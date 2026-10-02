@@ -16,6 +16,14 @@ Toutes les modifications UI issues d'un thread passent par _ui_queue,
 videe une fois par frame dans la boucle principale.
 La bascule FR/EN du bandeau commun retraduit les cinq onglets.
 
+Version 2026-10 :
+  - Doublons : suppression sans faux timeout (attente 180 s puis
+    verification de la disparition de l'item cote Emby).
+  - Base SQLite emby_toolbox_web.db : sauvegarde des ages/notes OMDB-TMDB
+    (explorateur de genres) et des recherches TMDB (RefMatch).
+  - Doublons : "Ouvrir tout" demande un timecode de depart
+    (MPC-HC/MPC-BE, VLC, mpv, PotPlayer).
+
 Lignes de commande utiles :
     python emby_toolbox_dpg.pyw --mkv-selftest   tests du moteur de renommage
 """
