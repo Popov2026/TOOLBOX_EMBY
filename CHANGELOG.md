@@ -6,8 +6,8 @@
 - **Doublons – suppression :** fin des faux « timeout ». Le délai d'attente de la
   réponse d'Emby passe de 15 s à 180 s. S'il est quand même dépassé, l'outil
   vérifie pendant 90 s auprès d'Emby que l'élément a bien disparu avant de
-  signaler une erreur. Statut « Suppression en cours… » et protection contre le
-  double-clic.
+  signaler une erreur. Sablier animé + chrono pendant la suppression, et
+  protection contre le double-clic.
 - **Base SQLite `emby_toolbox_web.db`** (remplace `emby_enrich_cache.json`,
   importé automatiquement puis renommé en `.json.imported`) :
   - âges / notes OMDB et TMDB enregistrés au fil de l'eau (rien n'est perdu si
@@ -30,8 +30,8 @@
 ### English
 - **Duplicates – deletion:** no more false "timeout". The wait for Emby's reply
   goes from 15 s to 180 s. If it is still exceeded, the tool checks with Emby
-  for 90 s that the item is really gone before reporting an error. "Deleting…"
-  status and double-click protection.
+  for 90 s that the item is really gone before reporting an error. Animated
+  spinner + timer while deleting, and double-click protection.
 - **SQLite database `emby_toolbox_web.db`** (replaces `emby_enrich_cache.json`,
   imported automatically then renamed to `.json.imported`):
   - OMDB and TMDB ages / scores saved as they arrive (nothing is lost if the

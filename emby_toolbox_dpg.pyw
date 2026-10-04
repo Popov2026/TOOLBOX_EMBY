@@ -5345,7 +5345,9 @@ def _init_doublons():
             dpg.add_separator()
             dpg.add_button(label="OK",width=-1,user_data=tag,callback=lambda s,a,u:dpg.delete_item(u))
 
-    _deleting = set()   # ids en cours de suppression (anti double-clic)
+    # ids en cours de suppression -> (titre, debut) : anti double-clic +
+    # sablier anime / chrono affiches par _tick() tant que la liste n'est pas vide
+    _deleting = {}
 
     def modal_confirm_delete(item_id, item_name, group_key):
         """Modale de confirmation avant suppression via l'API Emby."""
@@ -5369,7 +5371,7 @@ def _init_doublons():
                     if _id in _deleting:
                         _set_status(f"Suppression déjà en cours : {_nm}", (240,160,0))
                         return
-                    _deleting.add(_id)
+                    _deleting[_id] = (_nm, time.time())
                     _set_status(f"Suppression en cours (jusqu'à {DELETE_TIMEOUT} s) : {_nm}",
                                 (240,160,0))
                     def _prog(left, _nm=_nm):
@@ -5408,7 +5410,7 @@ def _init_doublons():
                         except Exception as e:
                             ui(lambda m=str(e): _set_status(f"ERREUR suppression - {m}", (233,69,96)))
                         finally:
-                            _deleting.discard(_id)
+                            _deleting.pop(_id, None)
                     threading.Thread(target=thread, daemon=True).start()
                 dpg.add_button(label=t("del_emby_only"), width=230,
                     callback=lambda s,a,u: _do_delete(False))
@@ -6531,6 +6533,13 @@ def _init_doublons():
             tip_t("tip_tc", wrap=360)
             dpg.add_text("",tag="dbl_lbl_tc_state",color=(136,136,170))
             dpg.add_spacer(width=10)
+            # Sablier : visible seulement pendant une suppression
+            with dpg.group(horizontal=True, tag="dbl_grp_del_busy", show=False):
+                dpg.add_loading_indicator(style=1, radius=1.4, thickness=1.6,
+                                          color=(240,160,0),
+                                          secondary_color=(90,70,30))
+                dpg.add_text("", tag="dbl_lbl_del_busy", color=(240,160,0))
+                dpg.add_spacer(width=10)
             dpg.add_text("",tag="dbl_lbl_scan_info",color=(136,136,170))
         dpg.add_spacer(height=4)
 
@@ -6622,11 +6631,41 @@ def _init_doublons():
     #  POINT D'ENTREE
     # ══════════════════════════════════════════════════════════════
 
+    _spin_state = {"shown": False, "txt": ""}
+
+    def _update_delete_spinner():
+        """Sablier anime + chrono pendant les suppressions en cours."""
+        busy = bool(_deleting)
+        try:
+            if busy != _spin_state["shown"]:
+                dpg.configure_item("dbl_grp_del_busy", show=busy)
+                _spin_state["shown"] = busy
+            if not busy:
+                return
+            en = G.get("lang", "fr") == "en"
+            items = list(_deleting.values())
+            name, t0 = min(items, key=lambda x: x[1])
+            el = int(time.time() - t0)
+            chrono = f"{el // 60}:{el % 60:02d}"
+            if len(items) > 1:
+                txt = (f"Deleting {len(items)} items... {chrono}" if en
+                       else f"Suppression de {len(items)} éléments... {chrono}")
+            else:
+                short = name if len(name) <= 45 else name[:42] + "..."
+                txt = (f"Deleting: {short}  {chrono}" if en
+                       else f"Suppression : {short}  {chrono}")
+            if txt != _spin_state["txt"]:
+                dpg.set_value("dbl_lbl_del_busy", txt)
+                _spin_state["txt"] = txt
+        except Exception:
+            pass
+
     def _tick():
         nonlocal _render_timer
         if _render_timer > 0 and time.time() >= _render_timer:
             _render_timer = 0.0
             render_results()
+        _update_delete_spinner()
 
     def _set_lang(code):
         G["lang"] = "en" if str(code).upper() == "EN" else "fr"
