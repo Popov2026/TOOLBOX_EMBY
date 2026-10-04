@@ -71,12 +71,15 @@ sans redémarrer. Le choix est mémorisé.
 - **Âge web** : récupère classification d'âge et note via **OMDB** ou **TMDB**
   (repli automatique sur l'autre source si la première ne classe pas le film).
 - Les résultats sont gardés dans la base **`emby_toolbox_web.db`** : affichage
-  dès la fin du scan, aucun quota consommé pour les films déjà connus, valeurs
-  disponibles même si OMDB/TMDB est en panne. Case **Forcer** pour tout
-  réinterroger, bouton **Base** pour voir / vider la base.
-- Modifier l'âge d'un film, **appliquer en masse** les âges web supérieurs,
-  **annuler** la dernière application en masse, masquer les âges identiques,
-  filtrer par âge.
+  dès la fin du scan, valeurs disponibles même si OMDB/TMDB est en panne.
+  **Un film déjà présent dans la base n'est jamais recherché de nouveau**
+  (aucun quota consommé) ; seule la case **Forcer** relance la recherche.
+  Bouton **Base** pour voir / vider la base.
+- Modifier l'âge d'un film, appliquer l'âge web d'un film ou **en masse** les
+  âges web supérieurs : un **récapitulatif à valider** (âge actuel → nouvel
+  âge, classification, source ; cases à cocher pour l'application en masse)
+  s'affiche toujours avant toute écriture sur Emby. **Annuler** la dernière
+  application en masse, masquer les âges identiques, filtrer par âge.
 - Ouvrir le fichier / le dossier, export CSV.
 
 #### MKV Renamer
@@ -229,11 +232,14 @@ restart. The choice is remembered.
 - **Web age**: fetches age rating and score from **OMDB** or **TMDB**
   (automatic fallback to the other source when the first one has no rating).
 - Results are kept in the **`emby_toolbox_web.db`** database: shown right after
-  the scan, no quota used for already known movies, values still available when
-  OMDB/TMDB is down. **Force** checkbox to query everything again, **DB**
-  button to view / clear the database.
-- Edit a movie's age rating, **bulk-apply** higher web ages, **undo** the last
-  bulk apply, hide identical ages, filter by age.
+  the scan, values still available when OMDB/TMDB is down. **A movie already
+  in the database is never looked up again** (no quota used); only the
+  **Force** checkbox triggers a new lookup. **DB** button to view / clear the
+  database.
+- Edit a movie's age rating, apply one movie's web age or **bulk-apply** higher
+  web ages: a **summary to confirm** (current age → new age, rating, source;
+  checkboxes for the bulk apply) is always shown before anything is written to
+  Emby. **Undo** the last bulk apply, hide identical ages, filter by age.
 - Open file / folder, CSV export.
 
 #### MKV Renamer

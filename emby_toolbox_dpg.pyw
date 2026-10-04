@@ -872,8 +872,8 @@ def render_results():
                         callback=lambda s,a,u: do_apply_web_age(u[0],u[1],u[2]))
                     with dpg.tooltip(dpg.last_item()):
                         dpg.add_text(
-                            gx(f"Appliquer l'âge web ({_web_age or '-'}) directement\nsur Emby sans confirmation.",
-                               f"Apply the web age ({_web_age or '-'}) directly\nto Emby without confirmation."), wrap=260)
+                            gx(f"Appliquer l'âge web ({_web_age or '-'}) sur Emby\n(récapitulatif à valider avant écriture).",
+                               f"Apply the web age ({_web_age or '-'}) to Emby\n(summary to confirm before writing)."), wrap=260)
 
 
 def _schedule_render():
@@ -1228,7 +1228,48 @@ def _browse_player():
 
 
 def do_apply_web_age(item_id, title, conn):
-    """Applique directement l'age web (OMDB/TMDB) sur Emby, sans modal."""
+    """Recapitulatif (age actuel -> age web) a valider avant ecriture sur Emby."""
+    global _mid
+    omdb = G["omdb_cache"].get(item_id)
+    if not isinstance(omdb, dict) or not (omdb.get("rated") or "").strip() or \
+            omdb.get("rated", "").upper() in ("N/A", "NOT RATED", "UNRATED", "NR", "?"):
+        return _apply_web_age_now(item_id, title, conn)   # affiche l'erreur adaptee
+    row = next((r for r in G["results"] if r.get("item_id") == item_id), {})
+    cur_raw = row.get("rating", "") or ""
+    _mid += 1
+    tag = f"_awa{_mid}"
+    with dpg.window(label=gx("Récapitulatif - appliquer l'âge web", "Summary - apply web age"),
+                    tag=tag, modal=True, width=560, autosize=True, pos=[220, 200],
+                    no_resize=True):
+        dpg.add_text(f"{title}" + (f"  ({row.get('year')})" if row.get("year") else ""),
+                     color=(255, 200, 90), wrap=530)
+        with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True,
+                       borders_innerV=True, borders_outerV=True):
+            dpg.add_table_column(label="")
+            dpg.add_table_column(label=gx("Âge", "Age"))
+            dpg.add_table_column(label=gx("Classification", "Rating"))
+            with dpg.table_row():
+                dpg.add_text(gx("Actuel (Emby)", "Current (Emby)"), color=(136, 136, 170))
+                dpg.add_text(_rated_to_age(cur_raw) if cur_raw else "-")
+                dpg.add_text(cur_raw or gx("(vide)", "(empty)"))
+            with dpg.table_row():
+                dpg.add_text(gx("Nouveau (web)", "New (web)"), color=(136, 136, 170))
+                dpg.add_text(omdb.get("age", "-"), color=(100, 255, 160))
+                dpg.add_text(omdb.get("rated", ""), color=(100, 255, 160))
+        dpg.add_text(gx(f"Source : {omdb.get('source', '?')}   ·   note : {omdb.get('note', '-')}",
+                        f"Source: {omdb.get('source', '?')}   ·   score: {omdb.get('note', '-')}"),
+                     color=(136, 136, 170))
+        dpg.add_separator()
+        with dpg.group(horizontal=True):
+            dpg.add_button(label=gx("Valider et appliquer", "Confirm and apply"), width=200,
+                           callback=lambda: (dpg.delete_item(tag),
+                                             _apply_web_age_now(item_id, title, conn)))
+            dpg.add_button(label=gx("Annuler", "Cancel"), width=120,
+                           callback=lambda: dpg.delete_item(tag))
+
+
+def _apply_web_age_now(item_id, title, conn):
+    """Applique l'age web (OMDB/TMDB) sur Emby (apres validation du recap)."""
     omdb = G["omdb_cache"].get(item_id)
     if not omdb or not isinstance(omdb, dict):
         ui(lambda: modal_err(gx("Âge web indisponible","Web age unavailable"),
@@ -1241,7 +1282,6 @@ def do_apply_web_age(item_id, title, conn):
             gx(f"Pas de classification disponible pour ce film.\nValeur OMDB/TMDB : {age!r}",
                f"No classification available for this movie.\nOMDB/TMDB value: {age!r}")))
         return
-    # Appliquer directement sans modal de confirmation
     _log(f"=== apply_web_age : iid={item_id} titre={title!r} age={age!r} ===")
     def thread(iid=item_id, nr=age, c=conn, ttl=title):
         try:
@@ -1455,35 +1495,85 @@ def do_apply_all_higher():
                       "No movie has a web age higher than the recorded one.\n"
                       "(Remember to run Enrich first.)"))
         return
-    # --- prévisualisation : cocher / décocher avant application ---
+    # --- récapitulatif : cocher / décocher avant application ---
     _mid += 1
     tag = f"_prev{_mid}"
-    def _confirm(s, a, u):
+    rows_by_id = {r.get("item_id"): r for r in G["results"]}
+
+    def _count():
+        n = sum(1 for i in range(len(targets)) if dpg.get_value(f"{tag}_c{i}"))
+        dpg.configure_item(f"{tag}_ok", label=gx(f"Appliquer la sélection ({n})",
+                                                 f"Apply selection ({n})"),
+                           enabled=n > 0)
+        return n
+
+    def _set_all(v):
+        for i in range(len(targets)):
+            dpg.set_value(f"{tag}_c{i}", v)
+        _count()
+
+    def _confirm():
         sel = [(t2[0], t2[1], t2[2]) for i, t2 in enumerate(targets)
-               if dpg.get_value(f"{u}_c{i}")]
-        dpg.delete_item(u)
+               if dpg.get_value(f"{tag}_c{i}")]
+        dpg.delete_item(tag)
         if sel:
             _run_age_updates(sel, record_undo=True,
                              lbl_fr="Application des âges",
                              lbl_en="Applying ages")
-    with dpg.window(label=gx("Prévisualisation - âges à appliquer",
-                             "Preview - ages to apply"),
-                    tag=tag, modal=True, width=640, height=520,
-                    pos=[150, 110], no_resize=True):
-        dpg.add_text(gx(f"{len(targets)} modification(s) proposée(s) - décochez pour exclure :",
-                        f"{len(targets)} proposed change(s) - untick to exclude:"),
-                     color=(255, 200, 80), wrap=610)
-        with dpg.child_window(height=380, border=True):
-            for i, (iid, title, raw, cur, web) in enumerate(targets):
-                dpg.add_checkbox(label=f"{title[:52]}   {cur} -> {web}  ({raw})",
-                                 tag=f"{tag}_c{i}", default_value=True)
-        dpg.add_spacer(height=6)
+
+    with dpg.window(label=gx("Récapitulatif - âges à appliquer sur Emby",
+                             "Summary - ages to apply to Emby"),
+                    tag=tag, modal=True, width=900, height=600,
+                    pos=[100, 80]):
+        dpg.add_text(gx(f"{len(targets)} film(s) ont un âge web SUPÉRIEUR à l'âge enregistré dans Emby.",
+                        f"{len(targets)} movie(s) have a web age HIGHER than the one recorded in Emby."),
+                     color=(255, 200, 80), wrap=870)
+        dpg.add_text(gx("Rien n'est encore modifié. Décochez les films à exclure, puis « Appliquer la sélection ». "
+                        "« Annuler âges » permettra de revenir en arrière.",
+                        "Nothing has been changed yet. Untick the movies to exclude, then \"Apply selection\". "
+                        "\"Undo ages\" will let you roll back."),
+                     color=(170, 170, 170), wrap=870)
         with dpg.group(horizontal=True):
-            dpg.add_button(label=gx("Appliquer", "Apply"), width=180,
-                           user_data=tag, callback=_confirm)
+            dpg.add_button(label=gx("Tout cocher", "Tick all"), width=120,
+                           callback=lambda: _set_all(True))
+            dpg.add_button(label=gx("Tout décocher", "Untick all"), width=120,
+                           callback=lambda: _set_all(False))
+        with dpg.child_window(height=-40, border=True):
+            with dpg.table(header_row=True, row_background=True, resizable=True,
+                           borders_innerH=True, policy=dpg.mvTable_SizingStretchProp):
+                dpg.add_table_column(label="", width_fixed=True, init_width_or_weight=28)
+                dpg.add_table_column(label=gx("Film", "Movie"), init_width_or_weight=0.55)
+                dpg.add_table_column(label=gx("Actuel", "Current"), width_fixed=True,
+                                     init_width_or_weight=110)
+                dpg.add_table_column(label=gx("Nouveau", "New"), width_fixed=True,
+                                     init_width_or_weight=110)
+                dpg.add_table_column(label=gx("Classification web", "Web rating"),
+                                     width_fixed=True, init_width_or_weight=120)
+                dpg.add_table_column(label="Source", width_fixed=True,
+                                     init_width_or_weight=60)
+                for i, (iid, title, raw, cur, web) in enumerate(targets):
+                    r = rows_by_id.get(iid, {})
+                    src = (G["omdb_cache"].get(iid) or {}).get("source", "?")
+                    with dpg.table_row():
+                        dpg.add_checkbox(tag=f"{tag}_c{i}", default_value=True,
+                                         callback=lambda: _count())
+                        dpg.add_text(f"{title}" + (f" ({r.get('year')})" if r.get("year") else ""))
+                        dpg.add_text(f"{cur}" + (f"  [{r.get('rating')}]" if r.get("rating") else ""),
+                                     color=(200, 200, 200))
+                        dpg.add_text(f"-> {web}", color=(100, 255, 160))
+                        dpg.add_text(raw, color=(100, 255, 160))
+                        dpg.add_text(src, color=(136, 136, 170))
+        with dpg.group(horizontal=True):
+            b = dpg.add_button(tag=f"{tag}_ok", width=220,
+                               label=gx(f"Appliquer la sélection ({len(targets)})",
+                                        f"Apply selection ({len(targets)})"),
+                               callback=_confirm)
+            try:
+                dpg.bind_item_theme(b, "th_btn_ok")
+            except Exception:
+                pass
             dpg.add_button(label=gx("Annuler", "Cancel"), width=120,
-                           user_data=tag,
-                           callback=lambda s, a, u: dpg.delete_item(u))
+                           callback=lambda: dpg.delete_item(tag))
 
 def _fetch_one_omdb(imdb_id, key):
     """Retourne un dict enrichi ou leve une exception."""
@@ -1777,24 +1867,29 @@ def _fetch_with_fallback(imdb_id, tmdb_id, provider, omdb_key, tmdb_key,
         order = [("omdb", imdb_id, omdb_key), ("tmdb", tmdb_id, tmdb_key)]
     else:
         order = [("tmdb", tmdb_id, tmdb_key), ("omdb", imdb_id, omdb_key)]
+    # 1) Base SQLite : si le film y figure deja (quelle que soit la source
+    #    et l'anciennete de l'entree), AUCUN appel reseau. Seule la case
+    #    "Forcer" relance une vraie recherche.
+    if not force:
+        found = [r for r in (_cache_get(src, fid, ignore_age=True)
+                             for src, fid, _k in order if fid) if r]
+        if found:
+            usable = [r for r in found if _usable_age(r)]
+            return usable[0] if usable else found[0]
+    # 2) Reseau : film absent de la base, ou "Forcer" coche
     best = None
     for src, fid, k in order:
-        if not fid:
+        if not fid or not k:
             continue
-        # 1) base SQLite (sauf si "Forcer" est coche)
-        res = None if force else _cache_get(src, fid)
-        if res is None:
-            if not k:
+        try:
+            res = _fetch_one_omdb(fid, k) if src == "omdb" else _fetch_one_tmdb(fid, k)
+        except Exception:
+            # reseau / quota KO : on se rabat sur la base
+            res = _cache_get(src, fid, ignore_age=True)
+            if res is None:
                 continue
-            try:
-                res = _fetch_one_omdb(fid, k) if src == "omdb" else _fetch_one_tmdb(fid, k)
-            except Exception:
-                # reseau / quota KO : on se rabat sur la base, meme perimee
-                res = _cache_get(src, fid, ignore_age=True)
-                if res is None:
-                    continue
-            else:
-                _cache_put(src, fid, res, title)
+        else:
+            _cache_put(src, fid, res, title)
         if best is None:
             best = res
         if _usable_age(res):
@@ -1836,6 +1931,25 @@ def do_enrich():
                      f"Movies have no {'IMDB' if provider=='omdb' else 'TMDB'} id in Emby."))
         return
 
+    force = bool(G_FORCE_REFRESH["on"])
+    # Films dont l'age est DEJA connu (base SQLite chargee apres le scan, ou
+    # deja enrichis dans cette session) : on ne les recherche pas de nouveau.
+    n_known = 0
+    if not force:
+        todo = []
+        for f in films:
+            if isinstance(G["omdb_cache"].get(f[3]), dict):
+                n_known += 1
+            else:
+                todo.append(f)
+        films = todo
+    if not films:
+        _set_status2(f"Les {n_known} film(s) ont déjà un âge web en base : aucune recherche "
+                     "(cochez « Forcer » pour les rechercher de nouveau).",
+                     f"All {n_known} movie(s) already have a web age in the database: no "
+                     "lookup (tick \"Force\" to look them up again).")
+        return
+
     lbl = "OMDB" if provider == "omdb" else "TMDB"
     for _, _, _, iid in films:
         if iid:
@@ -1845,10 +1959,8 @@ def do_enrich():
     dpg.set_value("lbl_status", gx(f"{lbl} : 0 / {len(films)} films enrichis...",
                          f"{lbl}: 0 / {len(films)} movies enriched..."))
 
-    force = bool(G_FORCE_REFRESH["on"])
-
     def thread(films=films, provider=provider, lbl=lbl,
-               omdb_key=omdb_key, tmdb_key=tmdb_key, force=force):
+               omdb_key=omdb_key, tmdb_key=tmdb_key, force=force, n_known=n_known):
         ok = 0
         for idx, (imdb, tmdb, title, iid) in enumerate(films):
             if not iid or (not imdb and not tmdb):
@@ -1876,13 +1988,15 @@ def do_enrich():
                 time.sleep(0.12 if provider == "omdb" else 0.05)
 
         # un seul rendu final : rafraichit tooltips, tri et boutons d'age web
-        ui(lambda o=ok, total=len(films), lb=lbl: (
-            dpg.configure_item("btn_enrich", enabled=True, label="Enrichir"),
+        ui(lambda o=ok, total=len(films), lb=lbl, nk=n_known: (
+            dpg.configure_item("btn_enrich", enabled=True, label=gx("Enrichir", "Enrich")),
             dpg.set_value("lbl_status", (_save_enrich_cache(),
                     _set_status2(f"{lb} terminé : {o}/{total} films enrichis"
-                                 + (f"  ({_CACHE_HITS} en cache)" if _CACHE_HITS else ""),
+                                 + (f"  ({_CACHE_HITS} trouvé(s) en base)" if _CACHE_HITS else "")
+                                 + (f"  -  {nk} déjà en base, non recherché(s)" if nk else ""),
                                  f"{lb} done: {o}/{total} movies enriched"
-                                 + (f"  ({_CACHE_HITS} cached)" if _CACHE_HITS else "")))[1]
+                                 + (f"  ({_CACHE_HITS} found in DB)" if _CACHE_HITS else "")
+                                 + (f"  -  {nk} already in DB, not looked up" if nk else "")))[1]
                               or dpg.get_value("lbl_status")),
             render_results()))
 

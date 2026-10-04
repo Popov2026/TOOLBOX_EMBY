@@ -26,6 +26,13 @@
   Doublons n'était synchronisé qu'au clic sur « Enregistrer », d'où le message
   « lecteur non défini » alors que MPC-HC était renseigné). Guillemets acceptés,
   repli sur le lecteur associé par Windows puis sur les installations standard.
+- **Explorateur de genres – âges en base :** un film déjà présent dans la base
+  (même « non classé » ou ancien) n'est plus jamais recherché de nouveau sur
+  OMDB/TMDB ; seule la case « Forcer » relance la recherche.
+- **Explorateur de genres – récapitulatif avant application :** le bouton
+  d'âge web de chaque ligne demande maintenant une validation (âge actuel →
+  nouvel âge) ; « Appliquer âges sup. » affiche un tableau récapitulatif à
+  cases à cocher (Tout cocher / Tout décocher, compteur).
 - **IDFinder – fiche du candidat :** fenêtre détaillée ouverte sur le meilleur
   candidat après « Rechercher candidats » (+ bouton « Détails » par carte) :
   affiche, durée, genres, réalisation, acteurs, note, résumé, liens TMDB/IMDb,
@@ -57,6 +64,12 @@
   only synced on "Save", hence the "player not set" message although MPC-HC was
   set). Quotes accepted, fallback to the Windows-associated player then to
   standard installs.
+- **Genre explorer – ages in the database:** a movie already in the database
+  (even "unrated" or old) is never looked up again on OMDB/TMDB; only the
+  "Force" checkbox triggers a new lookup.
+- **Genre explorer – summary before applying:** each row's web-age button now
+  asks for confirmation (current age → new age); "Apply higher ages" shows a
+  summary table with checkboxes (Tick all / Untick all, counter).
 - **IDFinder – candidate details:** detailed window opened on the best
   candidate after "Search candidates" (+ "Details" button per card): poster,
   runtime, genres, director, cast, rating, overview, TMDB/IMDb links,
