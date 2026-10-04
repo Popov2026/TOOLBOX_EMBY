@@ -2387,6 +2387,48 @@ TR = {
         "cand_best": "   <- meilleur",
         "cand_none": "Aucun candidat. Ajuste le titre/année et relance.",
         "cand_no_overview": "(pas de résumé)",
+        "btn_details": "Détails",
+        "pop_title": "Fiche du candidat",
+        "pop_orig": "Titre original : %s",
+        "pop_source": "Source : %s   ·   score %.2f   ·   similarité du titre %d %%",
+        "pop_loading": "Chargement des détails TMDB...",
+        "pop_overview": "Résumé",
+        "pop_emby": "Actuellement dans Emby",
+        "pop_emby_tpl": "Nom : %s\nAnnée : %s\nChemin : %s\nIDs actuels : TMDB=%s   IMDB=%s",
+        "pop_runtime": "Durée : %d min",
+        "pop_genres": "Genres : %s",
+        "pop_director": "Réalisation : %s",
+        "pop_cast": "Avec : %s",
+        "pop_country": "Pays : %s",
+        "pop_vote": "Note TMDB : %.1f / 10  (%d votes)",
+        "pop_release": "Sortie : %s",
+        "pop_seasons": "Saisons : %s   ·   épisodes : %s",
+        "pop_open_tmdb": "Voir sur TMDB",
+        "pop_open_imdb": "Voir sur IMDb",
+        "pop_close": "Fermer",
+        "pop_apply": "Appliquer ce candidat",
+        "pop_check": "Cocher ce film",
+        "pop_uncheck": "Décocher ce film",
+        "recap_title": "Auto-correction - récapitulatif à valider",
+        "recap_summary": "%d analysé(s) : %d correspondance(s) sûre(s) (cochées), %d à vérifier (décochées), %d sans résultat.",
+        "recap_help": "Rien n'a encore été modifié. Coche les films à corriger, 'Détails' pour voir la fiche complète, puis 'Appliquer la sélection'.",
+        "recap_col_emby": "Dans Emby",
+        "recap_col_prop": "Proposition TMDB",
+        "recap_col_sim": "Titre",
+        "recap_col_state": "État",
+        "recap_safe": "sûr",
+        "recap_verify": "à vérifier",
+        "recap_year_far": "année hors tolérance",
+        "recap_all": "Tout cocher",
+        "recap_none": "Tout décocher",
+        "recap_only_safe": "Cocher seulement les sûrs",
+        "recap_apply": "Appliquer la sélection (%d)",
+        "recap_cancel": "Annuler",
+        "recap_nothing": "Aucune proposition TMDB trouvée pour ces films.",
+        "log_auto_analyse": "Auto-correction : analyse de %d film(s) (aucune écriture)...",
+        "log_auto_recap": "Analyse terminée : %d proposition(s). Valide le récapitulatif.",
+        "log_auto_cancel": "Auto-correction annulée : rien n'a été modifié.",
+        "log_auto_apply": "Application de %d correction(s) validée(s)...",
         "libs_nothing": "(rien à afficher)",
         "hint_no_libs": "Aucune médiathèque listée.",
         "hint_count": "%d médiathèque(s) - coche celles à scanner.",
@@ -2484,6 +2526,48 @@ TR = {
         "cand_best": "   <- best",
         "cand_none": "No candidate. Adjust title/year and retry.",
         "cand_no_overview": "(no overview)",
+        "btn_details": "Details",
+        "pop_title": "Candidate details",
+        "pop_orig": "Original title: %s",
+        "pop_source": "Source: %s   ·   score %.2f   ·   title similarity %d %%",
+        "pop_loading": "Loading TMDB details...",
+        "pop_overview": "Overview",
+        "pop_emby": "Currently in Emby",
+        "pop_emby_tpl": "Name: %s\nYear: %s\nPath: %s\nCurrent IDs: TMDB=%s   IMDB=%s",
+        "pop_runtime": "Runtime: %d min",
+        "pop_genres": "Genres: %s",
+        "pop_director": "Directed by: %s",
+        "pop_cast": "Starring: %s",
+        "pop_country": "Country: %s",
+        "pop_vote": "TMDB rating: %.1f / 10  (%d votes)",
+        "pop_release": "Release: %s",
+        "pop_seasons": "Seasons: %s   ·   episodes: %s",
+        "pop_open_tmdb": "Open on TMDB",
+        "pop_open_imdb": "Open on IMDb",
+        "pop_close": "Close",
+        "pop_apply": "Apply this match",
+        "pop_check": "Tick this movie",
+        "pop_uncheck": "Untick this movie",
+        "recap_title": "Auto-fix - summary to validate",
+        "recap_summary": "%d analysed: %d safe match(es) (ticked), %d to check (unticked), %d without result.",
+        "recap_help": "Nothing has been changed yet. Tick the movies to fix, 'Details' to see the full record, then 'Apply selection'.",
+        "recap_col_emby": "In Emby",
+        "recap_col_prop": "TMDB match",
+        "recap_col_sim": "Title",
+        "recap_col_state": "State",
+        "recap_safe": "safe",
+        "recap_verify": "to check",
+        "recap_year_far": "year out of tolerance",
+        "recap_all": "Tick all",
+        "recap_none": "Untick all",
+        "recap_only_safe": "Tick safe ones only",
+        "recap_apply": "Apply selection (%d)",
+        "recap_cancel": "Cancel",
+        "recap_nothing": "No TMDB match found for these movies.",
+        "log_auto_analyse": "Auto-fix: analysing %d movie(s) (no write)...",
+        "log_auto_recap": "Analysis done: %d match(es). Please validate the summary.",
+        "log_auto_cancel": "Auto-fix cancelled: nothing was changed.",
+        "log_auto_apply": "Applying %d validated fix(es)...",
         "libs_nothing": "(nothing to show)",
         "hint_no_libs": "No library listed.",
         "hint_count": "%d library(ies) - tick those to scan.",
@@ -2875,6 +2959,29 @@ class TmdbClient:
             tmdb_query_put(qkey, results)
         return results
 
+    def details(self, tmdb_id, kind="movie"):
+        """Fiche complete (duree, genres, equipe, ids...). Sauvegardee dans
+        la base SQLite comme les recherches. {} si indisponible."""
+        if not self.api_key or not tmdb_id:
+            return {}
+        qkey = "details|%s|%s|%s" % (kind, self.language, tmdb_id)
+        cached = tmdb_query_get(qkey)
+        if cached is not None:
+            return cached
+        base = "/tv/%s" if kind == "tv" else "/movie/%s"
+        try:
+            r = self.s.get(TMDB_BASE + base % tmdb_id,
+                           params={"api_key": self.api_key, "language": self.language,
+                                   "append_to_response": "credits,external_ids"},
+                           timeout=HTTP_TIMEOUT)
+            r.raise_for_status()
+            data = r.json() or {}
+            if data:
+                tmdb_query_put(qkey, data)
+            return data
+        except Exception:
+            return _tmdb_query_stale(qkey) or {}
+
     def external_ids(self, movie_id, kind="movie"):
         if not self.api_key:
             return {}
@@ -2931,6 +3038,9 @@ class App:
         self.current = None        # film sélectionné
         self.candidates = []       # candidats affichés
         self._tex_tags = []        # textures dynamiques à nettoyer
+        self._pop_tex = []         # textures de la fiche candidat
+        self._pop_gen = 0
+        self._recap = []           # propositions de l'auto-correction
         self._gen = 0              # génération (anti-collision threads)
         self._scanning = False
         self.emby_type = "Movie"   # type d'items courant : "Movie" ou "Series"
@@ -3485,7 +3595,27 @@ class App:
                 best = {"r": r, "year": cyear, "score": sc, "title_sim": sim}
         return best
 
+    def _cand_from_tmdb(self, r, q_title, q_year):
+        """Candidat TMDB brut -> dict 'candidat' (meme forme que on_search)."""
+        cyear = tmdb_year(r)
+        sc, sim = score_candidate(q_title, q_year, r.get("title"),
+                                  r.get("original_title"), cyear, r.get("popularity"))
+        return {
+            "source": "TMDB",
+            "tmdb_id": r.get("id"),
+            "imdb_id": None,
+            "title": r.get("title") or r.get("original_title") or "?",
+            "orig": r.get("original_title") or "",
+            "year": cyear,
+            "overview": (r.get("overview") or "").strip(),
+            "poster": (TMDB_IMG + r["poster_path"]) if r.get("poster_path") else None,
+            "score": sc,
+            "title_sim": sim,
+        }
+
     def on_auto(self, sender, app_data, user_data):
+        """Auto-correction en 2 temps : analyse SANS ecriture, puis
+        recapitulatif a cases a cocher ; rien n'est ecrit avant validation."""
         if self._scanning:
             return
         if not self.flagged:
@@ -3495,87 +3625,391 @@ class App:
         if not self.tmdb.api_key:
             self.log(self.t("log_auto_needkey"))
             return
-        items = list(self.flagged)
-        tol = self._read_tol()
-        # confirmation avant écriture en masse sur Emby
-        tagc = "auto_confirm_win"
-        if dpg.does_item_exist(tagc):
-            dpg.delete_item(tagc)
-        def _start(sender=None, app_data=None, user_data=None):
-            if dpg.does_item_exist(tagc):
-                dpg.delete_item(tagc)
-            self._start_auto(items, tol)
-        with dpg.window(label=self.t("auto_confirm_title"), tag=tagc, modal=True,
-                        width=540, autosize=True, pos=[220, 220], no_resize=True):
-            dpg.add_text(self.t("auto_confirm_msg") % len(items), wrap=505)
-            dpg.add_spacer(height=4)
-            with dpg.group(horizontal=True):
-                dpg.add_button(label=self.t("btn_yes"), width=150, callback=_start)
-                dpg.add_button(label=self.t("btn_no"), width=110,
-                               callback=lambda s, a, u: dpg.delete_item(tagc))
-        return
+        self._start_auto_analysis(list(self.flagged), self._read_tol())
 
-    def _start_auto(self, items, tol):
+    def _start_auto_analysis(self, items, tol):
         self._scanning = True
         dpg.set_value("status_txt", self.t("status_auto"))
         self._set_progress(0.0, self.t("prog_auto") % (0, len(items)))
-        self.log(self.t("log_auto_start") % len(items))
+        self.log(self.t("log_auto_analyse") % len(items))
+
+        def worker():
+            props, nores = [], 0
+            total = len(items)
+            try:
+                for idx, it in enumerate(items, 1):
+                    title, year = guess_title_year(it.get("Name", ""), it.get("Path", ""))
+                    best = None
+                    try:
+                        best = self._tmdb_best(title, year, tol)
+                    except Exception as exc:
+                        self.log(self.t("log_tmdb_err_name") % (title, exc))
+                    if not best:
+                        nores += 1
+                    else:
+                        cand = self._cand_from_tmdb(best["r"], title, year)
+                        by = cand["year"]
+                        year_ok = not (year and by is not None and abs(by - year) > tol)
+                        safe = cand["title_sim"] >= AUTO_TITLE_MIN and year_ok
+                        props.append({"item": it, "q_title": title, "q_year": year,
+                                      "cand": cand, "r": best["r"],
+                                      "safe": safe, "year_ok": year_ok})
+                    self._set_progress(idx / total, self.t("prog_auto") % (idx, total))
+                    time.sleep(0.05)
+            finally:
+                self._scanning = False
+            props.sort(key=lambda p: (not p["safe"], -p["cand"]["title_sim"]))
+            self._set_progress(1.0, self.t("prog_done"))
+            self.log(self.t("log_auto_recap") % len(props))
+            ui_post(lambda: self._show_auto_recap(props, total, nores))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @staticmethod
+    def _vp_size():
+        try:
+            return (max(900, dpg.get_viewport_client_width() or 1100),
+                    max(600, dpg.get_viewport_client_height() or 760))
+        except Exception:
+            return 1100, 760
+
+    def _recap_count(self):
+        n = sum(1 for i in range(len(self._recap))
+                if dpg.does_item_exist("recap_chk_%d" % i)
+                and dpg.get_value("recap_chk_%d" % i))
+        if dpg.does_item_exist("recap_apply_btn"):
+            dpg.configure_item("recap_apply_btn", label=self.t("recap_apply") % n,
+                               enabled=n > 0)
+        return n
+
+    def _recap_set_all(self, mode):
+        for i, p in enumerate(self._recap):
+            tag = "recap_chk_%d" % i
+            if dpg.does_item_exist(tag):
+                dpg.set_value(tag, True if mode == "all" else
+                              False if mode == "none" else p["safe"])
+        self._recap_count()
+
+    def _show_auto_recap(self, props, total, nores):
+        self._recap = props
+        tag = "auto_recap_win"
+        if dpg.does_item_exist(tag):
+            dpg.delete_item(tag)
+        n_safe = sum(1 for p in props if p["safe"])
+        vw, vh = self._vp_size()
+        w, h = min(1150, vw - 60), min(720, vh - 60)
+
+        def _close(cancelled=True):
+            if dpg.does_item_exist(tag):
+                dpg.delete_item(tag)
+            if cancelled:
+                self.log(self.t("log_auto_cancel"))
+                dpg.set_value("status_txt", self.t("status_remaining") % len(self.flagged))
+
+        def _apply(sender=None, app_data=None, user_data=None):
+            sel = [p for i, p in enumerate(self._recap)
+                   if dpg.does_item_exist("recap_chk_%d" % i)
+                   and dpg.get_value("recap_chk_%d" % i)]
+            _close(cancelled=False)
+            if sel:
+                self._start_auto_apply(sel)
+
+        with dpg.window(label=self.t("recap_title"), tag=tag, modal=True,
+                        width=w, height=h, pos=[(vw - w) // 2, (vh - h) // 2],
+                        on_close=lambda: _close(True)):
+            dpg.add_text(self.t("recap_summary") % (total, n_safe,
+                                                    len(props) - n_safe, nores),
+                         color=(120, 220, 140))
+            dpg.add_text(self.t("recap_help"), wrap=w - 30, color=(170, 170, 170))
+            with dpg.group(horizontal=True):
+                dpg.add_button(label=self.t("recap_all"), width=120,
+                               callback=lambda: self._recap_set_all("all"))
+                dpg.add_button(label=self.t("recap_none"), width=120,
+                               callback=lambda: self._recap_set_all("none"))
+                dpg.add_button(label=self.t("recap_only_safe"), width=190,
+                               callback=lambda: self._recap_set_all("safe"))
+            dpg.add_separator()
+            with dpg.child_window(height=-40, border=False):
+                if not props:
+                    dpg.add_text(self.t("recap_nothing"), color=(200, 160, 80))
+                with dpg.table(header_row=True, resizable=True, row_background=True,
+                               borders_innerH=True, borders_outerH=True,
+                               policy=dpg.mvTable_SizingStretchProp):
+                    dpg.add_table_column(label="", width_fixed=True, init_width_or_weight=30)
+                    dpg.add_table_column(label=self.t("recap_col_emby"), init_width_or_weight=0.40)
+                    dpg.add_table_column(label=self.t("recap_col_prop"), init_width_or_weight=0.36)
+                    dpg.add_table_column(label=self.t("recap_col_sim"), width_fixed=True,
+                                         init_width_or_weight=55)
+                    dpg.add_table_column(label=self.t("recap_col_state"), width_fixed=True,
+                                         init_width_or_weight=150)
+                    dpg.add_table_column(label="", width_fixed=True, init_width_or_weight=70)
+                    for i, p in enumerate(props):
+                        it, c = p["item"], p["cand"]
+                        col = (120, 220, 140) if p["safe"] else (240, 180, 80)
+                        with dpg.table_row():
+                            dpg.add_checkbox(tag="recap_chk_%d" % i, default_value=p["safe"],
+                                             callback=lambda: self._recap_count())
+                            dpg.add_text("%s (%s)" % (it.get("Name", "?"),
+                                                      it.get("ProductionYear") or "-"))
+                            dpg.add_text("%s (%s)%s" % (
+                                c["title"], c["year"] or "-",
+                                ("  [%s]" % c["orig"]) if c["orig"] and c["orig"] != c["title"] else ""),
+                                color=col)
+                            dpg.add_text("%d %%" % round(c["title_sim"] * 100), color=col)
+                            state = self.t("recap_safe") if p["safe"] else (
+                                self.t("recap_year_far") if not p["year_ok"]
+                                else self.t("recap_verify"))
+                            dpg.add_text(state, color=col)
+                            dpg.add_button(label=self.t("btn_details"), width=65,
+                                           user_data=i,
+                                           callback=lambda s, a, u: self._recap_details(u))
+            with dpg.group(horizontal=True):
+                b = dpg.add_button(tag="recap_apply_btn", label=self.t("recap_apply") % n_safe,
+                                   width=240, callback=_apply, enabled=n_safe > 0)
+                dpg.bind_item_theme(b, "th_btn_ok")
+                dpg.add_button(label=self.t("recap_cancel"), width=120,
+                               callback=lambda: _close(True))
+
+    def _recap_details(self, i):
+        if i >= len(self._recap):
+            return
+        p = self._recap[i]
+        chk = "recap_chk_%d" % i
+        ticked = dpg.does_item_exist(chk) and dpg.get_value(chk)
+
+        def _toggle():
+            if dpg.does_item_exist(chk):
+                dpg.set_value(chk, not ticked)
+                self._recap_count()
+        self.show_candidate_popup(p["cand"], p["item"],
+                                  self.t("pop_uncheck") if ticked else self.t("pop_check"),
+                                  _toggle)
+
+    def _start_auto_apply(self, sel):
+        self._scanning = True
+        dpg.set_value("status_txt", self.t("status_auto"))
+        self._set_progress(0.0, self.t("prog_auto") % (0, len(sel)))
+        self.log(self.t("log_auto_apply") % len(sel))
 
         def worker():
             applied, done_ids = 0, set()
-            total = len(items)
-            for idx, it in enumerate(items, 1):
-                title, year = guess_title_year(it.get("Name", ""), it.get("Path", ""))
-                try:
-                    best = self._tmdb_best(title, year, tol)
-                except Exception as exc:
-                    self.log(self.t("log_tmdb_err_name") % (title, exc))
+            total = len(sel)
+            try:
+                for idx, p in enumerate(sel, 1):
+                    it, r, c = p["item"], p["r"], p["cand"]
+                    pids = {"Tmdb": str(r.get("id"))}
+                    try:
+                        ext = self.tmdb.external_ids(r.get("id"), self.tmdb_kind)
+                        if ext.get("imdb_id"):
+                            pids["Imdb"] = ext["imdb_id"]
+                    except Exception:
+                        pass
+                    result = {
+                        "Name": c["title"],
+                        "ProductionYear": c["year"],
+                        "ProviderIds": pids,
+                        "SearchProviderName": "TheMovieDb",
+                        "ImageUrl": c.get("poster"),
+                    }
+                    try:
+                        # replace_images=True : remplace résumé ET images
+                        self.emby.apply_remote_result(it.get("Id"), result,
+                                                      replace_images=True)
+                        applied += 1
+                        done_ids.add(it.get("Id"))
+                        self.log(self.t("log_auto_ok") % (result["Name"], c["year"] or "-"))
+                    except Exception as exc:
+                        self.log(self.t("log_auto_fail") % (p["q_title"], exc))
                     self._set_progress(idx / total, self.t("prog_auto") % (idx, total))
-                    continue
-                # l'annee du candidat est deja dans la fenetre +/- tol (via _filter_year) ;
-                # on applique des que le titre est quasi-exact.
-                if not best or best.get("title_sim", 0.0) < AUTO_TITLE_MIN:
-                    self._set_progress(idx / total, self.t("prog_auto") % (idx, total))
-                    continue
-                # garde-fou : en auto, on borne strictement l'annee a +/- tol
-                by = best.get("year")
-                if year and by is not None and abs(by - year) > tol:
-                    self._set_progress(idx / total, self.t("prog_auto") % (idx, total))
-                    continue
-                r, cyear = best["r"], best["year"]
-                pids = {"Tmdb": str(r.get("id"))}
-                try:
-                    ext = self.tmdb.external_ids(r.get("id"), self.tmdb_kind)
-                    if ext.get("imdb_id"):
-                        pids["Imdb"] = ext["imdb_id"]
-                except Exception:
-                    pass
-                result = {
-                    "Name": r.get("title") or r.get("original_title"),
-                    "ProductionYear": cyear,
-                    "ProviderIds": pids,
-                    "SearchProviderName": "TheMovieDb",
-                    "ImageUrl": (TMDB_IMG + r["poster_path"]) if r.get("poster_path") else None,
-                }
-                try:
-                    # replace_images=True : remplace résumé ET images
-                    self.emby.apply_remote_result(it.get("Id"), result, replace_images=True)
-                    applied += 1
-                    done_ids.add(it.get("Id"))
-                    self.log(self.t("log_auto_ok") % (result["Name"], cyear or "-"))
-                except Exception as exc:
-                    self.log(self.t("log_auto_fail") % (title, exc))
-                self._set_progress(idx / total, self.t("prog_auto") % (idx, total))
-                time.sleep(0.2)  # throttle TMDB/Emby
+                    time.sleep(0.2)  # throttle TMDB/Emby
+            finally:
+                self.flagged = [f for f in self.flagged if f.get("Id") not in done_ids]
+                self._set_progress(1.0, self.t("prog_done"))
+                self.log(self.t("log_auto_done") % (applied, len(self.flagged)))
+                ui_post(lambda: dpg.set_value("status_txt",
+                        self.t("status_remaining") % len(self.flagged)))
+                ui_post(self._refresh_flagged_table)
+                self._scanning = False
 
-            self.flagged = [f for f in self.flagged if f.get("Id") not in done_ids]
-            self._set_progress(1.0, self.t("prog_done"))
-            self.log(self.t("log_auto_done") % (applied, len(self.flagged)))
-            ui_post(lambda: dpg.set_value("status_txt",
-                    self.t("status_remaining") % len(self.flagged)))
-            ui_post(self._refresh_flagged_table)
-            self._scanning = False
+        threading.Thread(target=worker, daemon=True).start()
 
+    # ----- fiche détaillée d'un candidat (popup) -----
+    def _clear_pop_textures(self):
+        for t in self._pop_tex:
+            if dpg.does_item_exist(t):
+                dpg.delete_item(t)
+        self._pop_tex = []
+
+    def _close_candidate_popup(self):
+        if dpg.does_item_exist("cand_pop_win"):
+            dpg.delete_item("cand_pop_win")
+        self._clear_pop_textures()
+
+    def show_candidate_popup(self, c, item, action_label=None, action_cb=None):
+        """Grande fiche lisible d'un candidat + rappel de la fiche Emby."""
+        self._close_candidate_popup()
+        self._pop_gen += 1
+        g = self._pop_gen
+        tag = "cand_pop_win"
+        vw, vh = self._vp_size()
+        w, h = min(900, vw - 80), min(640, vh - 80)
+        kind = self.tmdb_kind
+        tmdb_id = c.get("tmdb_id")
+        imdb_holder = {"id": c.get("imdb_id")}
+
+        def _act():
+            self._close_candidate_popup()
+            if action_cb:
+                action_cb()
+
+        with dpg.window(label=self.t("pop_title"), tag=tag, modal=True,
+                        width=w, height=h, pos=[(vw - w) // 2, (vh - h) // 2],
+                        on_close=lambda: self._clear_pop_textures()):
+            with dpg.group(horizontal=True):
+                dpg.add_text(self.t("pop_loading") if c.get("poster") else "",
+                             tag="cand_pop_img_%d" % g, color=(120, 120, 120))
+                with dpg.group():
+                    dpg.add_text("%s  (%s)" % (c.get("title") or "?", c.get("year") or "-"),
+                                 color=(255, 200, 90))
+                    if c.get("orig") and c["orig"] != c.get("title"):
+                        dpg.add_text(self.t("pop_orig") % c["orig"], color=(190, 190, 190))
+                    sim = c.get("title_sim")
+                    if sim is None:
+                        q_t, q_y = guess_title_year(item.get("Name", ""), item.get("Path", ""))
+                        sim = score_candidate(q_t, q_y, c.get("title"), c.get("orig"),
+                                              c.get("year"), 0)[1]
+                    dpg.add_text(self.t("pop_source") % (c.get("source", "?"),
+                                                         c.get("score", 0.0),
+                                                         round(sim * 100)),
+                                 color=(150, 150, 150))
+                    dpg.add_text("TMDB=%s   IMDB=%s" % (tmdb_id or "-", c.get("imdb_id") or "-"),
+                                 tag="cand_pop_ids_%d" % g, color=(150, 150, 150))
+                    dpg.add_spacer(height=4)
+                    dpg.add_text(self.t("pop_loading") if (tmdb_id and self.tmdb
+                                                            and self.tmdb.api_key) else "",
+                                 tag="cand_pop_extra_%d" % g, wrap=w - 290,
+                                 color=(210, 210, 210))
+                    dpg.add_spacer(height=4)
+                    dpg.add_text(self.t("pop_overview"), color=(136, 136, 170))
+                    dpg.add_text(c.get("overview") or self.t("cand_no_overview"),
+                                 tag="cand_pop_ov_%d" % g, wrap=w - 290,
+                                 color=(220, 220, 220))
+            dpg.add_separator()
+            dpg.add_text(self.t("pop_emby"), color=(136, 136, 170))
+            pid = {k.lower(): v for k, v in (item.get("ProviderIds") or {}).items()}
+            dpg.add_text(self.t("pop_emby_tpl") % (
+                item.get("Name", "?"), item.get("ProductionYear") or "-",
+                item.get("Path", "-"), pid.get("tmdb", "-"), pid.get("imdb", "-")),
+                wrap=w - 30, color=(190, 190, 190))
+            dpg.add_separator()
+            with dpg.group(horizontal=True):
+                if action_label and action_cb:
+                    b = dpg.add_button(label=action_label, width=200, callback=_act)
+                    dpg.bind_item_theme(b, "th_btn_ok")
+                if tmdb_id:
+                    dpg.add_button(label=self.t("pop_open_tmdb"), width=130,
+                                   callback=lambda: webbrowser.open(
+                                       "https://www.themoviedb.org/%s/%s" % (
+                                           "tv" if kind == "tv" else "movie", tmdb_id)))
+                dpg.add_button(label=self.t("pop_open_imdb"), width=130,
+                               tag="cand_pop_imdb_%d" % g, show=bool(imdb_holder["id"]),
+                               callback=lambda: imdb_holder["id"] and webbrowser.open(
+                                   "https://www.imdb.com/title/%s/" % imdb_holder["id"]))
+                dpg.add_button(label=self.t("pop_close"), width=110,
+                               callback=lambda: self._close_candidate_popup())
+
+        # affiche en grand
+        if PIL_OK and c.get("poster"):
+            url = c["poster"].replace("/w185/", "/w342/")
+            self._load_image_async(url, "cand_pop_img_%d" % g, (260, 390),
+                                   lambda: g == self._pop_gen, self._pop_tex)
+
+        # details TMDB (duree, genres, equipe...) en arriere-plan
+        if tmdb_id and self.tmdb and self.tmdb.api_key:
+            def worker():
+                d = self.tmdb.details(tmdb_id, kind)
+                lines = []
+                if d:
+                    rd = d.get("release_date") or d.get("first_air_date")
+                    if rd:
+                        lines.append(self.t("pop_release") % rd)
+                    rt = d.get("runtime") or (d.get("episode_run_time") or [0])[0]
+                    if rt:
+                        lines.append(self.t("pop_runtime") % rt)
+                    if kind == "tv" and d.get("number_of_seasons"):
+                        lines.append(self.t("pop_seasons") % (d.get("number_of_seasons"),
+                                                              d.get("number_of_episodes") or "-"))
+                    gen_ = ", ".join(x.get("name", "") for x in d.get("genres") or [])
+                    if gen_:
+                        lines.append(self.t("pop_genres") % gen_)
+                    crew = (d.get("credits") or {}).get("crew") or []
+                    dirs = [x.get("name") for x in crew if x.get("job") == "Director"]
+                    dirs = dirs or [x.get("name") for x in d.get("created_by") or []]
+                    if dirs:
+                        lines.append(self.t("pop_director") % ", ".join(dirs[:3]))
+                    cast = [x.get("name") for x in ((d.get("credits") or {}).get("cast") or [])[:6]]
+                    if cast:
+                        lines.append(self.t("pop_cast") % ", ".join(cast))
+                    cn = [x.get("name") for x in d.get("production_countries") or []]
+                    if cn:
+                        lines.append(self.t("pop_country") % ", ".join(cn[:3]))
+                    if d.get("vote_count"):
+                        lines.append(self.t("pop_vote") % (d.get("vote_average") or 0,
+                                                           d.get("vote_count") or 0))
+                    imdb = d.get("imdb_id") or (d.get("external_ids") or {}).get("imdb_id")
+                    if imdb:
+                        imdb_holder["id"] = imdb
+                ov = (d.get("overview") or "").strip() if d else ""
+
+                def _do():
+                    if g != self._pop_gen:
+                        return
+                    t_ex = "cand_pop_extra_%d" % g
+                    if dpg.does_item_exist(t_ex):
+                        dpg.set_value(t_ex, "\n".join(lines))
+                    t_ov = "cand_pop_ov_%d" % g
+                    if ov and not c.get("overview") and dpg.does_item_exist(t_ov):
+                        dpg.set_value(t_ov, ov)
+                    if imdb_holder["id"]:
+                        t_ids = "cand_pop_ids_%d" % g
+                        if dpg.does_item_exist(t_ids):
+                            dpg.set_value(t_ids, "TMDB=%s   IMDB=%s" % (tmdb_id, imdb_holder["id"]))
+                        if dpg.does_item_exist("cand_pop_imdb_%d" % g):
+                            dpg.configure_item("cand_pop_imdb_%d" % g, show=True)
+                ui_post(_do)
+            threading.Thread(target=worker, daemon=True).start()
+
+    def _load_image_async(self, url, anchor_tag, max_size, alive, registry):
+        """Charge une image distante a la place de anchor_tag (si toujours valide)."""
+        def worker():
+            try:
+                r = requests.get(url, timeout=HTTP_TIMEOUT)
+                r.raise_for_status()
+                img = Image.open(BytesIO(r.content)).convert("RGBA")
+                img.thumbnail(max_size)
+                w, h = img.size
+                data = [b / 255.0 for b in img.tobytes()]
+            except Exception:
+                def _fail():
+                    if alive() and dpg.does_item_exist(anchor_tag):
+                        dpg.set_value(anchor_tag, "")
+                ui_post(_fail)
+                return
+
+            def _do():
+                if not alive() or not dpg.does_item_exist(anchor_tag):
+                    return
+                tex_tag = "tex_%s" % anchor_tag
+                if dpg.does_item_exist(tex_tag):
+                    return
+                with dpg.texture_registry():
+                    dpg.add_static_texture(w, h, data, tag=tex_tag)
+                registry.append(tex_tag)
+                parent = dpg.get_item_parent(anchor_tag)
+                dpg.add_image(tex_tag, parent=parent, before=anchor_tag,
+                              width=w, height=h)
+                dpg.delete_item(anchor_tag)
+            ui_post(_do)
         threading.Thread(target=worker, daemon=True).start()
 
     # ----- sélection d'un film -----
@@ -3712,6 +4146,9 @@ class App:
                                 label=self.t("btn_apply"), width=155,
                                 callback=self.on_apply, user_data=i)
                             dpg.bind_item_theme(apply_btn, "th_btn_ok")
+                            dpg.add_button(label=self.t("btn_details"), width=70,
+                                           user_data=i,
+                                           callback=lambda s, a, u: self._open_search_popup(u))
                             head = "%s (%s)  ·  %s  ·  score %.2f%s" % (
                                 c["title"], c["year"] or "-", c["source"],
                                 c["score"], self.t("cand_best") if best else "")
@@ -3726,6 +4163,15 @@ class App:
                                      color=(180, 180, 180))
             if PIL_OK and c.get("poster"):
                 self._load_poster_async(c["poster"], img_tag, gen)
+        # fiche du meilleur candidat ouverte d'office pour bien voir le film
+        self._open_search_popup(0)
+
+    def _open_search_popup(self, i):
+        if i is None or i >= len(self.candidates) or not self.current:
+            return
+        self.show_candidate_popup(self.candidates[i], self.current,
+                                  self.t("pop_apply"),
+                                  lambda i=i: self.on_apply(None, None, i))
 
     def _load_poster_async(self, url, anchor_tag, gen):
         def worker():

@@ -26,6 +26,13 @@
   Doublons n'était synchronisé qu'au clic sur « Enregistrer », d'où le message
   « lecteur non défini » alors que MPC-HC était renseigné). Guillemets acceptés,
   repli sur le lecteur associé par Windows puis sur les installations standard.
+- **IDFinder – fiche du candidat :** fenêtre détaillée ouverte sur le meilleur
+  candidat après « Rechercher candidats » (+ bouton « Détails » par carte) :
+  affiche, durée, genres, réalisation, acteurs, note, résumé, liens TMDB/IMDb,
+  comparaison avec la fiche Emby. Détails TMDB enregistrés dans la base.
+- **IDFinder – auto-correction :** analyse sans écriture puis récapitulatif à
+  cases à cocher (sûrs cochés, douteux décochés) ; seuls les films cochés sont
+  corrigés.
 
 ### English
 - **Duplicates – deletion:** no more false "timeout". The wait for Emby's reply
@@ -50,3 +57,9 @@
   only synced on "Save", hence the "player not set" message although MPC-HC was
   set). Quotes accepted, fallback to the Windows-associated player then to
   standard installs.
+- **IDFinder – candidate details:** detailed window opened on the best
+  candidate after "Search candidates" (+ "Details" button per card): poster,
+  runtime, genres, director, cast, rating, overview, TMDB/IMDb links,
+  comparison with the Emby record. TMDB details saved in the database.
+- **IDFinder – auto-fix:** no-write analysis then a checkbox summary (safe ones
+  ticked, doubtful ones unticked); only ticked movies are fixed.

@@ -33,9 +33,16 @@ sans redémarrer. Le choix est mémorisé.
 - **Recherche manuelle** : candidats TMDB (avec affiches) puis, en secours,
   la recherche distante d'Emby ; tolérance d'année réglable ; application du
   bon résultat en un clic.
-- **Auto-correction** : applique automatiquement les correspondances TMDB dont
-  la similarité de titre est ≥ 95 % (dans la tolérance d'année), après
-  confirmation.
+- **Fiche du candidat** : à la fin de la recherche, une fenêtre s'ouvre sur le
+  meilleur candidat (bouton **Détails** pour les autres) : grande affiche,
+  titre original, sortie, durée, genres, réalisation, acteurs, pays, note TMDB,
+  résumé complet, liens TMDB / IMDb, et rappel de la fiche Emby actuelle pour
+  comparer. Bouton « Appliquer ce candidat ».
+- **Auto-correction** en deux temps : analyse **sans aucune écriture**, puis
+  **récapitulatif à valider** avec une case à cocher par film. Les
+  correspondances sûres (titre ≥ 95 %, année dans la tolérance) sont cochées,
+  les douteuses décochées ; « Détails » ouvre la fiche de chaque proposition.
+  Seuls les films cochés sont corrigés, après « Appliquer la sélection ».
 - **Scan des fiches fusionnées** : repère les fiches Emby qui regroupent
   plusieurs fichiers de films différents (fusion suspecte) ; export possible.
 - Les recherches TMDB sont enregistrées dans la base `emby_toolbox_web.db`.
@@ -185,8 +192,16 @@ restart. The choice is remembered.
   TMDB/IMDB id**, **with no artwork**, or everything.
 - **Manual search**: TMDB candidates (with posters), then Emby's remote search
   as a fallback; adjustable year tolerance; apply the right match in one click.
-- **Auto-fix**: automatically applies TMDB matches whose title similarity is
-  ≥ 95 % (within the year tolerance), after confirmation.
+- **Candidate details**: when the search ends, a window opens on the best
+  candidate (**Details** button for the others): large poster, original title,
+  release, runtime, genres, director, cast, country, TMDB rating, full overview,
+  TMDB / IMDb links, and the current Emby record for comparison. "Apply this
+  match" button.
+- **Auto-fix** in two steps: analysis **with no write at all**, then a
+  **summary to validate** with one checkbox per movie. Safe matches (title
+  ≥ 95 %, year within tolerance) are ticked, doubtful ones unticked; "Details"
+  opens each proposal's record. Only ticked movies are fixed, after
+  "Apply selection".
 - **Merged-entries scan**: finds Emby entries that group several files of
   different movies (suspicious merge); exportable.
 - TMDB searches are saved in the `emby_toolbox_web.db` database.
