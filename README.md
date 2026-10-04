@@ -47,9 +47,9 @@ sans redémarrer. Le choix est mémorisé.
   critères cochables : 4K/1080p, HDR/SDR, AV1, 3D, Remastered, version
   longue / Director's Cut, bonus.
 - Filtres (résolution, codec, même durée, même taille), tris, pagination.
-- Par groupe : **Ouvrir tout** (fenêtres du lecteur en mosaïque, **avec choix
-  du timecode de départ** pour que toutes les versions démarrent au même
-  endroit), **Comparer** (métadonnées côte à côte, différences surlignées),
+- Par groupe : **Ouvrir tout** (fenêtres du lecteur en mosaïque, toutes les
+  versions démarrent au **timecode réglé dans le champ « Départ Ouvrir
+  tout »** de la barre de l'onglet, sans popup), **Comparer** (métadonnées côte à côte, différences surlignées),
   **Audio** (pistes audio côte à côte), **Ignorer** (faux positif).
 - Par fichier : lire, ouvrir le dossier, copier le chemin, **supprimer** via
   l'API Emby (retirer de la médiathèque ou supprimer le fichier), avec
@@ -116,7 +116,7 @@ pip install -r requirements.txt
 | Programme | Utilisé par | Notes |
 |---|---|---|
 | **ffprobe.exe** (fourni avec **FFmpeg**) | MKV Renamer | Obligatoire pour cet onglet. Détection auto : dossier du script, `bin\`, `ffmpeg\bin\`, `C:\ffmpeg\bin`, `C:\Program Files\ffmpeg\bin`, WinGet, Scoop, Chocolatey, PATH. Sinon : bouton « Choisir ffprobe… ». Téléchargement : <https://ffmpeg.org/download.html> (ou `winget install ffmpeg`). |
-| **Lecteur vidéo** : **MPC-HC**, **MPC-BE**, **VLC**, **mpv** ou **PotPlayer** | Doublons, Explorateur | Chemin du `.exe` dans le champ « Lecteur » (ex. `C:\Program Files\MPC-HC\mpc-hc64.exe`). Vide = lecteur système, mais alors **pas de timecode de départ**. |
+| **Lecteur vidéo** : **MPC-HC**, **MPC-BE**, **VLC**, **mpv** ou **PotPlayer** | Doublons, Explorateur | Chemin du `.exe` dans le champ « Lecteur » (ex. `C:\Program Files\MPC-HC\mpc-hc64.exe`). Le chemin est lu dans le bandeau du haut (guillemets acceptés). S'il est vide ou invalide, l'outil prend le lecteur associé aux `.mkv` par Windows, puis une installation standard de MPC-HC / MPC-BE / VLC / PotPlayer. |
 
 > Pour « Ouvrir tout », le lecteur doit accepter **plusieurs instances** :
 > VLC : *Préférences > Interface > décocher « Une seule instance »* ;
@@ -198,8 +198,8 @@ restart. The choice is remembered.
   criteria: 4K/1080p, HDR/SDR, AV1, 3D, Remastered, extended / Director's Cut,
   bonus.
 - Filters (resolution, codec, same duration, same size), sorting, paging.
-- Per group: **Open all** (player windows tiled, **with a start timecode** so
-  every version starts at the same point), **Compare** (metadata side by side,
+- Per group: **Open all** (player windows tiled, every version starts at
+  the **timecode set in the "Open all start" field** of the tab bar, no popup), **Compare** (metadata side by side,
   differences highlighted), **Audio** (audio tracks side by side), **Ignore**
   (false positive).
 - Per file: play, open folder, copy path, **delete** through the Emby API
@@ -264,7 +264,7 @@ pip install -r requirements.txt
 | Program | Used by | Notes |
 |---|---|---|
 | **ffprobe.exe** (ships with **FFmpeg**) | MKV Renamer | Required for this tab. Auto-detected in: script folder, `bin\`, `ffmpeg\bin\`, `C:\ffmpeg\bin`, `C:\Program Files\ffmpeg\bin`, WinGet, Scoop, Chocolatey, PATH. Otherwise: "Choose ffprobe…" button. Download: <https://ffmpeg.org/download.html> (or `winget install ffmpeg`). |
-| **Video player**: **MPC-HC**, **MPC-BE**, **VLC**, **mpv** or **PotPlayer** | Duplicates, Genre explorer | Path of the `.exe` in the "Player" field (e.g. `C:\Program Files\MPC-HC\mpc-hc64.exe`). Empty = system player, but then **no start timecode**. |
+| **Video player**: **MPC-HC**, **MPC-BE**, **VLC**, **mpv** or **PotPlayer** | Duplicates, Genre explorer | Path of the `.exe` in the "Player" field (e.g. `C:\Program Files\MPC-HC\mpc-hc64.exe`). The path is read from the top bar (quotes accepted). If it is empty or invalid, the tool uses the player Windows associates with `.mkv`, then a standard MPC-HC / MPC-BE / VLC / PotPlayer install. |
 
 > For "Open all", the player must allow **multiple instances**:
 > VLC: *Preferences > Interface > uncheck "Allow only one instance"*;

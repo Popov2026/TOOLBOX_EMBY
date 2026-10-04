@@ -4169,6 +4169,8 @@ def _init_doublons():
             "ignored_panel":"Groupes ignores","remove_ignore":"Retirer",
             "hidden_score":"{n} groupe(s) masque(s) par le seuil de score.",
             "refresh_emby":"Analyser Emby",
+            "tc_lbl":"Depart Ouvrir tout :",
+            "tip_tc":"Timecode de depart utilise par 'Ouvrir tout' (et 'Ouvrir les deux').\nToutes les fenetres MPC-HC / MPC-BE / VLC / mpv / PotPlayer\ndemarrent a cet endroit. Vide ou 0 = depuis le debut.\n\nFormats : 1:02:30  45:00  1h05m  90s  45 (= minutes).\nMemorise automatiquement.",
             "tip_refresh_emby":"Lance l'analyse des mediatheques SELECTIONNEES sur le serveur Emby\n(equivalent de Tableau de bord > Mediatheques > Analyser).\nA utiliser apres avoir supprime des fichiers manuellement :\npatientez quelques instants puis relancez un scan pour rafraichir les resultats.",
         },
         "en": {
@@ -4240,6 +4242,8 @@ def _init_doublons():
             "ignored_panel":"Ignored groups","remove_ignore":"Remove",
             "hidden_score":"{n} group(s) hidden by score threshold.",
             "refresh_emby":"Scan Emby",
+            "tc_lbl":"Open all start:",
+            "tip_tc":"Start timecode used by 'Open all' (and 'Open both').\nEvery MPC-HC / MPC-BE / VLC / mpv / PotPlayer window\nstarts there. Empty or 0 = from the start.\n\nFormats: 1:02:30  45:00  1h05m  90s  45 (= minutes).\nSaved automatically.",
             "tip_refresh_emby":"Triggers a scan of the SELECTED libraries on the Emby server\n(same as Dashboard > Libraries > Scan).\nUse after manually deleting files:\nwait a moment then re-run a scan to refresh results.",
         }
     }
@@ -4976,12 +4980,81 @@ def _init_doublons():
     # ══════════════════════════════════════════════════════════════
     #  OUVERTURE FICHIERS
     # ══════════════════════════════════════════════════════════════
+    def _clean_player(p):
+        return (p or "").strip().strip('"').strip("'").strip()
+
     def get_player():
-        """Lit toujours le champ lecteur depuis l'UI - jamais de valeur figée."""
+        """Lit toujours le lecteur depuis l'UI - jamais de valeur figée.
+        Priorite au champ VISIBLE du bandeau commun (sh_player) : le champ
+        de l'onglet (dbl_inp_player, masque) n'est resynchronise qu'au clic
+        sur Enregistrer, il pouvait donc etre vide ou perime."""
+        cands = []
+        for tag in ("sh_player", "dbl_inp_player"):
+            try:
+                if dpg.does_item_exist(tag):
+                    cands.append(_clean_player(dpg.get_value(tag)))
+            except Exception:
+                pass
         try:
-            return dpg.get_value("dbl_inp_player").strip()
+            cands.append(_clean_player(get_shared_creds().get("player", "")))
         except Exception:
-            return G.get("player","")
+            pass
+        cands.append(_clean_player(G.get("player", "")))
+        cands = [c for c in cands if c]
+        for c in cands:
+            if Path(c).is_file():
+                return c
+        return cands[0] if cands else ""
+
+    _KNOWN_PLAYERS = (
+        r"%ProgramFiles%\MPC-HC\mpc-hc64.exe",
+        r"%ProgramFiles(x86)%\MPC-HC\mpc-hc.exe",
+        r"%ProgramFiles(x86)%\K-Lite Codec Pack\MPC-HC64\mpc-hc64.exe",
+        r"%ProgramFiles(x86)%\K-Lite Codec Pack\MPC-HC\mpc-hc.exe",
+        r"%ProgramFiles%\MPC-BE x64\mpc-be64.exe",
+        r"%ProgramFiles(x86)%\MPC-BE\mpc-be.exe",
+        r"%ProgramFiles%\VideoLAN\VLC\vlc.exe",
+        r"%ProgramFiles(x86)%\VideoLAN\VLC\vlc.exe",
+        r"%ProgramFiles%\DAUM\PotPlayer\PotPlayerMini64.exe",
+    )
+
+    def _assoc_player(ext):
+        """Programme associe a l'extension par Windows (ex. MPC-HC pour .mkv)."""
+        if sys.platform != "win32":
+            return ""
+        try:
+            import ctypes
+            from ctypes import wintypes
+            fn = ctypes.windll.shlwapi.AssocQueryStringW
+            fn.argtypes = [ctypes.c_uint, ctypes.c_uint, wintypes.LPCWSTR,
+                           wintypes.LPCWSTR, wintypes.LPWSTR,
+                           ctypes.POINTER(wintypes.DWORD)]
+            size = wintypes.DWORD(1024)
+            buf = ctypes.create_unicode_buffer(1024)
+            # ASSOCF_NONE=0, ASSOCSTR_EXECUTABLE=2
+            if fn(0, 2, ext or ".mkv", "open", buf, ctypes.byref(size)) == 0:
+                return buf.value
+        except Exception:
+            pass
+        return ""
+
+    def resolve_player(player, sample_path=""):
+        """Chemin d'un lecteur utilisable : celui configure s'il existe, sinon
+        le lecteur associe par Windows a l'extension, sinon une installation
+        standard de MPC-HC / MPC-BE / VLC / PotPlayer. '' si rien."""
+        player = _clean_player(player)
+        if player and Path(player).is_file():
+            return player
+        ext = Path(sample_path).suffix if sample_path else ".mkv"
+        a = _assoc_player(ext)
+        if a and Path(a).is_file() and player_kind(a):
+            return a
+        if sys.platform == "win32":
+            for c in _KNOWN_PLAYERS:
+                c = os.path.expandvars(c)
+                if Path(c).is_file():
+                    return c
+        return ""
 
 
     # ── Timecode de depart (bouton "Ouvrir tout") ──────────────────
@@ -5051,6 +5124,7 @@ def _init_doublons():
 
     def open_file(path, player="", start_s=0):
         if not path: return
+        player = resolve_player(player, path) or player
         try:
             if player and Path(player).exists():
                 subprocess.Popen(player_cmd(player, path, start_s))
@@ -5090,6 +5164,7 @@ def _init_doublons():
         paths = [p for p in paths if p]
         if not paths:
             return
+        player = resolve_player(player, paths[0]) or player
         if sys.platform != "win32" or not (player and Path(player).exists()):
             for p in paths:
                 open_file(p, player, start_s)
@@ -5345,82 +5420,58 @@ def _init_doublons():
                 user_data=tag,
                 callback=lambda s,a,u: dpg.delete_item(u))
 
-    def ask_open_all(paths):
-        """Demande le timecode de depart avant d'ouvrir toutes les versions :
-        toutes les fenetres MPC-HC / VLC demarrent au meme endroit du film."""
-        nonlocal _mid; _mid += 1; tag = f"dbl_tc{_mid}"
+    def get_start_timecode():
+        """Timecode du champ 'Départ' (barre de l'onglet). (secondes, texte)."""
+        try:
+            txt = (dpg.get_value("dbl_inp_tc") or "").strip()
+        except Exception:
+            txt = G.get("last_timecode", "")
+        return parse_timecode(txt), txt
+
+    def on_timecode_change(s=None, v=None, u=None):
+        txt = (v or "").strip()
+        sec = parse_timecode(txt)
+        try:
+            if sec is None:
+                dpg.set_value("dbl_lbl_tc_state", "?")
+                dpg.configure_item("dbl_lbl_tc_state", color=(233,69,96))
+                return
+            dpg.set_value("dbl_lbl_tc_state", fmt_timecode(sec) if sec else
+                          ("début" if G.get("lang","fr") != "en" else "start"))
+            dpg.configure_item("dbl_lbl_tc_state", color=(136,136,170))
+        except Exception:
+            pass
+        G["last_timecode"] = txt
+        save_last_timecode(txt)
+
+    def open_all_now(paths):
+        """'Ouvrir tout' : ouvre directement, au timecode réglé en amont."""
         paths = [p for p in paths if p]
         if not paths:
             return
-        player = get_player()
-        kind = player_kind(player) if (player and Path(player).exists()) else ""
-        last = G.get("last_timecode") or load_last_timecode()
         en = G.get("lang", "fr") == "en"
         L = (lambda fr, e: e if en else fr)
-
-        def _go(start_s, tc_txt=""):
-            if dpg.does_item_exist(tag):
-                dpg.delete_item(tag)
-            if tc_txt:
-                G["last_timecode"] = tc_txt
-                save_last_timecode(tc_txt)
-            open_files_tiled(paths, get_player(), start_s)
-            if start_s:
-                _set_status(L(f"Ouverture de {len(paths)} fichier(s) à {fmt_timecode(start_s)}",
-                              f"Opening {len(paths)} file(s) at {fmt_timecode(start_s)}"),
-                            (46,204,113))
-
-        def _ok(s=None, a=None, u=None):
-            txt = dpg.get_value(f"{tag}_in") or ""
-            sec = parse_timecode(txt)
-            if sec is None:
-                dpg.set_value(f"{tag}_err", L("Timecode invalide (ex : 1:02:30, 45:00, 1h05m, 45)",
-                                               "Invalid timecode (e.g. 1:02:30, 45:00, 1h05m, 45)"))
-                return
-            _go(sec, txt.strip())
-
-        def _preset(s, a, u):
-            dpg.set_value(f"{tag}_in", u)
-            _ok()
-
-        with dpg.window(label=L("Ouvrir tout - timecode de départ",
-                                "Open all - start timecode"),
-                        tag=tag, modal=True, width=470, autosize=True,
-                        pos=[220, 200], no_resize=True):
-            dpg.add_text(L(f"{len(paths)} fichier(s) vont s'ouvrir en mosaïque.",
-                           f"{len(paths)} file(s) will open tiled."))
-            dpg.add_text(L("Démarrer la lecture à :", "Start playback at:"),
-                         color=(136,136,170))
-            with dpg.group(horizontal=True):
-                dpg.add_input_text(tag=f"{tag}_in", width=140, default_value=last,
-                                   hint="1:02:30", on_enter=True, callback=_ok)
-                dpg.add_text(L("h:mm:ss, mm:ss, 1h05m ou minutes",
-                               "h:mm:ss, mm:ss, 1h05m or minutes"),
-                             color=(136,136,170))
-            with dpg.group(horizontal=True):
-                for pr in ("5:00", "15:00", "30:00", "45:00", "1:00:00", "1:30:00"):
-                    dpg.add_button(label=pr, width=62, user_data=pr, callback=_preset)
-            dpg.add_text("", tag=f"{tag}_err", color=(233,69,96))
-            if not kind:
-                dpg.add_text(L("Lecteur non reconnu (ou lecteur système) : le timecode\n"
-                               "ne peut pas être transmis. Renseignez MPC-HC, MPC-BE,\n"
-                               "VLC, mpv ou PotPlayer dans le champ Lecteur.",
-                               "Unknown player (or system player): the timecode\n"
-                               "cannot be passed. Set MPC-HC, MPC-BE, VLC, mpv\n"
-                               "or PotPlayer in the Player field."),
-                             color=(240,160,0))
-            dpg.add_separator()
-            with dpg.group(horizontal=True):
-                dpg.add_button(label=L("Ouvrir à ce timecode", "Open at this timecode"),
-                               width=170, callback=_ok)
-                dpg.add_button(label=L("Depuis le début", "From the start"),
-                               width=130, callback=lambda s, a, u: _go(0))
-                dpg.add_button(label=L("Annuler", "Cancel"), width=-1,
-                               callback=lambda s, a, u: dpg.delete_item(tag))
-        try:
-            dpg.focus_item(f"{tag}_in")
-        except Exception:
-            pass
+        sec, txt = get_start_timecode()
+        if sec is None:
+            _set_status(L(f"Timecode de départ invalide : {txt!r} (ex : 1:02:30, 45:00, 1h05m, 45)",
+                          f"Invalid start timecode: {txt!r} (e.g. 1:02:30, 45:00, 1h05m, 45)"),
+                        (233,69,96))
+            return
+        player = resolve_player(get_player(), paths[0])
+        open_files_tiled(paths, player or get_player(), sec)
+        name = Path(player).name if player else L("lecteur système", "system player")
+        if sec and not player_kind(player):
+            _set_status(L(f"Lecteur non reconnu ({name}) : ouverture SANS timecode. "
+                          "Indiquez le chemin de mpc-hc64.exe / vlc.exe dans le bandeau du haut.",
+                          f"Unknown player ({name}): opening WITHOUT timecode. "
+                          "Set the path of mpc-hc64.exe / vlc.exe in the top bar."),
+                        (240,160,0))
+        else:
+            _set_status(L(f"Ouverture de {len(paths)} fichier(s) avec {name}"
+                          + (f" à {fmt_timecode(sec)}" if sec else " depuis le début"),
+                          f"Opening {len(paths)} file(s) with {name}"
+                          + (f" at {fmt_timecode(sec)}" if sec else " from the start")),
+                        (46,204,113))
 
     def show_ignored_panel():
         """Panneau listant les groupes ignorés avec bouton Retirer individuel."""
@@ -5704,19 +5755,19 @@ def _init_doublons():
                     dpg.add_spacer(width=10)
                     dpg.add_button(label=t("open_all"), width=80,
                         user_data=all_wp,
-                        callback=lambda s,a,u: ask_open_all(u))
+                        callback=lambda s,a,u: open_all_now(u))
                     tip("Ouvre tous les fichiers du groupe et dispose les fenetres\n"
                         "cote a cote (mosaique) automatiquement.\n"
-                        "Un timecode de depart est demande : toutes les fenetres\n"
-                        "(MPC-HC, MPC-BE, VLC, mpv, PotPlayer) demarrent au meme endroit.\n\n"
+                        "Toutes les fenetres demarrent au timecode du champ 'Depart'\n"
+                        "(MPC-HC, MPC-BE, VLC, mpv, PotPlayer).\n\n"
                         "ATTENTION : votre lecteur video doit supporter\n"
                         "plusieurs instances simultanées (sessions multiples).\n"
                         "VLC : Preferences > Interface > decocher 'Une seule instance'.\n"
                         "MPC-BE : Options > Lecteur > 'Permettre plusieurs instances'.", wrap=360,
                         en="Opens all files in the group and arranges the windows\n"
                            "side by side (mosaic) automatically.\n"
-                           "A start timecode is asked: every window\n"
-                           "(MPC-HC, MPC-BE, VLC, mpv, PotPlayer) starts at the same point.\n\n"
+                           "Every window starts at the timecode of the 'Start' field\n"
+                           "(MPC-HC, MPC-BE, VLC, mpv, PotPlayer).\n\n"
                            "WARNING: your video player must support\n"
                            "multiple simultaneous instances (multi-session).\n"
                            "VLC: Preferences > Interface > uncheck 'Allow only one instance'.\n"
@@ -5865,7 +5916,7 @@ def _init_doublons():
             with dpg.group(horizontal=True):
                 dpg.add_button(label=t("open_both"), width=130,
                     user_data=wp,
-                    callback=lambda s,a,u: ask_open_all(u))
+                    callback=lambda s,a,u: open_all_now(u))
                 tip("Ouvre tous les fichiers du groupe avec le lecteur configure.",
                     en="Opens all files in the group with the configured player.")
                 dpg.add_spacer(width=10)
@@ -5910,7 +5961,7 @@ def _init_doublons():
             try: dpg.configure_item(tag, label=L[key])
             except Exception: pass
         # Labels texte
-        for tag, key in [("dbl_lbl_url","url_lbl"),("dbl_lbl_apikey","apikey_lbl"),
+        for tag, key in [("dbl_lbl_tc","tc_lbl"),("dbl_lbl_url","url_lbl"),("dbl_lbl_apikey","apikey_lbl"),
                          ("dbl_t_appname","app_title"),
                          ("dbl_lbl_uid","userid_lbl"),("dbl_lbl_prefix","prefix_lbl"),
                          ("dbl_lbl_player","player_lbl"),("dbl_lbl_filter","filter_lbl"),
@@ -6472,6 +6523,13 @@ def _init_doublons():
             dpg.add_button(label="Analyser Emby",tag="dbl_btn_refresh",
                            callback=lambda s,a,u: do_refresh_emby(),width=120)
             tip_t("tip_refresh_emby", wrap=380)
+            dpg.add_spacer(width=10)
+            dpg.add_text("Depart Ouvrir tout :",tag="dbl_lbl_tc",color=(136,136,170))
+            dpg.add_input_text(tag="dbl_inp_tc",width=80,hint="0:45:00",
+                               default_value=G.get("last_timecode") or load_last_timecode(),
+                               callback=on_timecode_change)
+            tip_t("tip_tc", wrap=360)
+            dpg.add_text("",tag="dbl_lbl_tc_state",color=(136,136,170))
             dpg.add_spacer(width=10)
             dpg.add_text("",tag="dbl_lbl_scan_info",color=(136,136,170))
         dpg.add_spacer(height=4)

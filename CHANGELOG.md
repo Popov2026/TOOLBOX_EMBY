@@ -18,9 +18,14 @@
     vidage) ;
   - validité : 365 jours (film classé), 30 jours (non classé) ;
   - IDFinder (RefMatch) : les recherches TMDB sont aussi enregistrées (30 jours).
-- **Doublons – « Ouvrir tout » :** demande d'un timecode de départ, transmis à
-  MPC-HC / MPC-BE (`/start`), VLC (`--start-time`), mpv (`--start`) et
-  PotPlayer (`/seek`). Le dernier timecode est mémorisé.
+- **Doublons – « Ouvrir tout » :** timecode de départ réglé en amont dans le
+  champ « Départ Ouvrir tout » (pas de popup), transmis à MPC-HC / MPC-BE
+  (`/start`), VLC (`--start-time`), mpv (`--start`) et PotPlayer (`/seek`).
+  Mémorisé automatiquement.
+- **Lecteur vidéo :** lu dans le bandeau du haut (le champ caché de l'onglet
+  Doublons n'était synchronisé qu'au clic sur « Enregistrer », d'où le message
+  « lecteur non défini » alors que MPC-HC était renseigné). Guillemets acceptés,
+  repli sur le lecteur associé par Windows puis sur les installations standard.
 
 ### English
 - **Duplicates – deletion:** no more false "timeout". The wait for Emby's reply
@@ -37,6 +42,11 @@
     clearing);
   - validity: 365 days (rated movie), 30 days (unrated);
   - IDFinder (RefMatch): TMDB searches are saved as well (30 days).
-- **Duplicates – "Open all":** asks for a start timecode, passed to
-  MPC-HC / MPC-BE (`/start`), VLC (`--start-time`), mpv (`--start`) and
-  PotPlayer (`/seek`). The last timecode is remembered.
+- **Duplicates – "Open all":** start timecode set beforehand in the
+  "Open all start" field (no popup), passed to MPC-HC / MPC-BE (`/start`),
+  VLC (`--start-time`), mpv (`--start`) and PotPlayer (`/seek`). Saved
+  automatically.
+- **Video player:** read from the top bar (the Duplicates tab's hidden field was
+  only synced on "Save", hence the "player not set" message although MPC-HC was
+  set). Quotes accepted, fallback to the Windows-associated player then to
+  standard installs.
