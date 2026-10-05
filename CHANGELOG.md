@@ -40,6 +40,10 @@
 - **IDFinder – auto-correction :** analyse sans écriture puis récapitulatif à
   cases à cocher (sûrs cochés, douteux décochés) ; seuls les films cochés sont
   corrigés.
+- **Configuration :** l'ancien `emby_toolbox_dpg.ini` (et les `.ini` des autres
+  outils) est relu à chaque lancement : tout champ vide ou par défaut de
+  `emby_toolbox_creds.ini` en est complété, sans rien écraser. Avant, il était
+  ignoré dès que `emby_toolbox_creds.ini` existait (bandeau vide).
 - **Version Windows :** workflow GitHub Actions (build PyInstaller, auto-test,
   signature Azure Artifact Signing si configurée, release sur tag `v*`).
   Numéro de version affiché dans le titre de la fenêtre.
@@ -79,6 +83,10 @@
   comparison with the Emby record. TMDB details saved in the database.
 - **IDFinder – auto-fix:** no-write analysis then a checkbox summary (safe ones
   ticked, doubtful ones unticked); only ticked movies are fixed.
+- **Configuration:** the old `emby_toolbox_dpg.ini` (and the other tools'
+  `.ini` files) is read at every start: any empty or default field of
+  `emby_toolbox_creds.ini` is filled from it, nothing is overwritten. Before,
+  it was ignored as soon as `emby_toolbox_creds.ini` existed (empty top bar).
 - **Windows build:** GitHub Actions workflow (PyInstaller build, self-test,
   Azure Artifact Signing when configured, release on `v*` tag). Version number
   shown in the window title.

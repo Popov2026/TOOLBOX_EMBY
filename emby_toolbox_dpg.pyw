@@ -7284,11 +7284,15 @@ def _push_doublons(c):
             dpg.set_value(tag, c.get(k, "") or "")
 
 def migrate_into_shared(app, DBL):
-    """Au premier lancement : agrege les clefs des anciens fichiers de
-    config (genres, refmatch, doublons) dans le magasin partage chiffre."""
-    if SHARED_CREDS_FILE.exists():
-        load_shared_creds()
-        return
+    """Agrege les clefs des fichiers de config de chaque outil (genres
+    emby_toolbox_dpg.ini, refmatch, doublons, api_config), tous lus A COTE DU
+    SCRIPT, dans le magasin partage chiffre emby_toolbox_creds.ini.
+
+    Avant : des que emby_toolbox_creds.ini existait, les autres .ini etaient
+    ignores, meme si ce fichier etait vide ou ne contenait que les valeurs par
+    defaut -> bandeau vide alors que emby_toolbox_dpg.ini etait renseigne.
+    Maintenant : chaque champ vide (ou reste a sa valeur par defaut) du magasin
+    partage est complete depuis les .ini des outils, a chaque lancement."""
 
     def first(*vals):
         for v in vals:
@@ -7306,21 +7310,40 @@ def migrate_into_shared(app, DBL):
         api = {}
     leg = DBL.get("legacy", {})
 
-    save_shared_creds(
-        url=first(g.get("url"), app.get("emby", "url", ""), leg.get("url")),
-        api_key=first(g.get("api_key"),
-                      decrypt_secret(app.get("emby", "api_key", "")),
-                      leg.get("api_key")),
-        user_id=first(g.get("user_id"), leg.get("user_id")),
-        nas_prefix=first(g.get("nas_prefix"), leg.get("nas_prefix")),
-        nas_unc=first(g.get("nas_unc"), leg.get("nas_unc")),
-        player=first(g.get("player"), leg.get("player")),
-        omdb_key=first(api.get("omdb_key")),
-        tmdb_key=first(api.get("tmdb_key"),
-                       decrypt_secret(app.get("tmdb", "api_key", ""))),
-        provider=first(api.get("provider")),
-        lang=first(getattr(app, "lang", "FR")),
-    )
+    found = {
+        "url": first(g.get("url"), app.get("emby", "url", ""), leg.get("url")),
+        "api_key": first(g.get("api_key"),
+                         decrypt_secret(app.get("emby", "api_key", "")),
+                         leg.get("api_key")),
+        "user_id": first(g.get("user_id"), leg.get("user_id")),
+        "nas_prefix": first(g.get("nas_prefix"), leg.get("nas_prefix")),
+        "nas_unc": first(g.get("nas_unc"), leg.get("nas_unc")),
+        "player": first(g.get("player"), leg.get("player")),
+        "omdb_key": first(api.get("omdb_key")),
+        "tmdb_key": first(api.get("tmdb_key"),
+                          decrypt_secret(app.get("tmdb", "api_key", ""))),
+        "provider": first(api.get("provider")),
+        "lang": first(getattr(app, "lang", "FR")),
+    }
+
+    if not SHARED_CREDS_FILE.exists():
+        save_shared_creds(**found)
+        _trace("config : %s cree depuis %s" % (SHARED_CREDS_FILE, CONFIG_FILE))
+        return
+
+    cur = load_shared_creds()
+    dflt = _shared_defaults()
+    fill = {}
+    for k, v in found.items():
+        if not v or k in ("lang", "provider") or v == dflt.get(k) \
+                or "192.168.1.x" in str(v):      # valeurs d'exemple
+            continue
+        if not cur.get(k) or cur.get(k) == dflt.get(k):
+            fill[k] = v
+    if fill:
+        save_shared_creds(**fill)
+        _trace("config : champs completes depuis %s : %s"
+               % (CONFIG_FILE, ", ".join(sorted(fill))))
 
 # =====================================================================
 #  OUTIL 4 : MKV Renamer  --  renommage automatique des films MKV
