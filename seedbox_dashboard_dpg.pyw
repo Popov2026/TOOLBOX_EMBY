@@ -11,6 +11,10 @@ Pilote une seedbox depuis le poste Windows :
   - TABLEAU DE BORD : etat des telechargements en temps reel (progression,
     vitesses, ETA, ratio, seeds/peers), rafraichissement automatique,
     actions pause / reprise / verification / suppression.
+  - VERIFICATION NAVIGATEUR : un script Tampermonkey interroge l'outil
+    (serveur local 127.0.0.1) au survol d'un nom de film ou a l'ouverture
+    d'une fiche : deja sur Emby / sur le disque ? et differences visibles
+    (VFQ au lieu de VFF, BLURAY au lieu de WEB-DL, 1080p au lieu de 4K...).
 
 L'outil est AGNOSTIQUE du client : il detecte tout seul qBittorrent,
 rTorrent (ruTorrent) ou Deluge et parle le protocole qui va bien.
@@ -33,6 +37,8 @@ from difflib import SequenceMatcher
 import urllib.request, urllib.parse, urllib.error
 import http.cookiejar, ssl, socket, hashlib, subprocess
 import xmlrpc.client
+import secrets, webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 APP_TITLE = "Seedbox Dashboard  -  ajout automatique & suivi"
@@ -209,6 +215,9 @@ _CFG_DEFAULTS = {
     "snap_dir": "",         # vide = sous-dossier seedbox_snapshots
     "snap_interval": 10,    # minutes entre deux sauvegardes de routine
     "snap_keep": 60,        # jours de conservation des instantanes quotidiens
+    "browser_enabled": True,  # serveur local interroge par le script navigateur
+    "browser_port": 8765,
+    "browser_token": "",      # genere au premier lancement
 }
 
 
@@ -1275,6 +1284,246 @@ def _toks(n):
     return [t for t in n.split() if len(t) >= 3 and t not in _STOP]
 
 
+# ---------------------------------------------------------------------
+#  Caracteristiques visibles d'une release (langue, source, codec...)
+# ---------------------------------------------------------------------
+# Chaque regle : (valeur affichee, motif cherche dans le nom nettoye par
+# clean_tokens, donc "WEB-DL" y devient "web dl"). La premiere qui
+# correspond gagne : l'ordre compte (REMUX avant BLURAY, WEBRIP avant WEB).
+_SRC_RULES = (
+    ("REMUX", r"(?:bd|uhd|blu ?ray) ?remux|remux|bdmv|complete blu ?ray|"
+              r"full blu ?ray"),
+    ("HDLIGHT", r"hdlight|hdlite|mhd"),
+    ("BDRIP", r"bdrip|brrip|bd ?rip"),
+    ("BLURAY", r"blu ?ray|bd|uhd ?bd"),
+    ("WEBRIP", r"webrip|web ?rip"),
+    ("WEB-DL", r"web ?dl|webdl|web|amzn|nf|netflix|dsnp|hmax|atvp|pcok"),
+    ("HDTV", r"hdtv|tvrip|dsr|pdtv"),
+    ("DVDRIP", r"dvdrip|dvd ?rip"),
+    ("DVD", r"dvd ?[59]|dvd|dvdr"),
+    ("CAM/TS", r"cam|hdcam|ts|telesync|hdts|tc|telecine|dvdscr|screener"),
+)
+# Rang de qualite pour dire qui a "mieux" (plus grand = meilleur).
+SRC_RANK = {"REMUX": 8, "BLURAY": 7, "WEB-DL": 6, "BDRIP": 5, "HDLIGHT": 5,
+            "WEBRIP": 4, "HDTV": 3, "DVD": 3, "DVDRIP": 2, "CAM/TS": 0}
+_CODEC_RULES = (("AV1", r"av1"), ("x265/HEVC", r"x ?265|h ?265|hevc"),
+                ("x264/AVC", r"x ?264|h ?264|avc"), ("XviD", r"xvid|divx"),
+                ("MPEG-2", r"mpeg ?2"), ("VC-1", r"vc ?1"))
+_HDR_RULES = (("DV", r"dolby ?vision|dovi|dv"), ("HDR10+", r"hdr10 ?plus|hdr10p"),
+              ("HDR", r"hdr10|hdr"))
+_AUDIO_RULES = (("Atmos", r"atmos"), ("TrueHD", r"true ?hd"),
+                ("DTS-HD MA", r"dts ?hd ?ma|dts ?ma"), ("DTS-HD", r"dts ?hd|dts ?x"),
+                ("DTS", r"dts"), ("E-AC3", r"e ?ac3|eac3|ddp|dd ?plus"),
+                ("AC3", r"ac3|dd ?5 1|dd"), ("FLAC", r"flac"), ("AAC", r"aac"),
+                ("Opus", r"opus"), ("MP3", r"mp3"))
+AUDIO_RANK = {"Atmos": 9, "TrueHD": 8, "DTS-HD MA": 8, "DTS-HD": 7, "FLAC": 7,
+              "DTS": 6, "E-AC3": 5, "AC3": 4, "Opus": 3, "AAC": 3, "MP3": 1}
+_EDITION_RULES = (("Extended", r"extended|version longue"),
+                  ("Director's Cut", r"directors? cut|director s cut"),
+                  ("Unrated", r"unrated|uncut"), ("Remastered", r"remaster(?:ed|ise)?"),
+                  ("IMAX", r"imax"), ("Final Cut", r"final cut"),
+                  ("Theatrical", r"theatrical"), ("Criterion", r"criterion"),
+                  ("3D", r"3d|sbs|hsbs|mvc"))
+_RULE_CACHE = {}
+
+
+def _rx(pat):
+    r = _RULE_CACHE.get(pat)
+    if r is None:
+        r = _RULE_CACHE[pat] = re.compile(r"(?<![a-z0-9])(?:%s)(?![a-z0-9])"
+                                          % pat)
+    return r
+
+
+def _first(rules, x):
+    for lbl, pat in rules:
+        if _rx(pat).search(x):
+            return lbl
+    return ""
+
+
+def _lang_from_text(x):
+    """Langue annoncee dans un nom deja nettoye. "" si rien n'est dit."""
+    has = lambda pat: bool(_rx(pat).search(x))
+    vff = has(r"vff|truefrench|true french|vfi")
+    vfq = has(r"vfq|quebec|qc|french canadian|canadien")
+    if has(r"vf2"):
+        variant = "VF2"
+    elif vff and vfq:
+        variant = "VF2"
+    elif vfq:
+        variant = "VFQ"
+    elif vff:
+        variant = "VFI" if has(r"vfi") and not has(r"vff|truefrench") else "VFF"
+    else:
+        variant = ""
+    if has(r"multi ?\d?|multilang|dual"):
+        return "MULTI " + variant if variant else "MULTI"
+    if variant:
+        return variant
+    if has(r"vostfr|subfrench|vost|stfr"):
+        return "VOSTFR"
+    if has(r"french|vf|fr"):
+        return "FRENCH"
+    if has(r"vo|english|eng"):
+        return "VO"
+    return ""
+
+
+def _release_group(raw):
+    """Equipe de release : le "-XXX" qui termine le nom (avant l'extension)."""
+    stem = str(raw or "").strip()
+    ext = Path(stem).suffix.lower()
+    if ext in VIDEO_EXT or ext == ".torrent":
+        stem = stem[:-len(ext)]
+    m = re.search(r"-([A-Za-z0-9]{2,15})\s*(?:\[[^\]]*\])?\s*$", stem)
+    if not m or re.fullmatch(r"(?:19|20)\d{2}|\d+p|x26[45]|dl", m.group(1), re.I):
+        return ""
+    return m.group(1)
+
+
+def _tags_part(raw):
+    """Partie "technique" d'un nom : ce qui suit l'annee, ou a defaut ce qui
+    suit le premier marqueur connu (1080p, MULTI...). Le titre lui-meme n'est
+    jamais analyse : "French Connection" ou "Cam" ne sont pas des tags."""
+    x = clean_tokens(raw)
+    cut = None
+    for m in _YEAR_ANY.finditer(x):
+        if 1888 <= int(m.group(1)) <= _MAX_YEAR:
+            cut = m.end()
+    if cut is None:
+        m = _TAG_RE.search(x)
+        cut = m.start() if m else len(x)
+    return x[cut:].strip()
+
+
+def release_attrs(raw):
+    """Caracteristiques lisibles dans un nom de release ou de fichier.
+
+    Toutes les clefs sont presentes ; "" = non precise dans le nom.
+    """
+    x = _tags_part(raw)
+    tier = tier_from_name(x)
+    ed = [lbl for lbl, pat in _EDITION_RULES if _rx(pat).search(x)]
+    return {"lang": _lang_from_text(x), "source": _first(_SRC_RULES, x),
+            "res": TIER_LBL[tier] if tier else "", "tier": tier,
+            "codec": _first(_CODEC_RULES, x), "hdr": _first(_HDR_RULES, x),
+            "audio": _first(_AUDIO_RULES, x), "edition": ", ".join(ed),
+            "group": _release_group(raw)}
+
+
+_VCODEC = {"hevc": "x265/HEVC", "h265": "x265/HEVC", "h264": "x264/AVC",
+           "avc": "x264/AVC", "av1": "AV1", "mpeg4": "XviD", "msmpeg4v3": "XviD",
+           "mpeg2video": "MPEG-2", "vc1": "VC-1"}
+_ACODEC = {"truehd": "TrueHD", "dts": "DTS", "eac3": "E-AC3", "ac3": "AC3",
+           "aac": "AAC", "flac": "FLAC", "opus": "Opus", "mp3": "MP3"}
+_FR = {"fre", "fra", "fr", "french"}
+
+
+def emby_source_attrs(path, streams, tier):
+    """Caracteristiques d'une version Emby : le nom du fichier (et de son
+    dossier) d'abord, completes et corriges par les pistes reellement lues
+    par Emby (resolution, codec, HDR, audio, langues)."""
+    p = Path(path) if path else None
+    a = release_attrs("%s %s" % (p.parent.name, p.name) if p else "")
+    if tier:
+        a["tier"], a["res"] = tier, TIER_LBL[tier]
+    vid = next((s for s in streams if s.get("Type") == "Video"), None)
+    if vid:
+        a["codec"] = _VCODEC.get(str(vid.get("Codec", "")).lower(), a["codec"])
+        rng = "%s %s" % (vid.get("VideoRange", ""), vid.get("VideoRangeType", ""))
+        rng = rng.lower()
+        if "dovi" in rng or "dolby" in rng:
+            a["hdr"] = "DV"
+        elif "hdr10+" in rng or "hdr10plus" in rng:
+            a["hdr"] = "HDR10+"
+        elif "hdr" in rng or "hlg" in rng:
+            a["hdr"] = "HDR"
+        elif "sdr" in rng:
+            a["hdr"] = ""
+    auds = [s for s in streams if s.get("Type") == "Audio"]
+    if auds:
+        best, rank = "", -1
+        for s in auds:
+            c = _ACODEC.get(str(s.get("Codec", "")).lower(), "")
+            t = clean_tokens("%s %s" % (s.get("DisplayTitle", ""), s.get("Title", "")))
+            if "atmos" in t:
+                c = "Atmos"
+            elif c == "DTS" and ("ma" in t.split() or "dts hd" in t):
+                c = "DTS-HD MA"
+            if AUDIO_RANK.get(c, 0) > rank:
+                best, rank = c, AUDIO_RANK.get(c, 0)
+        a["audio"] = best or a["audio"]
+        # Langues des pistes : n'ecrase pas ce que le nom precise (VFQ...),
+        # mais complete un nom muet, ou un "MULTI" sans variante.
+        langs = [str(s.get("Language", "")).lower() for s in auds]
+        titles = " ".join(clean_tokens("%s %s" % (s.get("DisplayTitle", ""),
+                                                   s.get("Title", "")))
+                          for s in auds)
+        fr = sum(1 for l in langs if l in _FR)
+        other = sum(1 for l in langs if l and l not in _FR)
+        variant = _lang_from_text(titles)
+        variant = variant.replace("MULTI", "").strip() \
+            if variant not in ("FRENCH", "VO", "VOSTFR") else ""
+        if not a["lang"]:
+            if fr and other:
+                a["lang"] = ("MULTI " + variant).strip()
+            elif fr:
+                a["lang"] = variant or "FRENCH"
+            elif other:
+                subs = [s for s in streams if s.get("Type") == "Subtitle" and
+                        str(s.get("Language", "")).lower() in _FR]
+                a["lang"] = "VOSTFR" if subs else "VO"
+        elif a["lang"] in ("MULTI", "FRENCH") and variant:
+            a["lang"] = ("MULTI " + variant) if a["lang"] == "MULTI" else variant
+    return a
+
+
+ATTR_LABELS = (("lang", "Langue"), ("source", "Source"), ("res", "Resolution"),
+               ("codec", "Codec"), ("hdr", "HDR"), ("audio", "Audio"),
+               ("edition", "Edition"), ("group", "Equipe"))
+
+
+def _rank(key, a):
+    if key == "res":
+        return a.get("tier") or None
+    if key == "source":
+        return SRC_RANK.get(a.get("source"))
+    if key == "audio":
+        return AUDIO_RANK.get(a.get("audio"))
+    if key == "hdr":
+        return {"": 0, "HDR": 1, "HDR10+": 2, "DV": 3}.get(a.get("hdr"))
+    return None
+
+
+def attrs_diff(page, have):
+    """Differences visibles entre la release vue dans le navigateur et une
+    version deja possedee. -> liste de {key, label, page, have, cmp}
+    cmp : "mieux" (la page a mieux), "moins" (la page a moins bien), "autre".
+
+    Une caracteristique que le nom de la page ne precise pas n'est pas une
+    difference (sauf le HDR : le posseder est un vrai plus a signaler).
+    """
+    out = []
+    for key, lbl in ATTR_LABELS:
+        pv, hv = page.get(key, ""), have.get(key, "")
+        if pv == hv or (not pv and key != "hdr") or (not hv and key == "group"):
+            continue
+        if key == "hdr" and not page.get("res"):
+            continue            # simple titre de film : rien a comparer
+        if key == "lang" and pv and hv and (pv in hv or hv in pv) \
+                and "FRENCH" in (pv, hv):
+            continue            # "FRENCH" generique contre "VFF" : pas d'info
+        rp, rh = _rank(key, page), _rank(key, have)
+        cmp = "autre"
+        if rp is not None and rh is not None and rp != rh:
+            cmp = "mieux" if rp > rh else "moins"
+        none = "aucun" if key == "hdr" else "-"
+        out.append({"key": key, "label": lbl, "page": pv or none,
+                    "have": hv or none, "cmp": cmp})
+    return out
+
+
 # =====================================================================
 #  ETAT GLOBAL
 # =====================================================================
@@ -2081,7 +2330,8 @@ def fetch_emby_movies(base, key, uid, cb=None):
     Emby renvoie TotalRecordCount des la premiere reponse, la progression est
     donc exacte et non simulee."""
     params = {"Recursive": "true", "IncludeItemTypes": "Movie",
-              "Fields": "Path,MediaSources,ProductionYear,OriginalTitle",
+              "Fields": "Path,MediaSources,ProductionYear,OriginalTitle,"
+                        "ProviderIds",
               "Limit": 300, "StartIndex": 0}
     if uid:
         params["UserId"] = uid
@@ -2124,6 +2374,8 @@ def build_emby_index(movies):
         orig = it.get("OriginalTitle", "") or ""
         nt, _ = split_title_year("%s %s" % (name, year or ""))
         no, _ = split_title_year(orig) if orig else ("", None)
+        pids = {str(k).lower(): str(v) for k, v in
+                (it.get("ProviderIds") or {}).items()}
         srcs = it.get("MediaSources") or [{"Path": it.get("Path", ""),
                                            "Size": 0}]
         for src in srcs:
@@ -2143,8 +2395,20 @@ def build_emby_index(movies):
                 "norm_orig": no, "path": path,
                 "stem_key": norm_key(Path(path).stem) if path else "",
                 "size": int(src.get("Size", 0) or 0),
-                "tier": tier, "res": TIER_LBL[tier]})
-    return build_index(entries)
+                "tier": tier, "res": TIER_LBL[tier],
+                "imdb": pids.get("imdb", "").lower(),
+                "tmdb": pids.get("tmdb", ""),
+                "attrs": emby_source_attrs(path, streams, tier)})
+    idx = build_index(entries)
+    # Acces direct par identifiant : pages IMDb / TMDB ouvertes dans le
+    # navigateur, sans passer par le rapprochement des titres.
+    idx["by_id"] = {}
+    for i, e in enumerate(entries):
+        if e["imdb"]:
+            idx["by_id"].setdefault("imdb:" + e["imdb"], []).append(i)
+        if e["tmdb"]:
+            idx["by_id"].setdefault("tmdb:" + e["tmdb"], []).append(i)
+    return idx
 
 
 def scan_local_dirs(dirs, cb=None):
@@ -2178,7 +2442,9 @@ def scan_local_dirs(dirs, cb=None):
                     "name": f, "year": ny or 0, "norm": nt,
                     "norm_orig": "", "path": full,
                     "stem_key": norm_key(stem), "size": size,
-                    "tier": tier, "res": TIER_LBL[tier]})
+                    "tier": tier, "res": TIER_LBL[tier],
+                    "attrs": release_attrs("%s %s"
+                                           % (Path(root).name, f))})
                 seen += 1
                 if cb and seen % 200 == 0:
                     cb(seen, d)
@@ -3660,6 +3926,622 @@ def build_font():
 
 
 # =====================================================================
+#  VERIFICATION DEPUIS LE NAVIGATEUR
+# =====================================================================
+# Un petit serveur HTTP local (127.0.0.1 uniquement) repond a un script
+# Tampermonkey / Violentmonkey : en survolant un nom de film sur une page,
+# ou en ouvrant une fiche (IMDb, TMDB, tracker...), le navigateur demande
+# "ai-je deja ce film ?" et affiche les differences visibles avec ce qui est
+# deja sur Emby ou sur le disque (VFQ au lieu de VFF, BLURAY au lieu de
+# WEB-DL, 1080p au lieu de 4K...).
+#
+# Securite : ecoute sur la boucle locale seulement, en-tete Host verifie
+# (parade au DNS rebinding), jeton secret exige, et aucune en-tete CORS :
+# une page web ordinaire ne peut pas lire les reponses, seul le script
+# utilisateur (GM_xmlhttpRequest) le peut.
+USERSCRIPT_NAME = "emby_checker.user.js"
+_SRV = {"httpd": None, "port": 0, "hits": 0}
+
+
+def browser_token():
+    tok = str(CFG.get("browser_token") or "")
+    if len(tok) < 16:
+        tok = CFG["browser_token"] = secrets.token_hex(16)
+        save_cfg(CFG)
+    return tok
+
+
+def _versions_of(e, idx):
+    """Toutes les versions du meme film (Emby : une entree par fichier)."""
+    out = [x for x in idx["entries"]
+           if x["name"] == e["name"] and x["year"] == e["year"]
+           and x.get("norm") == e.get("norm")]
+    return out or [e]
+
+
+def _version_json(x, page_attrs, page_size=0):
+    a = x.get("attrs") or release_attrs(x.get("path") or x.get("name", ""))
+    diffs = attrs_diff(page_attrs, a)
+    same_size = bool(page_size and x["size"] and
+                     abs(page_size - x["size"]) * 100.0
+                     / max(page_size, x["size"]) <= 2.0)
+    return {"name": x["name"], "year": x["year"],
+            "file": Path(x["path"]).name if x.get("path") else "",
+            "path": x.get("path", ""), "size": x["size"],
+            "size_txt": fmt_size(x["size"]), "attrs": a, "diffs": diffs,
+            "same_size": same_size}
+
+
+def _lookup_in(idx, q, page_attrs, imdb="", tmdb="", page_size=0):
+    """-> (versions, methode) pour un index (Emby ou dossiers locaux)."""
+    if not idx:
+        return [], ""
+    hits = []
+    for key in (("imdb:" + imdb) if imdb else "", ("tmdb:" + tmdb) if tmdb else ""):
+        if key and idx.get("by_id", {}).get(key):
+            hits = [idx["entries"][i] for i in idx["by_id"][key]]
+            return [_version_json(x, page_attrs, page_size) for x in hits], "ID"
+    if not q:
+        return [], ""
+    e, score, method = match_torrent_to_emby({"name": q, "size": page_size}, idx,
+                                             int(CFG.get("emby_fuzzy", 80)))
+    if not e:
+        return [], ""
+    return [_version_json(x, page_attrs, page_size)
+            for x in _versions_of(e, idx)], method
+
+
+def _summary(versions, page_attrs):
+    """Verdict global, du point de vue de ce qu'on regarde dans la page."""
+    if not versions:
+        return "absent"
+    if any(v["same_size"] for v in versions):
+        return "identique"
+    if not any(page_attrs.get(k) for k in ("lang", "source", "res")):
+        return "present"        # simple titre ou fiche IMDb : rien a comparer
+    if any(not v["diffs"] for v in versions):
+        return "identique"
+    # La page n'apporte un plus que si elle bat TOUTES les versions possedees
+    # sur la resolution ou la source.
+    def better(v):
+        c = {d["key"]: d["cmp"] for d in v["diffs"]}
+        return c.get("res") == "mieux" or (c.get("res") != "moins" and
+                                           c.get("source") == "mieux")
+    if page_attrs.get("res") or page_attrs.get("source"):
+        if all(better(v) for v in versions):
+            return "mieux"
+    return "present"
+
+
+def browser_lookup(q="", imdb="", tmdb="", size=0):
+    """Coeur de la verification : utilisable aussi sans navigateur."""
+    q = re.sub(r"\s+", " ", str(q or "")).strip()[:400]
+    imdb = (re.search(r"tt\d{5,10}", str(imdb or "").lower()) or [""])[0]
+    tmdb = re.sub(r"\D", "", str(tmdb or ""))[:12]
+    page = release_attrs(q) if q else release_attrs("")
+    nt, ny = split_title_year(q) if q else ("", None)
+    eidx, lidx = G.get("emby_idx"), G.get("local_idx")
+    ev, em = _lookup_in(eidx, q, page, imdb, tmdb, size)
+    lv, lm = _lookup_in(lidx, q, page, imdb, tmdb, size)
+    _SRV["hits"] += 1
+    return {"ok": True, "query": q, "title": nt, "year": ny,
+            "page": page, "emby_loaded": bool(eidx),
+            "local_loaded": bool(lidx),
+            "emby": {"status": _summary(ev, page) if eidx else "inconnu",
+                     "method": em, "versions": ev},
+            "local": {"status": _summary(lv, page) if lidx else "inconnu",
+                      "method": lm, "versions": lv}}
+
+
+def lookup_text(res):
+    """Version texte d'une reponse, pour l'essai dans l'application."""
+    st_lbl = {"absent": "ABSENT", "identique": "DEJA PRESENT (identique)",
+              "present": "DEJA PRESENT", "mieux": "DEJA PRESENT, la page a mieux",
+              "inconnu": "non charge"}
+    p = res["page"]
+    L = ["Recherche : %s (%s)" % (res["title"] or "?", res["year"] or "annee ?"),
+         "Page : " + ("  ".join("%s %s" % (lbl, p[k]) for k, lbl in ATTR_LABELS
+                                if p.get(k)) or "(aucune caracteristique lisible)")]
+    for src, lbl in (("emby", "EMBY"), ("local", "DISQUE")):
+        r = res[src]
+        L += ["", "%-7s %s%s" % (lbl, st_lbl.get(r["status"], r["status"]),
+                                 "   [%s]" % r["method"] if r["method"] else "")]
+        for v in r["versions"]:
+            a = v["attrs"]
+            L.append("  - %s  (%s)" % (v["file"] or v["name"], v["size_txt"]))
+            L.append("      " + "  ".join(a[k] for k, _ in ATTR_LABELS
+                                         if a.get(k) and k != "group"))
+            for d in v["diffs"]:
+                L.append("      %-10s page %s  /  possede %s%s"
+                         % (d["label"], d["page"], d["have"],
+                            {"mieux": "   (page mieux)",
+                             "moins": "   (page moins bien)"}.get(d["cmp"], "")))
+    return "\n".join(L)
+
+
+class _CheckHandler(BaseHTTPRequestHandler):
+    server_version = "EmbyCheck/1"
+
+    def log_message(self, fmt, *args):
+        pass                                   # pas de bruit dans la console
+
+    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+        data = body if isinstance(body, bytes) else body.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _json(self, code, obj):
+        self._send(code, json.dumps(obj, ensure_ascii=False))
+
+    def do_GET(self):
+        try:
+            host = (self.headers.get("Host") or "").split(":")[0].lower()
+            if host not in ("127.0.0.1", "localhost"):
+                return self._json(403, {"ok": False, "error": "host"})
+            u = urllib.parse.urlsplit(self.path)
+            qs = dict(urllib.parse.parse_qsl(u.query))
+            if u.path == "/" + USERSCRIPT_NAME:
+                return self._send(200, userscript_source(),
+                                  "text/javascript; charset=utf-8")
+            tok = self.headers.get("X-Emby-Check-Token") or qs.get("token", "")
+            if not secrets.compare_digest(str(tok), browser_token()):
+                return self._json(401, {"ok": False, "error": "jeton"})
+            if u.path == "/ping":
+                ei, li = G.get("emby_idx"), G.get("local_idx")
+                return self._json(200, {
+                    "ok": True, "emby": len(ei["entries"]) if ei else 0,
+                    "local": len(li["entries"]) if li else 0})
+            if u.path == "/check":
+                try:
+                    size = int(qs.get("size", 0) or 0)
+                except ValueError:
+                    size = 0
+                return self._json(200, browser_lookup(
+                    qs.get("q", ""), qs.get("imdb", ""), qs.get("tmdb", ""), size))
+            return self._json(404, {"ok": False, "error": "route"})
+        except Exception as exc:
+            log("serveur navigateur: %s" % traceback.format_exc())
+            try:
+                self._json(500, {"ok": False, "error": str(exc)})
+            except Exception:
+                pass
+
+
+def start_browser_server(port=None):
+    """Demarre le serveur local. -> (ok, message)."""
+    stop_browser_server()
+    port = int(port or CFG.get("browser_port") or 8765)
+    try:
+        httpd = ThreadingHTTPServer(("127.0.0.1", port), _CheckHandler)
+    except OSError as exc:
+        return False, ("Port %d indisponible (%s). Choisis un autre port."
+                       % (port, exc))
+    httpd.daemon_threads = True
+    _SRV.update(httpd=httpd, port=port)
+    threading.Thread(target=httpd.serve_forever, daemon=True,
+                     name="emby-check").start()
+    log("serveur navigateur actif sur 127.0.0.1:%d" % port)
+    return True, "Actif sur 127.0.0.1:%d" % port
+
+
+def stop_browser_server():
+    httpd = _SRV.get("httpd")
+    _SRV["httpd"] = None
+    if httpd:
+        threading.Thread(target=lambda: (httpd.shutdown(), httpd.server_close()),
+                         daemon=True).start()
+
+
+def userscript_source():
+    return (_USERSCRIPT.replace("__PORT__", str(_SRV.get("port") or
+                                                CFG.get("browser_port") or 8765))
+            .replace("__TOKEN__", browser_token()))
+
+
+_USERSCRIPT = r"""// ==UserScript==
+// @name         Emby Checker (Seedbox Dashboard)
+// @namespace    emby-toolbox
+// @version      1.0
+// @description  Survol d'un nom de film ou ouverture d'une fiche : deja sur Emby ? Differences visibles (VFQ/VFF, BLURAY/WEB-DL, 1080p/4K...).
+// @match        *://*/*
+// @exclude      http://127.0.0.1:*/*
+// @exclude      http://localhost:*/*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_registerMenuCommand
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @connect      127.0.0.1
+// @connect      localhost
+// @run-at       document-idle
+// @noframes
+// ==/UserScript==
+// Genere par Seedbox Dashboard : l'adresse et le jeton ci-dessous sont
+// propres a cette installation. Reinstalle le script depuis l'application
+// si tu changes le port.
+(function () {
+  'use strict';
+  const API = 'http://127.0.0.1:__PORT__';
+  const TOKEN = '__TOKEN__';
+  const HOVER_DELAY = 350;
+
+  const opt = {
+    hover: GM_getValue('hover', true),     // survol des liens
+    page: GM_getValue('page', true),       // bandeau a l'ouverture d'une fiche
+    absent: GM_getValue('absent', true),   // bandeau aussi quand le film manque
+    select: GM_getValue('select', true),   // texte selectionne
+  };
+
+  // ---------------------------------------------------------------- reseau
+  const cache = new Map();
+  function ask(params) {
+    const clean = {};
+    for (const k in params) if (params[k]) clean[k] = params[k];
+    const qs = new URLSearchParams(clean).toString();
+    if (cache.has(qs)) return cache.get(qs);
+    const p = new Promise((resolve) => {
+      GM_xmlhttpRequest({
+        method: 'GET', url: API + '/check?' + qs, timeout: 8000,
+        headers: { 'X-Emby-Check-Token': TOKEN },
+        onload: (r) => {
+          if (r.status === 401) return resolve({ ok: false, error: 'jeton' });
+          try { resolve(JSON.parse(r.responseText)); }
+          catch (e) { resolve({ ok: false, error: 'reponse' }); }
+        },
+        onerror: () => resolve({ ok: false, error: 'hors-ligne' }),
+        ontimeout: () => resolve({ ok: false, error: 'hors-ligne' }),
+      });
+    });
+    cache.set(qs, p);
+    p.then((r) => { if (!r.ok) cache.delete(qs); });   // reessayer plus tard
+    return p;
+  }
+
+  // ------------------------------------------------------------- detection
+  const RE_YEAR = /(^|[^0-9])(19[0-9]{2}|20[0-9]{2})([^0-9]|$)/;
+  const RE_TAG = /(^|[^a-z0-9])(2160p|1080p|720p|4k|uhd|blu-?ray|bdrip|web-?dl|webrip|hdlight|remux|x26[45]|h\.?26[45]|hevc|av1|multi|vff|vfq|vf2|vostfr|truefrench|french)([^a-z0-9]|$)/i;
+  function looksLikeMovie(t) {
+    return !!t && t.length >= 4 && t.length <= 300 &&
+      (RE_YEAR.test(t) || RE_TAG.test(t));
+  }
+  const squash = (t) => (t || '').replace(/\s+/g, ' ').trim();
+
+  function textOf(el) {
+    let t = squash(el.innerText || el.textContent);
+    const alt = squash(el.getAttribute('title') || el.getAttribute('data-title') ||
+                       el.getAttribute('aria-label'));
+    if (alt && (alt.length > t.length || /(…|\.\.\.)$/.test(t))) t = alt;
+    return t.length > 300 ? '' : t;
+  }
+
+  // Taille affichee sur la meme ligne (tableaux de trackers) : permet de
+  // reconnaitre un fichier identique a celui deja possede.
+  const UNIT = { o: 0, b: 0, k: 1, m: 2, g: 3, t: 4 };
+  function sizeNear(el) {
+    const row = el.closest('tr, li, article');
+    if (!row) return 0;
+    const m = squash(row.innerText).match(/(\d+(?:[.,]\d+)?)\s*([KMGT])i?[oB]\b/i);
+    if (!m) return 0;
+    return Math.round(parseFloat(m[1].replace(',', '.')) *
+                      Math.pow(1024, UNIT[m[2].toLowerCase()]));
+  }
+
+  // ----------------------------------------------------------------- rendu
+  const STATUS = {
+    absent: ['Pas sur Emby', '#9aa0aa', '✖'],
+    identique: ['Déjà sur Emby (même version)', '#2ecc71', '✔'],
+    present: ['Déjà sur Emby (autre version)', '#6ec896', '✔'],
+    mieux: ['Sur Emby, mais cette release est meilleure', '#eb8c14', '▲'],
+    inconnu: ['Bibliothèque Emby non chargée', '#9aa0aa', '?'],
+  };
+  const LSTATUS = {
+    absent: 'Pas sur le disque', identique: 'Sur le disque (même version)',
+    present: 'Sur le disque (autre version)',
+    mieux: 'Sur le disque, mais cette release est meilleure',
+  };
+  const KEYS = [['lang', 'Langue'], ['source', 'Source'], ['res', 'Résolution'],
+                ['codec', 'Codec'], ['hdr', 'HDR'], ['audio', 'Audio'],
+                ['edition', 'Édition'], ['group', 'Équipe']];
+
+  function h(tag, css, text) {
+    const e = document.createElement(tag);
+    if (css) e.className = css;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function attrLine(a) {
+    return KEYS.filter(([k]) => a[k] && k !== 'group').map(([k]) => a[k]).join(' · ');
+  }
+
+  function versionsBlock(box, versions, where) {
+    for (const v of versions) {
+      const d = box.appendChild(h('div', 'ver'));
+      d.appendChild(h('div', 'file', v.file || v.name));
+      d.appendChild(h('div', 'attrs', [attrLine(v.attrs), v.size_txt]
+        .filter((x) => x && x !== '-').join(' · ')));
+      if (v.same_size) d.appendChild(h('div', 'diff same', 'Même taille que la release'));
+      for (const df of v.diffs) {
+        const row = d.appendChild(h('div', 'diff ' + df.cmp));
+        const arrow = df.cmp === 'mieux' ? '▲ ' : df.cmp === 'moins' ? '▼ ' : '≠ ';
+        row.textContent = arrow + df.label + ' : ' + df.page + ' ici, ' + df.have + ' ' + where;
+      }
+      if (!v.diffs.length && !v.same_size) d.appendChild(h('div', 'diff same', 'Aucune différence visible'));
+    }
+  }
+
+  function render(res, opts) {
+    const root = h('div', 'card');
+    if (opts && opts.close) {
+      const x = root.appendChild(h('span', 'close', '×'));
+      x.title = 'Fermer';
+      x.addEventListener('click', opts.close);
+    }
+    if (!res || !res.ok) {
+      const msg = res && res.error === 'jeton'
+        ? 'Jeton refusé : réinstalle le script depuis Seedbox Dashboard.'
+        : 'Seedbox Dashboard injoignable (lancé ? port __PORT__)';
+      root.appendChild(h('div', 'head grey', msg));
+      return root;
+    }
+    const e = res.emby, l = res.local;
+    const [lbl, col, ico] = STATUS[e.status] || STATUS.inconnu;
+    const head = root.appendChild(h('div', 'head', ico + ' ' + lbl));
+    head.style.color = col;
+    const cap = (t) => (t || '').replace(/(^|\s)\S/g, (c) => c.toUpperCase());
+    const tt = (e.versions[0] && e.versions[0].name) || cap(res.title);
+    const yr = (e.versions[0] && e.versions[0].year) || res.year;
+    if (tt) root.appendChild(h('div', 'title', tt + (yr ? ' (' + yr + ')' : '')));
+    const pl = attrLine(res.page);
+    if (pl) root.appendChild(h('div', 'page', 'Cette release : ' + pl));
+    versionsBlock(root, e.versions, 'sur Emby');
+    if (res.local_loaded && l.status !== 'absent') {
+      root.appendChild(h('div', 'sub', LSTATUS[l.status] || ''));
+      versionsBlock(root, l.versions, 'sur le disque');
+    }
+    if (e.versions.concat(l.versions).some((v) => v.diffs.some((d) => d.cmp !== 'autre')))
+      root.appendChild(h('div', 'legend', '\u25b2 cette release a mieux \u00b7 \u25bc tu as d\u00e9j\u00e0 mieux'));
+    return root;
+  }
+
+  // ------------------------------------------------- calque (shadow DOM)
+  const host = document.createElement('div');
+  host.style.cssText = 'all:initial;position:fixed;z-index:2147483647;top:0;left:0;';
+  const shadow = host.attachShadow({ mode: 'closed' });
+  const style = document.createElement('style');
+  style.textContent = `
+    .card{font:13px/1.4 system-ui,Segoe UI,Arial,sans-serif;color:#e4e6ec;background:#1e2028f2;
+      border:1px solid #3a3d4a;border-radius:8px;padding:9px 12px;max-width:460px;
+      box-shadow:0 6px 24px #0008;position:relative}
+    .head{font-weight:600;font-size:14px;padding-right:16px}
+    .grey{color:#9aa0aa}
+    .title{color:#fff;margin-top:2px}
+    .page{color:#9fb4d8;font-size:12px;margin-top:4px}
+    .sub{margin-top:8px;font-weight:600;color:#9fb4d8}
+    .ver{margin-top:6px;padding:5px 7px;background:#ffffff0d;border-radius:5px}
+    .file{font-size:11px;color:#a8acb8;word-break:break-all}
+    .attrs{color:#e4e6ec}
+    .diff{font-size:12px;margin-top:1px}
+    .diff.mieux{color:#eb8c14} .diff.moins{color:#6ec896} .diff.autre{color:#e6c35c}
+    .diff.same{color:#2ecc71}
+    .legend{font-size:11px;color:#7d8290;margin-top:6px}
+    .close{position:absolute;top:4px;right:8px;cursor:pointer;color:#9aa0aa;font-size:16px}
+    .tip{position:fixed;pointer-events:none}
+    .badge{position:fixed;top:12px;right:12px;pointer-events:auto}
+  `;
+  shadow.appendChild(style);
+  const tip = shadow.appendChild(h('div', 'tip'));
+  const badge = shadow.appendChild(h('div', 'badge'));
+  tip.style.display = badge.style.display = 'none';
+  (document.body || document.documentElement).appendChild(host);
+
+  let mouse = { x: 0, y: 0 };
+  function placeTip() {
+    const r = tip.getBoundingClientRect();
+    let x = mouse.x + 16, y = mouse.y + 18;
+    if (x + r.width > innerWidth - 8) x = Math.max(8, mouse.x - r.width - 16);
+    if (y + r.height > innerHeight - 8) y = Math.max(8, mouse.y - r.height - 12);
+    tip.style.left = x + 'px';
+    tip.style.top = y + 'px';
+  }
+  function showTip(node) {
+    tip.replaceChildren(node);
+    tip.style.display = 'block';
+    placeTip();
+  }
+  function hideTip() { tip.style.display = 'none'; tip.replaceChildren(); }
+
+  // ----------------------------------------------------------------- survol
+  let cur = null, timer = null;
+  document.addEventListener('mousemove', (ev) => {
+    mouse = { x: ev.clientX, y: ev.clientY };
+    if (tip.style.display === 'block') placeTip();
+  }, { passive: true, capture: true });
+
+  document.addEventListener('mouseover', (ev) => {
+    if (!opt.hover || !ev.target.closest) return;
+    const el = ev.target.closest('a, [title], [data-title]') || (ev.altKey ? ev.target : null);
+    if (!el || el === cur) return;
+    const text = textOf(el);
+    if (!text || !(ev.altKey || looksLikeMovie(text))) return;
+    cur = el;
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const res = await ask({ q: text, size: sizeNear(el) });
+      if (cur === el) showTip(render(res));
+    }, HOVER_DELAY);
+  }, true);
+
+  document.addEventListener('mouseout', (ev) => {
+    if (cur && !cur.contains(ev.relatedTarget)) {
+      cur = null;
+      clearTimeout(timer);
+      hideTip();
+    }
+  }, true);
+
+  // ---------------------------------------------------- texte selectionne
+  document.addEventListener('mouseup', () => {
+    if (!opt.select) return;
+    setTimeout(async () => {
+      const t = squash(String(getSelection() || ''));
+      if (t.length < 3 || t.length > 200) return;
+      const res = await ask({ q: t });
+      if (squash(String(getSelection() || '')) !== t) return;
+      // Une selection quelconque n'affiche rien, sauf si le film est trouve.
+      if (!looksLikeMovie(t) && !(res.ok && res.emby.versions.length)) return;
+      showTip(render(res));
+      setTimeout(hideTip, 6000);
+    }, 50);
+  }, true);
+  document.addEventListener('mousedown', () => { if (!cur) hideTip(); }, true);
+
+  // --------------------------------------------- ouverture d'une fiche
+  function pageIds() {
+    const u = location.href;
+    let m = u.match(/imdb\.com\/(?:[a-z-]+\/)?title\/(tt\d+)/i);
+    if (m) return { imdb: m[1] };
+    m = u.match(/themoviedb\.org\/movie\/(\d+)/i);
+    if (m) return { tmdb: m[1] };
+    // Fiche de tracker / forum : un seul film IMDb cite dans la page.
+    const ids = new Set();
+    for (const a of document.querySelectorAll('a[href*="imdb.com/title/tt"]')) {
+      const t = (a.href.match(/tt\d+/) || [])[0];
+      if (t) ids.add(t);
+    }
+    if (ids.size === 1) return { imdb: [...ids][0] };
+    return null;
+  }
+
+  function pageTexts() {
+    const out = [];
+    const h1 = document.querySelector('h1');
+    if (h1) out.push(squash(h1.innerText));
+    const og = document.querySelector('meta[property="og:title"]');
+    if (og) out.push(squash(og.content));
+    out.push(squash(document.title));
+    return out.filter(Boolean);
+  }
+
+  let badgeTimer = null;
+  function closeBadge() { badge.style.display = 'none'; badge.replaceChildren(); }
+  async function checkPage() {
+    if (!opt.page) return;
+    const ids = pageIds();
+    const texts = pageTexts();
+    const q = texts.find(looksLikeMovie) || (ids ? texts[0] : '');
+    if (!ids && !q) return;
+    const res = await ask(Object.assign({ q: q }, ids || {}));
+    if (!res.ok && !ids) return;                  // pas de bruit hors fiches
+    const st = res.ok ? res.emby.status : '';
+    if (st === 'absent' && !opt.absent) return;
+    if (st === 'inconnu' && !ids) return;
+    badge.replaceChildren(render(res, { close: closeBadge }));
+    badge.style.display = 'block';
+    clearTimeout(badgeTimer);
+    if (st === 'absent') badgeTimer = setTimeout(closeBadge, 8000);
+  }
+
+  let lastUrl = location.href;
+  setTimeout(checkPage, 600);
+  setInterval(() => {                            // sites a navigation interne
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      closeBadge();
+      setTimeout(checkPage, 900);
+    }
+  }, 1000);
+
+  // ------------------------------------------------------------- menu
+  function toggle(key, lbl) {
+    GM_registerMenuCommand((opt[key] ? '☑ ' : '☐ ') + lbl, () => {
+      opt[key] = !opt[key];
+      GM_setValue(key, opt[key]);
+      alert(lbl + ' : ' + (opt[key] ? 'activé' : 'désactivé') +
+            '\n(effet complet au rechargement de la page)');
+    });
+  }
+  GM_registerMenuCommand('Vérifier un titre…', async () => {
+    const t = prompt('Nom du film ou de la release :', String(getSelection() || ''));
+    if (!t) return;
+    const res = await ask({ q: t });
+    badge.replaceChildren(render(res, { close: closeBadge }));
+    badge.style.display = 'block';
+  });
+  GM_registerMenuCommand('Vérifier cette page', () => { cache.clear(); checkPage(); });
+  toggle('hover', 'Survol des liens');
+  toggle('page', 'Bandeau à l’ouverture d’une fiche');
+  toggle('absent', 'Bandeau aussi pour un film absent');
+  toggle('select', 'Vérifier le texte sélectionné');
+})();
+"""
+
+
+def _browser_lbl(msg, ok=True):
+    if dpg.does_item_exist("sb_br_lbl"):
+        dpg.set_value("sb_br_lbl", msg)
+        dpg.configure_item("sb_br_lbl",
+                           color=(46, 204, 113) if ok else (215, 75, 90))
+
+
+def apply_browser_server(sender=None, app_data=None, user_data=None):
+    """(Re)demarre ou arrete le serveur selon la case et le port saisis."""
+    CFG["browser_enabled"] = bool(gv("sb_br_on", CFG["browser_enabled"]))
+    try:
+        CFG["browser_port"] = max(1024, min(65535, int(
+            gv("sb_br_port", CFG["browser_port"]) or 8765)))
+    except (TypeError, ValueError):
+        CFG["browser_port"] = 8765
+    save_cfg(CFG)
+    if not CFG["browser_enabled"]:
+        stop_browser_server()
+        _browser_lbl("Arrete", ok=False)
+        return
+    ok, msg = start_browser_server(CFG["browser_port"])
+    _browser_lbl(msg, ok)
+    if not ok:
+        add_log("Verification navigateur : " + msg, (215, 75, 90))
+
+
+def install_userscript(sender=None, app_data=None, user_data=None):
+    """Ouvre l'adresse du script : Tampermonkey / Violentmonkey proposent
+    alors de l'installer. Copie aussi le fichier a cote de l'application."""
+    if not _SRV.get("httpd"):
+        modal("Serveur arrete",
+              "Active d'abord la verification navigateur (case 'Activer').")
+        return
+    try:
+        (APP_DIR / USERSCRIPT_NAME).write_text(userscript_source(),
+                                               encoding="utf-8")
+    except Exception as exc:
+        log("userscript: %s" % exc)
+    url = "http://127.0.0.1:%d/%s" % (_SRV["port"], USERSCRIPT_NAME)
+    webbrowser.open(url)
+    add_log("Script navigateur ouvert : %s  (copie : %s)"
+            % (url, APP_DIR / USERSCRIPT_NAME), (120, 200, 255))
+
+
+def new_browser_token(sender=None, app_data=None, user_data=None):
+    CFG["browser_token"] = ""
+    browser_token()
+    _browser_lbl("Nouveau jeton : reinstalle le script dans le navigateur",
+                 ok=True)
+
+
+def test_browser_lookup(sender=None, app_data=None, user_data=None):
+    q = (gv("sb_br_test") or "").strip()
+    if not q:
+        return
+    try:
+        txt = lookup_text(browser_lookup(q))
+    except Exception as exc:
+        txt = "Erreur : %s" % exc
+    dpg.set_value("sb_br_out", txt)
+
+
+# =====================================================================
 #  INTERFACE
 # =====================================================================
 def build_ui():
@@ -3800,6 +4682,50 @@ def build_ui():
                 dpg.add_text("", tag="sb_dirlbl", color=(46, 204, 113))
             with dpg.child_window(tag="sb_dirlist", height=80, border=True):
                 pass
+
+            dpg.add_separator()
+            dpg.add_text("VERIFICATION DEPUIS LE NAVIGATEUR", color=(120, 200, 255))
+            dpg.add_text("En survolant un nom de film sur une page web (ou en "
+                         "ouvrant sa fiche IMDb, TMDB, tracker...), le navigateur "
+                         "indique s'il est deja sur Emby ou sur le disque, et les "
+                         "differences visibles : VFQ au lieu de VFF, BLURAY au "
+                         "lieu de WEB-DL, 1080p au lieu de 4K... Necessite "
+                         "l'extension Tampermonkey ou Violentmonkey.",
+                         color=(150, 150, 175), wrap=1100)
+            with dpg.group(horizontal=True):
+                dpg.add_checkbox(label="Activer", tag="sb_br_on",
+                                 default_value=bool(CFG["browser_enabled"]),
+                                 callback=apply_browser_server)
+                dpg.add_text("Port")
+                dpg.add_input_int(tag="sb_br_port", width=110, min_value=1024,
+                                  max_value=65535, step=0,
+                                  default_value=int(CFG["browser_port"]),
+                                  on_enter=True, callback=apply_browser_server)
+                b = dpg.add_button(label="Installer le script navigateur",
+                                   width=250, callback=install_userscript)
+                dpg.bind_item_theme(b, "sb_th_ok")
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text("Ouvre le script dans le navigateur par "
+                                 "defaut : Tampermonkey propose de l'installer.\n"
+                                 "Le script ne parle qu'a cette application "
+                                 "(127.0.0.1), avec un jeton secret.\n"
+                                 "Dans la page : survol d'un lien = infobulle ; "
+                                 "Alt + survol = n'importe quel texte ; "
+                                 "selection d'un titre = verification ; menu "
+                                 "de l'extension = options.", wrap=420)
+                dpg.add_button(label="Nouveau jeton", width=130,
+                               callback=new_browser_token)
+                dpg.add_text("", tag="sb_br_lbl", color=(46, 204, 113))
+            with dpg.group(horizontal=True):
+                dpg.add_text("Essai")
+                dpg.add_input_text(tag="sb_br_test", width=560, on_enter=True,
+                                   hint="Dune.Part.Two.2024.MULTI.VFQ.2160p."
+                                        "WEB-DL.x265-GRP",
+                                   callback=test_browser_lookup)
+                dpg.add_button(label="Verifier", width=100,
+                               callback=test_browser_lookup)
+            dpg.add_input_text(tag="sb_br_out", multiline=True, readonly=True,
+                               width=-1, height=110, default_value="")
 
         dpg.add_progress_bar(tag="sb_pb", default_value=0.0, width=-1,
                              overlay="", show=False)
@@ -4066,6 +4992,8 @@ def main():
         ui(do_connect)          # reconnexion automatique au lancement
     if EMB["url"] and EMB["api_key"]:
         ui(do_load_emby)
+    if CFG.get("browser_enabled"):
+        ui(apply_browser_server)
 
     while dpg.is_dearpygui_running():
         drain_ui_queue()
@@ -4074,6 +5002,7 @@ def main():
 
     _stop_refresh.set()
     _stop_watch.set()
+    stop_browser_server()
     persist()
     dpg.destroy_context()
 

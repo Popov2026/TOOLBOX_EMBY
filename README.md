@@ -102,6 +102,29 @@ sans redémarrer. Le choix est mémorisé.
 - Journal d'activité du serveur.
 - Actions à distance : **pause / reprise / arrêt** et **message à l'écran**.
 
+### Seedbox Dashboard : « ai-je déjà ce film ? » depuis le navigateur
+Script à part, `seedbox_dashboard_dpg.pyw` (pilotage de la seedbox, croisement
+avec Emby). Il embarque un petit serveur local (127.0.0.1, jeton secret) et un
+script pour **Tampermonkey / Violentmonkey** :
+- **survol d'un nom de film** (lien d'un tracker, d'un forum…) : infobulle
+  « Pas sur Emby » / « Déjà sur Emby » / « Sur Emby, mais cette release est
+  meilleure » ;
+- **ouverture d'une fiche** (IMDb, TMDB, page de release d'un tracker) :
+  bandeau en haut à droite, avec reconnaissance directe par identifiant IMDb /
+  TMDB ;
+- **différences visibles** avec chaque version possédée : langue (**VFQ au lieu
+  de VFF**, MULTI, VOSTFR…), source (**BLURAY au lieu de WEB-DL**, REMUX,
+  HDLight…), résolution, codec, HDR / Dolby Vision, audio, édition, équipe.
+  ▲ = la release de la page a mieux, ▼ = tu as déjà mieux. Les versions Emby
+  sont décrites à partir du nom du fichier **et** des pistes réellement lues
+  par Emby ;
+- Alt + survol : n'importe quel texte ; sélection d'un titre : vérification.
+
+Mise en route : *Comparaison avec Emby → Vérification depuis le navigateur*,
+cocher **Activer**, **Charger Emby**, puis **Installer le script navigateur**
+(Tampermonkey propose l'installation). Le champ **Essai** permet de tester un
+nom sans navigateur.
+
 ### Ce dont le script a besoin
 
 #### 1. Système
@@ -260,6 +283,17 @@ restart. The choice is remembered.
   detection.
 - Server activity log.
 - Remote actions: **pause / resume / stop** and **on-screen message**.
+
+### Seedbox Dashboard: "do I already have this movie?" from the browser
+Separate script, `seedbox_dashboard_dpg.pyw`. It runs a small local server
+(127.0.0.1, secret token) used by a **Tampermonkey / Violentmonkey** script:
+hover a movie / release name, or open a movie page (IMDb, TMDB, tracker), and
+it tells you whether the movie is already on Emby (or on disk) and lists the
+visible differences with each version you own: language (**VFQ instead of
+VFF**…), source (**BLURAY instead of WEB-DL**…), resolution, codec, HDR,
+audio, edition, group. Setup: *Comparaison avec Emby → Vérification depuis le
+navigateur*, tick **Activer**, load Emby, then **Installer le script
+navigateur**.
 
 ### What the script needs
 

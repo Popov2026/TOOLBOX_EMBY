@@ -3,6 +3,11 @@
 ## 2026-10
 
 ### Français
+- **Seedbox Dashboard – vérification depuis le navigateur :** serveur local
+  (127.0.0.1, jeton) + script Tampermonkey. Au survol d'un nom de film ou à
+  l'ouverture d'une fiche (IMDb, TMDB, tracker), indique si le film est déjà
+  sur Emby / sur le disque et les différences visibles (VFQ au lieu de VFF,
+  BLURAY au lieu de WEB-DL, 1080p au lieu de 4K, HDR, audio, édition…).
 - **Doublons – suppression :** fin des faux « timeout ». Le délai d'attente de la
   réponse d'Emby passe de 15 s à 180 s. S'il est quand même dépassé, l'outil
   vérifie pendant 90 s auprès d'Emby que l'élément a bien disparu avant de
@@ -42,6 +47,10 @@
   corrigés.
 
 ### English
+- **Seedbox Dashboard – browser check:** local server (127.0.0.1, token) +
+  Tampermonkey script. Hovering a movie name or opening a movie page (IMDb,
+  TMDB, tracker) tells whether the movie is already on Emby / on disk and the
+  visible differences (VFQ vs VFF, BLURAY vs WEB-DL, 1080p vs 4K, HDR…).
 - **Duplicates – deletion:** no more false "timeout". The wait for Emby's reply
   goes from 15 s to 180 s. If it is still exceeded, the tool checks with Emby
   for 90 s that the item is really gone before reporting an error. Animated
