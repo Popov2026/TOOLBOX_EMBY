@@ -210,7 +210,7 @@ _shared_cache = None
 
 def _shared_defaults():
     return {"url": "http://localhost:8096", "api_key": "", "user_id": "",
-            "nas_prefix": "/volume1", "nas_unc": r"\\\\192.168.1.x",
+            "nas_prefix": "/volume1", "nas_unc": "",
             "player": "", "omdb_key": "", "tmdb_key": "", "provider": "tmdb",
             "lang": "FR"}
 
@@ -296,7 +296,7 @@ if not CONFIG_FILE.exists() and _sib.exists():
 def load_config():
     cfg = configparser.ConfigParser()
     cfg["emby"] = {"url":"http://localhost:8096","api_key":"","user_id":"",
-                   "nas_prefix":"/volume1","nas_unc":r"\\192.168.1.x","player":""}
+                   "nas_prefix":"/volume1","nas_unc":"","player":""}
     if CONFIG_FILE.exists():
         cfg.read(CONFIG_FILE, encoding="utf-8")
     if cfg.has_section("emby"):
@@ -546,12 +546,13 @@ def fetch_genres_from_server(base, key, uid, movie_lib_ids=None):
     return sorted(genres, key=str.casefold)
 
 
-def fetch_by_genres(base, key, uid, genres, parent_ids, cb):
+def fetch_by_genres(base, key, uid, genres, parent_ids, cb, names=None):
     """
     Récupère les films correspondant à AU MOINS UN des genres listés.
     genres    : liste de chaînes (valeurs API Emby, ex. ["Animation","Horror"])
     parent_ids: liste d'IDs de médiathèques (None = toutes)
-    cb        : callback(fetched, total, page)
+    cb        : callback(fetched, total, page, scope="")
+    names     : {id: nom} des médiathèques, pour afficher le nom en cours
     """
     base_params = {
         "Recursive":         "true",
@@ -566,9 +567,10 @@ def fetch_by_genres(base, key, uid, genres, parent_ids, cb):
     scopes = parent_ids if parent_ids else [None]
     all_items, seen_ids = [], set()
 
-    for pid in scopes:
+    for n_scope, pid in enumerate(scopes, 1):
         params = dict(base_params); params["StartIndex"] = 0
         if pid: params["ParentId"] = pid
+        scope = _scope_label(pid, n_scope, len(scopes), names)
         page = 0
         while True:
             data  = emby_get(base, key, "/Items", dict(params))
@@ -578,11 +580,21 @@ def fetch_by_genres(base, key, uid, genres, parent_ids, cb):
                     seen_ids.add(it.get("Id")); all_items.append(it)
             total = data.get("TotalRecordCount", 0)
             page += 1
-            cb(len(all_items), len(all_items) + max(0, total - len(items)), page)
+            cb(len(all_items), len(all_items) + max(0, total - len(items)), page,
+               scope=scope)
             if len(items) < params["Limit"] or not items: break
             params["StartIndex"] += len(items)
 
     return all_items
+
+
+def _scope_label(pid, n, total, names):
+    """'Médiathèque 2/3 : Films 4K' (ou '' pour un scan global)."""
+    if not pid:
+        return ""
+    nm = (names or {}).get(pid) or pid
+    return (gx(f"Médiathèque {n}/{total} : {nm}", f"Library {n}/{total}: {nm}")
+            if total > 1 else gx(f"Médiathèque : {nm}", f"Library: {nm}"))
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1062,16 +1074,18 @@ def start_scan():
                         f"Searching [{genres_label}] in {scope_msg}..."), 0.10)
 
             t0 = time.time()
-            def on_page(fetched, total, page):
+            def on_page(fetched, total, page, scope=""):
                 pct = 0.10 + 0.80 * (fetched / max(total, 1))
                 el  = time.time() - t0; rate = fetched / el if el > 0 else 0
                 eta = (total - fetched) / rate if rate > 0 else 0
-                msg = (f"Page {page} - {fetched} films ({rate:.0f}/s)"
+                msg = ((scope + "  -  " if scope else "")
+                       + f"Page {page} - {fetched} films ({rate:.0f}/s)"
                        + (f" ~{eta:.0f}s" if eta > 2 else ""))
                 set_step(msg, pct)
 
+            names = {l.get("id"): l.get("name") for l in (G.get("libraries") or [])}
             movies = fetch_by_genres(p["url"], p["key"], p["uid"],
-                                     genres_api, parent_ids, on_page)
+                                     genres_api, parent_ids, on_page, names)
 
             set_step(gx(f"{len(movies)} films - construction de la liste...",
                         f"{len(movies)} movies - building the list..."), 0.92)
@@ -4830,7 +4844,7 @@ def _init_doublons():
     def load_config():
         cfg = configparser.ConfigParser()
         cfg["emby"] = {"url":"http://localhost:8096","api_key":"","user_id":"",
-                       "nas_prefix":"/volume1","nas_unc":r"\\192.168.1.x","player":""}
+                       "nas_prefix":"/volume1","nas_unc":"","player":""}
         if CONFIG_FILE.exists():
             cfg.read(CONFIG_FILE, encoding="utf-8")
         if cfg.has_section("emby"):
@@ -4981,7 +4995,7 @@ def _init_doublons():
         with urllib.request.urlopen(req, timeout=15) as r:
             return r.status
 
-    def fetch_movies(base, key, uid, cb, parent_ids=None):
+    def fetch_movies(base, key, uid, cb, parent_ids=None, names=None):
         """
         parent_ids : liste d'IDs de médiathèques à scanner.
         Si None ou vide → scan global (comportement original).
@@ -4996,10 +5010,11 @@ def _init_doublons():
         scopes = parent_ids if parent_ids else [None]
         all_items, seen_ids = [], set()
 
-        for pid in scopes:
+        for n_scope, pid in enumerate(scopes, 1):
             if _cancel_scan.is_set(): break
             params = dict(base_params); params["StartIndex"] = 0
             if pid: params["ParentId"] = pid
+            scope = _scope_label(pid, n_scope, len(scopes), names)
             page = 0
             while True:
                 if _cancel_scan.is_set(): break
@@ -5011,7 +5026,8 @@ def _init_doublons():
                 total_scope = data.get("TotalRecordCount",0)
                 fetched_in_scope = params["StartIndex"] + len(items)
                 remaining = max(0, total_scope - fetched_in_scope)
-                page += 1; cb(len(all_items), len(all_items) + remaining, page)
+                page += 1; cb(len(all_items), len(all_items) + remaining, page,
+                              scope=scope)
                 if len(items)<params["Limit"] or not items: break
                 params["StartIndex"] += len(items)
 
@@ -6985,15 +7001,17 @@ def _init_doublons():
                 set_step(f"OK - recuperation films ({scope_msg})...",0.05)
                 t0=time.time()
 
-                def on_page(fetched,total,page):
+                def on_page(fetched,total,page,scope=""):
                     pct=0.05+0.55*(fetched/max(total,1))
                     el=time.time()-t0; rate=fetched/el if el>0 else 0
                     eta=(total-fetched)/rate if rate>0 else 0
-                    msg=(f"Page {page} - {fetched} films ({rate:.0f}/s)"
+                    msg=((scope+"  -  " if scope else "")
+                         +f"Page {page} - {fetched} films ({rate:.0f}/s)"
                          +(f" ~{eta:.0f}s" if eta>2 else ""))
                     set_step(msg,pct)
 
-                movies=fetch_movies(p["url"],p["key"],p["uid"],on_page,parent_ids)
+                names={l.get("id"):l.get("name") for l in (G.get("libraries") or [])}
+                movies=fetch_movies(p["url"],p["key"],p["uid"],on_page,parent_ids,names)
                 set_step(f"{len(movies)} films - analyse...",0.62)
 
                 def on_step(idx,total,title):
@@ -7370,7 +7388,8 @@ def migrate_into_shared(app, DBL):
         if not v or k in ("lang", "provider") or v == dflt.get(k) \
                 or "192.168.1.x" in str(v):      # valeurs d'exemple
             continue
-        if not cur.get(k) or cur.get(k) == dflt.get(k):
+        if not cur.get(k) or cur.get(k) == dflt.get(k) \
+                or "192.168.1.x" in str(cur.get(k)):   # exemple resté en place
             fill[k] = v
     if fill:
         save_shared_creds(**fill)

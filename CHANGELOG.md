@@ -44,6 +44,12 @@
   outils) est relu à chaque lancement : tout champ vide ou par défaut de
   `emby_toolbox_creds.ini` en est complété, sans rien écraser. Avant, il était
   ignoré dès que `emby_toolbox_creds.ini` existait (bandeau vide).
+- **Chargement des médiathèques :** la progression affiche le nom de la
+  médiathèque en cours (« Médiathèque 2/3 : Films 4K – Page 1 – 1 250 films »)
+  dans les Doublons et l'Explorateur de genres.
+- **Chemin UNC :** la valeur d'exemple `\\192.168.1.x` n'est plus mise dans le
+  champ (seulement affichée en grisé) ; si elle y était restée, elle est
+  remplacée par la valeur de l'ancien `.ini`.
 - **Version Windows :** workflow GitHub Actions (build PyInstaller, auto-test,
   signature Azure Artifact Signing si configurée, release sur tag `v*`).
   Numéro de version affiché dans le titre de la fenêtre.
@@ -87,6 +93,12 @@
   `.ini` files) is read at every start: any empty or default field of
   `emby_toolbox_creds.ini` is filled from it, nothing is overwritten. Before,
   it was ignored as soon as `emby_toolbox_creds.ini` existed (empty top bar).
+- **Library loading:** progress shows the name of the library being read
+  ("Library 2/3: Films 4K – Page 1 – 1,250 movies") in Duplicates and the Genre
+  explorer.
+- **UNC path:** the example value `\\192.168.1.x` is no longer put in the field
+  (only shown greyed out); if it was left there, it is replaced by the value
+  from the old `.ini`.
 - **Windows build:** GitHub Actions workflow (PyInstaller build, self-test,
   Azure Artifact Signing when configured, release on `v*` tag). Version number
   shown in the window title.
