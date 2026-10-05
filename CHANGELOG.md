@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-10
+## 2026.10.0
 
 ### Français
 - **Doublons – suppression :** fin des faux « timeout ». Le délai d'attente de la
@@ -40,6 +40,9 @@
 - **IDFinder – auto-correction :** analyse sans écriture puis récapitulatif à
   cases à cocher (sûrs cochés, douteux décochés) ; seuls les films cochés sont
   corrigés.
+- **Version Windows :** workflow GitHub Actions (build PyInstaller, auto-test,
+  signature Azure Artifact Signing si configurée, release sur tag `v*`).
+  Numéro de version affiché dans le titre de la fenêtre.
 
 ### English
 - **Duplicates – deletion:** no more false "timeout". The wait for Emby's reply
@@ -76,3 +79,6 @@
   comparison with the Emby record. TMDB details saved in the database.
 - **IDFinder – auto-fix:** no-write analysis then a checkbox summary (safe ones
   ticked, doubtful ones unticked); only ticked movies are fixed.
+- **Windows build:** GitHub Actions workflow (PyInstaller build, self-test,
+  Azure Artifact Signing when configured, release on `v*` tag). Version number
+  shown in the window title.

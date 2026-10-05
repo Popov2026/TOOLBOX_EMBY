@@ -28,6 +28,8 @@ Lignes de commande utiles :
     python emby_toolbox_dpg.pyw --mkv-selftest   tests du moteur de renommage
 """
 
+APP_VERSION = "2026.10.0"
+
 import dearpygui.dearpygui as dpg
 import threading, queue, json, os, sys, subprocess, time, socket
 import re, configparser, csv, difflib, base64, traceback, webbrowser
@@ -55,7 +57,13 @@ except Exception:
 # =====================================================================
 #  Chiffrement partage (clef unique : emby_secret.key)
 # =====================================================================
-_SECRET_KEYFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+def _exe_or_script_dir():
+    """Dossier de l'exe (version compilee PyInstaller) ou du script."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+_SECRET_KEYFILE = os.path.join(_exe_or_script_dir(),
                                "emby_secret.key")
 
 try:
@@ -246,7 +254,7 @@ def save_shared_creds(**updates):
         pass
     return d
 
-_TRACE_FILE = Path(__file__).with_name("emby_toolbox_trace.log")
+_TRACE_FILE = APP_DIR / "emby_toolbox_trace.log"
 
 
 def _trace(msg):
@@ -3508,7 +3516,7 @@ class App:
             self._merge_hint("Rien a exporter : lance d'abord l'analyse.",
                              (235, 140, 20))
             return
-        fp = Path(__file__).with_name("emby_versions_multiples.csv")
+        fp = APP_DIR / "emby_versions_multiples.csv"
         try:
             with open(fp, "w", newline="", encoding="utf-8-sig") as fh:
                 w = csv.writer(fh, delimiter=";")
@@ -10766,7 +10774,7 @@ def main():
     SES = _init_sessions()             # espace de noms Sessions
     app = App()                        # instance RefMatch
 
-    dpg.create_viewport(title="Emby Toolbox  -  Genres / IDFinder / Doublons "
+    dpg.create_viewport(title=f"Emby Toolbox {APP_VERSION}  -  Genres / IDFinder / Doublons "
                               "/ MKV / Sessions",
                         width=1320, height=920, min_width=1024, min_height=640)
 
@@ -11132,4 +11140,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

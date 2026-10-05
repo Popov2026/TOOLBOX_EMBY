@@ -169,6 +169,24 @@ Puis renseigner le bandeau du haut, **Enregistrer**, **Connecter**.
 Si le dossier du script n'est pas accessible en écriture, les fichiers du
 MKV Renamer et des Sessions vont dans `%APPDATA%\EmbyToolbox`.
 
+### Version Windows (.exe) et signature
+Chaque tag `vX.Y.Z` poussé sur GitHub déclenche le workflow
+`.github/workflows/release.yml` : build Windows (PyInstaller, dossier
+`EmbyToolbox\` avec `EmbyToolbox.exe`, sans installation de Python), auto-test,
+puis publication d'une **Release** GitHub avec :
+- `EmbyToolbox-X.Y.Z-win64.zip` : l'application compilée ;
+- `EmbyToolbox-X.Y.Z-script.zip` : le script `.pyw` (nécessite Python) ;
+- `SHA256SUMS.txt` : empreintes pour vérifier les téléchargements.
+
+**Éditeur vérifié / SmartScreen.** Windows n'affiche un éditeur vérifié que
+pour un exécutable **signé avec un certificat de signature de code** délivré
+après vérification d'identité. Le workflow signe automatiquement l'exe dès
+que les secrets *Azure Artifact Signing* sont configurés dans le dépôt
+(voir l'en-tête du workflow) ; sinon l'archive est nommée `-unsigned` et
+SmartScreen affiche « Éditeur inconnu » (bouton *Informations complémentaires
+> Exécuter quand même*). Même signé, un nouvel exe peut afficher un
+avertissement SmartScreen tant que sa réputation n'est pas établie.
+
 L'historique des changements est dans [CHANGELOG.md](CHANGELOG.md).
 
 ---
@@ -327,5 +345,21 @@ Then fill in the top bar, **Save**, **Connect**.
 
 If the script folder is not writable, the MKV Renamer and Sessions files go to
 `%APPDATA%\EmbyToolbox`.
+
+### Windows build (.exe) and signing
+Every `vX.Y.Z` tag pushed to GitHub runs `.github/workflows/release.yml`:
+Windows build (PyInstaller, `EmbyToolbox\` folder with `EmbyToolbox.exe`, no
+Python install needed), self-test, then a GitHub **Release** with:
+- `EmbyToolbox-X.Y.Z-win64.zip`: the compiled application;
+- `EmbyToolbox-X.Y.Z-script.zip`: the `.pyw` script (needs Python);
+- `SHA256SUMS.txt`: checksums to verify the downloads.
+
+**Verified publisher / SmartScreen.** Windows only shows a verified publisher
+for an executable **signed with a code-signing certificate** issued after an
+identity check. The workflow signs the exe automatically as soon as the
+*Azure Artifact Signing* secrets are set in the repository (see the workflow
+header); otherwise the archive is named `-unsigned` and SmartScreen shows
+"Unknown publisher" (*More info > Run anyway*). Even when signed, a new exe can
+show a SmartScreen warning until its reputation is established.
 
 The change history is in [CHANGELOG.md](CHANGELOG.md).

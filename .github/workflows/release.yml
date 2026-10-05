@@ -1,0 +1,131 @@
+# Build Windows de Emby Toolbox (+ signature de code si configuree) et release.
+#
+#  - pull_request / workflow_dispatch : build + auto-test, archive en artefact
+#  - push d'un tag vX.Y.Z             : idem + publication d'une release GitHub
+#
+# Signature (editeur verifie sous Windows) : activee automatiquement des que
+# les secrets Azure Artifact Signing ci-dessous existent dans le depot
+# (Settings > Secrets and variables > Actions). Sans eux, l'exe est publie
+# NON signe et Windows SmartScreen affichera "Editeur inconnu".
+#   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
+#   AZURE_SIGNING_ENDPOINT (ex. https://weu.codesigning.azure.net/),
+#   AZURE_SIGNING_ACCOUNT, AZURE_CERT_PROFILE
+name: Build & release Windows
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      SIGN_ENABLED: ${{ secrets.AZURE_CLIENT_ID != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Version
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") { $v = "${{ github.ref_name }}".TrimStart("v") }
+          else { $v = (Select-String -Path emby_toolbox_dpg.pyw -Pattern '^APP_VERSION = "(.+)"').Matches[0].Groups[1].Value }
+          "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Version $v"
+
+      - name: Dependances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Auto-test (script)
+        run: python emby_toolbox_dpg.pyw --mkv-selftest
+
+      - name: Build PyInstaller (onedir)
+        # onedir plutot que onefile : demarrage plus rapide et beaucoup moins
+        # de faux positifs antivirus (pas d'auto-extraction dans %TEMP%).
+        run: |
+          python packaging/make_version_file.py $env:VERSION version_info.txt
+          pyinstaller --noconfirm --clean --windowed --onedir `
+            --name EmbyToolbox --version-file version_info.txt `
+            emby_toolbox_dpg.pyw
+
+      - name: Auto-test (exe)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\EmbyToolbox\EmbyToolbox.exe `
+                -ArgumentList "--mkv-selftest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "auto-test exe : code $($p.ExitCode)" }
+
+      - name: Connexion Azure (signature)
+        if: env.SIGN_ENABLED == 'true'
+        uses: azure/login@v2
+        with:
+          creds: >-
+            {"clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+             "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+             "tenantId":"${{ secrets.AZURE_TENANT_ID }}"}
+          allow-no-subscriptions: true
+
+      - name: Signature (Azure Artifact Signing)
+        if: env.SIGN_ENABLED == 'true'
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\dist\EmbyToolbox
+          files-folder-filter: exe,dll,pyd
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Verification de la signature
+        shell: pwsh
+        run: |
+          $sig = Get-AuthenticodeSignature dist\EmbyToolbox\EmbyToolbox.exe
+          Write-Host "Signature : $($sig.Status) - $($sig.SignerCertificate.Subject)"
+          if ($env:SIGN_ENABLED -eq 'true' -and $sig.Status -ne 'Valid') { throw "signature invalide" }
+
+      - name: Archives
+        shell: pwsh
+        run: |
+          $sfx = if ($env:SIGN_ENABLED -eq 'true') { "" } else { "-unsigned" }
+          $zip = "EmbyToolbox-$env:VERSION-win64$sfx.zip"
+          Copy-Item README.md, CHANGELOG.md, requirements.txt dist\EmbyToolbox\
+          Compress-Archive -Path dist\EmbyToolbox -DestinationPath $zip
+          $src = "EmbyToolbox-$env:VERSION-script.zip"
+          Compress-Archive -Path emby_toolbox_dpg.pyw, requirements.txt, README.md, CHANGELOG.md -DestinationPath $src
+          Get-FileHash $zip, $src -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
+            Out-File SHA256SUMS.txt -Encoding ascii
+          "ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SRC=$src" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EmbyToolbox-${{ env.VERSION }}
+          path: |
+            ${{ env.ZIP }}
+            ${{ env.SRC }}
+            SHA256SUMS.txt
+
+      - name: Release GitHub
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Emby Toolbox ${{ env.VERSION }}
+          body_path: CHANGELOG.md
+          files: |
+            ${{ env.ZIP }}
+            ${{ env.SRC }}
+            SHA256SUMS.txt
