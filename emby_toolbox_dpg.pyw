@@ -6028,7 +6028,39 @@ def _init_doublons():
                         (233,69,96))
             return
         player = resolve_player(get_player(), paths[0])
-        open_files_tiled(paths, player or get_player(), sec)
+        _trace("Ouvrir tout : lecteur=%r start=%ss prefixe=%r unc=%r fichiers=%r"
+               % (player or get_player(), sec, G.get("nas_prefix"), G.get("nas_unc"), paths))
+
+        def _check_then_open(paths=paths, pl=player or get_player(), sec=sec):
+            # Verification AVANT lancement (dans un thread : un NAS en veille
+            # peut mettre quelques secondes a repondre) : un chemin faux donnait
+            # seulement "fichier introuvable" dans le lecteur, sans indice.
+            missing = []
+            for p in paths:
+                try:
+                    if not os.path.exists(p):
+                        missing.append(p)
+                except Exception:
+                    missing.append(p)
+            ok = [p for p in paths if p not in missing]
+            if ok:
+                open_files_tiled(ok, pl, sec)
+            if missing:
+                _trace("Ouvrir tout : introuvable(s) : %r" % missing)
+                ui(lambda m=missing: modal_err(
+                    L("Fichier introuvable", "File not found"),
+                    L("Ce(s) chemin(s) n'existe(nt) pas depuis ce PC :\n\n",
+                      "This/these path(s) do not exist from this PC:\n\n")
+                    + "\n".join(m)
+                    + L(f"\n\nConversion utilisée : préfixe Linux {G.get('nas_prefix')!r}"
+                        f"  ->  UNC {G.get('nas_unc')!r}\n"
+                        "Vérifiez le préfixe NAS et le chemin UNC dans le bandeau du haut,"
+                        " puis cliquez Enregistrer et relancez le scan.",
+                        f"\n\nConversion used: Linux prefix {G.get('nas_prefix')!r}"
+                        f"  ->  UNC {G.get('nas_unc')!r}\n"
+                        "Check the NAS prefix and UNC path in the top bar,"
+                        " then click Save and scan again.")))
+        threading.Thread(target=_check_then_open, daemon=True).start()
         name = Path(player).name if player else L("lecteur système", "system player")
         if sec and not player_kind(player):
             _set_status(L(f"Lecteur non reconnu ({name}) : ouverture SANS timecode. "
