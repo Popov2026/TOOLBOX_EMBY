@@ -38,6 +38,10 @@ SCR.OriginalMode = (function () {
      l'entraînement sur ce circuit, ou null pour démarrer le jeu complet (écran titre). */
   OriginalMode.prototype.start = function (bytes, practiceTrack) {
     var e = this.engine = new SCR.Engine(bytes);
+    try { this.trackDefs = SCR.data.tracksFromFile(bytes); } catch (err) { this.trackDefs = null; }
+    this.tracks = {};
+    this.prev = this.cur = null;
+    if (!this.renderer) this.renderer = new SCR.Renderer(this.canvas, this.P);
     if (practiceTrack === null || practiceTrack === undefined) {
       var c = e.cpu;
       c.pc = SCR.Engine.ADDR.boot; c.s = 0; c.a[7] = 0x103da; c.ssp = 0x7000; c.ipl = 0;
@@ -84,8 +88,56 @@ SCR.OriginalMode = (function () {
       e.setInput(this.joystick());
       e.runFrame();
       this.acc -= 1; n++;
+      var st = this.carState();
+      if (!this.cur || st.key !== this.cur.key) { this.prev = this.cur; this.cur = st; this.tickAt = now; }
     }
-    this.draw();
+    var view = this.P.original ? this.P.original.view | 0 : 0;
+    if (view && this.trackDefs && this.cur) this.drawModern(now, view);
+    else this.draw();
+  };
+
+  /* état de la voiture du joueur dans la mémoire du jeu (voir docs/RETRO_INGENIERIE.md) */
+  OriginalMode.prototype.carState = function () {
+    var e = this.engine, A = 2 * Math.PI / 65536;
+    var x = e.l(0x10ac2) / 65536, y = e.l(0x10ac6) / 65536, z = e.l(0x10aca) / 65536;
+    return { x: x, y: y, z: z, yaw: e.w(0x10ad0) * A, pitch: e.sw(0x10ace) * A, roll: e.sw(0x10ad2) * A,
+             track: e.b(0x1112d) & 7, key: e.l(0x10ac2) + ',' + e.l(0x10ac6) + ',' + e.l(0x10aca) + ',' + e.w(0x10ad0) };
+  };
+
+  function lerpAngle(a, b, t) {
+    var d = b - a;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    return a + d * t;
+  }
+
+  /* scène redessinée par le moteur 3D de la réplique à partir de l'état du jeu d'origine */
+  OriginalMode.prototype.drawModern = function (now, view) {
+    var P = this.P, s = this.cur, p = this.prev || s;
+    var ti = s.track;
+    if (!this.tracks[ti]) { this.tracks[ti] = new SCR.Track(this.trackDefs[ti], P); this.tracks[ti].baseHeightWorld = 0; }
+    var tr = this.tracks[ti], r = this.renderer;
+    // interpolation entre les deux derniers ticks (0,12 s à vitesse 1)
+    var dur = 120 / (P.original.speed || 1), t = Math.max(0, Math.min(1, (now - this.tickAt) / dur));
+    var X = p.x + (s.x - p.x) * t, Y = p.y + (s.y - p.y) * t, Z = p.z + (s.z - p.z) * t;
+    var yaw = lerpAngle(p.yaw, s.yaw, t), pitch = lerpAngle(p.pitch, s.pitch, t), roll = lerpAngle(p.roll, s.roll, t);
+    // repère du jeu -> repère de la réplique : x,z ×16 ; y = hauteur brute/32 -> (brute - base) × échelle
+    var upm = P.world.unitsPerMeter, vs = tr.vscale;
+    var pos = [X * 16, (Y * 32 - tr.baseY) * vs + P.track.baseHeight + P.view.eyeHeight * upm, Z * 16];
+    var surf = tr.surface(pos[0], pos[2], this.seg || 0, pos[1], tr.n);
+    if (surf) this.seg = surf.seg;
+    r.resize();
+    r.setCamera(pos, yaw, P.original.pitchSign * pitch, P.original.rollSign * roll);
+    r.drawBackground();
+    r.drawWorld(tr, [], this.seg || 0);
+    if (view === 2) {
+      // vignette : l'image d'origine, pour comparer
+      this.engine.screenRGBA(this.img.data);
+      this.offCtx.putImageData(this.img, 0, 0);
+      var g = r.ctx, w = r.W * 0.32, h = w * 200 / 320;
+      g.drawImage(this.off, r.W - w - 4, 4, w, h);
+      g.strokeStyle = '#ff0'; g.strokeRect(r.W - w - 4, 4, w, h);
+    }
   };
 
   OriginalMode.prototype.draw = function () {

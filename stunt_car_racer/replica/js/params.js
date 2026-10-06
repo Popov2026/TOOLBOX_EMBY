@@ -45,7 +45,10 @@ SCR.PARAM_SPEC = [
     ['startGap', 'Écart au départ (m)', 0, -100, 100, 1] ] },
   { group: 'original', label: 'Mode Original (code du jeu)', items: [
     ['speed', 'Vitesse du jeu (1 = Atari ST, 50 Hz)', 1, 0.25, 3, 0.05],
-    ['smooth', 'Lissage de l\'image agrandie (0/1)', 0, 0, 1, 1] ] },
+    ['smooth', 'Lissage de l\'image agrandie (0/1)', 0, 0, 1, 1],
+    ['view', 'Affichage : 0 = écran ST, 1 = 3D moderne, 2 = 3D + vignette ST', 0, 0, 2, 1],
+    ['pitchSign', 'Signe du tangage (calibrage 3D moderne)', 1, -1, 1, 2],
+    ['rollSign', 'Signe du roulis (calibrage 3D moderne)', 1, -1, 1, 2] ] },
   { group: 'view', label: 'Affichage', items: [
     ['fov', 'Champ de vision (degrés)', 60, 30, 120, 1],
     ['eyeHeight', 'Hauteur des yeux (m)', 0.8, 0.3, 4, 0.01],

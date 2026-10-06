@@ -131,7 +131,7 @@ SCR.Renderer = (function () {
         this.addPoly(list, [p0, p1, t1, t0], col);
       }
     }
-    list.sort(function (a, b) { return a === list[0] ? -1 : b === list[0] ? 1 : b.z - a.z; });
+    // ordre d'insertion conservé : sol, collines lointaines, collines proches
     for (var k = 0; k < list.length; k++) this.fillPoly(list[k].pts, list[k].color);
   };
 

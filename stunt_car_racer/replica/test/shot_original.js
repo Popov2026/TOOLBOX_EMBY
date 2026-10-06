@@ -10,6 +10,7 @@ const path = require('path');
   await p.goto('file://' + path.resolve(__dirname, '..', 'index.html'));
   await p.setInputFiles('#file', disk);
   await p.selectOption('#track', String(idx || 0));
+  if (process.argv[5]) await p.evaluate(v => { SCR.params.original.view = +v; }, process.argv[5]);
   await p.selectOption('#mode', 'original');
   await p.waitForTimeout(1500);
   await p.screenshot({ path: out + '_0.png', clip: { x: 0, y: 0, width: 1050, height: 700 } });
