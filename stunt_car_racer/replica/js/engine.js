@@ -164,6 +164,7 @@ SCR.Engine = (function () {
   Engine.prototype.boot = function () {
     var c = this.cpu;
     c.pc = A.boot; c.s = 0; c.a[7] = 0x103da; c.ssp = 0x7000; c.ipl = 0;
+    this.passChecksum();
     // menus d'avant la boucle principale (titre, mode, nom, pilotes) : un « utilisateur »
     // simulé appuie régulièrement sur le bouton, tape « A » puis Entrée
     var self = this, n = 0;
@@ -181,6 +182,13 @@ SCR.Engine = (function () {
     return n;
   };
 
+  /* exécute le démarrage jusqu'après la somme de contrôle du code, puis applique les réglages */
+  Engine.prototype.passChecksum = function () {
+    this.runUntil(CHECKSUM_DONE, 5e6);
+    this.patchable = true;
+    this.applyTuning();
+  };
+
   /* entraînement sur le circuit `track` (0..7) : chargement, grue, jusqu'au premier tick */
   Engine.prototype.startPractice = function (track) {
     var c = this.cpu;
@@ -194,6 +202,42 @@ SCR.Engine = (function () {
     c.a[7] = (c.a[7] - 4) >>> 0; c.w32(c.a[7], SENT);
     c.pc = A.race;
     return this.runUntil(A.loopTop, 8e7);
+  };
+
+  /* ------------------------------------------------------------ réglages de la physique d'origine
+   * Constantes identifiées dans le code (voir docs/RETRO_INGENIERIE.md, §8) et réécrites
+   * dans la mémoire du jeu.  Valeurs exprimées en multiplicateurs de l'original. */
+  var DT_SITES = [0x48a08, 0x4efaa, 0x4efc6, 0x4efe2, 0x4f014, 0x4f02c, 0x4f044, 0x4f136, 0x4f14e, 0x4f166,
+                  0x4f180, 0x4f198, 0x4f1b0, 0x507fe, 0x509ea, 0x50ed4, 0x50eec, 0x50f06, 0x50f1e, 0x50f38, 0x50f50];
+  var CAR_TABLE = 0x1455a, CAR_BLOCK = 0x108e2, CHECKSUM_DONE = 0x1041e;
+
+  Engine.prototype.setTuning = function (t) { this.tuning = t; if (this.patchable) this.applyTuning(); };
+
+  Engine.prototype.applyTuning = function () {
+    var c = this.cpu, t = this.tuning || {}, m = c.mem, i;
+    if (!this.orig) {   // valeurs d'origine, lues une fois
+      this.orig = { car: Array.prototype.slice.call(m, CAR_TABLE, CAR_TABLE + 22), g: c.r16(0x4e88c),
+                    damp: c.r16(0x4ee64), dt: m[DT_SITES[0] + 3] };
+    }
+    var o = this.orig;
+    function k(v) { return v === undefined ? 1 : +v; }
+    var g = Math.max(1, Math.min(0x7fff, Math.round(o.g * k(t.gravity))));
+    c.w16(0x4e884, (-g) & 0xffff); c.w16(0x4e88c, g);
+    var dt = Math.max(1, Math.min(255, Math.round(o.dt * k(t.timeStep))));
+    for (i = 0; i < DT_SITES.length; i++) m[DT_SITES[i] + 3] = dt;
+    c.w16(0x4ee64, Math.max(0, Math.min(0x7fff, Math.round(o.damp * k(t.damping)))));
+    var brake = Math.max(0, Math.min(0x7fff, Math.round(240 * k(t.brake)))), bw = (-brake) & 0xffff;
+    m[0x4af39] = bw & 0xff; m[0x4af3d] = bw >> 8;
+    for (var blk = 0; blk < 2; blk++) {
+      var b = o.car.slice(blk * 11, blk * 11 + 11);
+      var thrust = Math.max(0, Math.min(0x7fff, Math.round((b[2] | (b[3] << 8)) * k(t.thrust))));
+      b[2] = thrust & 0xff; b[3] = thrust >> 8;
+      b[6] = Math.max(1, Math.min(255, Math.round(b[6] / Math.max(0.05, k(t.boostUse)))));
+      b[9] = Math.max(0, Math.min(255, b[9] + (t.shockTolerance | 0)));
+      for (i = 0; i < 11; i++) m[CAR_TABLE + blk * 11 + i] = b[i];
+      // bloc actif (copié au départ de chaque course) : ligue normale ou super ligue ($110CA)
+      if ((m[0x110ca] ? 1 : 0) === blk) for (i = 0; i < 11; i++) if (i === 2 || i === 3 || i === 6 || i === 9) m[CAR_BLOCK + i] = b[i];
+    }
   };
 
   /* entrées : joystick {up, down, left, right, fire} */

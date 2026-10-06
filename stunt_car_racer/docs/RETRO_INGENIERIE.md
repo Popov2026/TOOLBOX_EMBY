@@ -134,6 +134,47 @@ minimal et les registres matériels utiles, injecte les VBL, et peut soit exécu
 temps réel (mode Original), soit l'amorcer automatiquement jusqu'à l'entraînement sur un
 circuit donné (utilisateur simulé pour les menus, réponse immédiate à la vue d'ensemble).
 
+## 8. Physique de la voiture (routine `$4EEB0`, une fois par tick)
+
+Corps rigide à **trois points de contact**, intégré en virgule fixe avec un facteur de pas
+`0xEE/256` présent sur 21 sites (`move.b #$EE,D2` + `muls` + `asr.l #8`).
+
+| Grandeur | Adresse | Notes |
+|---|---|---|
+| position x, y, z | `$10AC2`, `$10AC6`, `$10ACA` | 16.16 ; x,z : 128 / case ; y bornée à 1000 |
+| tangage, lacet, roulis | `$10ACE`, `$10AD0`, `$10AD2` | 0x10000 = 360° ; lacet 0 = +z, 90° = +x |
+| vitesse (monde) | `$10AD4/6/8` | position += v × Δt × 2⁶ (x,z) ou 2⁷ (y) — `$4EFA4` |
+| vitesses angulaires | `$10ADA/C/E` | angles += ω × Δt ; tangage/roulis bornés (table `$4F128`) |
+| accélérations (monde) | `$10AE0/2/4` | v += a × Δt — `$4F130` |
+| accélérations angulaires | `$10AE6/8/A` | `$4F17A` |
+| forces locales | `$10B1C/1E/20` | latérale / normale / longitudinale, ramenées au monde par la matrice |
+| matrice d'orientation | `$6EEDC` | construite par `$4E8B2` (cos `$51A88`, sin `$51A90`, Q15, table `$11130`) |
+
+Enchaînement : matrice (`$4E8B2`) → points de contact (`$4EF22`, `$49718`, `$4F1C4`) →
+vitesses locales (`$4EAD6`) → **gravité** dans le repère voiture (`$4EB30`, constante
+**0x13D** en `$4E88C`, −0x13D en `$4E884`) → **suspension** (`$4F220`) : pour chaque roue,
+compression = sol − roue bornée [−0x300, 0x1400], ressort + amortisseur (`$4EE62`,
+coefficient **0x114**), force bornée à 0x11FF ; une force > 0x700 + (`$108EB` << 8) ajoute
+des **dégâts** à la roue (`$10939/A/B`) → répartition (`$4F8E6`) → adhérence latérale
+limitée à 2 × la charge (`$4F784`, `$4F7E4`) → propulsion (`$4F6C2`) → **direction** et couple
+de lacet (`$4E55C`, avec un contrôle anti-piratage : la clé `$51894` = 0xC0BE145F doit être
+présente, sinon la voiture ne tourne plus) → frottement proportionnel à la charge
+(`$4F7FE`) → intégration.
+
+**Commandes** (`$4AEDC`) : joystick haut → poussée `$10B14` = mot lu dans `$108E4/$108E5`
+(petit-boutiste) ; bas → freinage fixe 0xFF10 (−240). **Boost** (`$4DE20`) : bouton → poussée
+doublée tant qu'il reste du carburant `$1111A` (BCD), décrémenté tous les `$108E8` ticks ; la
+réserve initiale vient des octets de fin du circuit (`$11126`, super ligue `$11127`).
+
+**Caractéristiques de la voiture** : au départ de chaque course, `$4AD10` copie 11 octets
+depuis `$1455A` (ligue normale) ou `$1455A+11` (super ligue, drapeau `$110CA`) vers
+`$108E2…$108EC` : poussée 240 / 320, allure de l'adversaire (`$108E6/7`, 0x00EC / 0x013A),
+période de consommation du boost (16 / 12 ticks), tolérance aux chocs (0 / 1).
+
+Ces constantes sont exposées comme réglages du mode Original (`Engine.applyTuning`). Elles
+sont réécrites **après** la somme de contrôle du démarrage (`$10106`, qui couvre tout le
+code et bloquerait le jeu).
+
 ## 6. Outils
 
 * `tools/scr_tool.py` : liste/extraction FAT12, décompression, extraction du programme du
@@ -147,7 +188,6 @@ circuit donné (utilisateur simulé pour les menus, réponse immédiate à la vu
 
 ## 7. Reste à faire
 
-* Décompiler la physique (vitesse, gravité, suspension, dégâts) pour remplacer le modèle
-  approché de la réplique par les formules d'origine.
+* Porter la physique décompilée (§8) en code lisible dans le Remake.
 * Décompiler la projection 3D pour l'échelle verticale et le champ de vision exacts.
 * IA des adversaires, pont-levis animé (Draw Bridge), ligue / divisions.

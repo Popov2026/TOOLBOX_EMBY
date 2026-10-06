@@ -87,5 +87,7 @@ NODE_PATH=$(npm root -g) node test/shot.js disque.st 0 /tmp/capture   # captures
   reste identique pendant 78 ticks (seule l'horloge, cadencée par la VBL, diffère ensuite).
 * Remake : rendu 3D façon ST, cockpit, chrono, tours, boost, dégâts, grue, adversaire,
   réglages : **jouable** ; la physique est un modèle approché, réglable.
-* Prochaines étapes : décompiler la physique d'origine (orientation de la voiture,
-  constantes) pour l'exposer en paramètres et rapprocher le Remake de l'original.
+* Physique d'origine décompilée dans ses grandes lignes (docs §8) ; ses constantes
+  (gravité, poussée, freinage, pas de temps, amortissement, boost, tolérance aux chocs)
+  sont **réglables dans le mode Original**.
+* Prochaine étape : porter cette physique en code lisible dans le Remake.

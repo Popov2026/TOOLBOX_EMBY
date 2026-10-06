@@ -45,7 +45,10 @@ SCR.OriginalMode = (function () {
     if (practiceTrack === null || practiceTrack === undefined) {
       var c = e.cpu;
       c.pc = SCR.Engine.ADDR.boot; c.s = 0; c.a[7] = 0x103da; c.ssp = 0x7000; c.ipl = 0;
+      e.tuning = this.P.physOrig;
+      e.passChecksum();
     } else {
+      e.tuning = this.P.physOrig;
       e.boot();
       e.startPractice(practiceTrack);
     }
@@ -84,6 +87,8 @@ SCR.OriginalMode = (function () {
     var hz = 50 * (this.P.original ? this.P.original.speed : 1);
     this.acc += dt * hz;
     var e = this.engine, n = 0;
+    var key = JSON.stringify(this.P.physOrig);
+    if (key !== this.tuneKey) { this.tuneKey = key; e.setTuning(this.P.physOrig); }
     while (this.acc >= 1 && n < 20) {
       e.setInput(this.joystick());
       e.runFrame();
