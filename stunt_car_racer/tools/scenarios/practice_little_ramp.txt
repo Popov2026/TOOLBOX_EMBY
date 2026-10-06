@@ -1,0 +1,20 @@
+# Écran titre -> ligue solo -> nom "AB" -> Entraînement -> Division 4 -> Little Ramp -> départ
+wait 1000
+key 39            # espace : passe l'écran titre
+wait 300
+joy 80            # 1. Single Player League
+wait 100
+key 1E 30 1C      # nom "AB" + Entrée
+wait 100
+joy 80            # (écran des pilotes)
+wait 150
+joy 80            # 2. Practise
+wait 150
+joy 80            # Tracks in DIVISION 4
+wait 130          # menu : Practise The LITTLE RAMP (joy 02 pour HUMP BACK)
+joy 80
+wait 300          # vue d'ensemble du circuit
+joy 80
+wait 400          # la grue dépose la voiture
+joyon 01          # joystick vers l'avant : accélérer
+wait 1500

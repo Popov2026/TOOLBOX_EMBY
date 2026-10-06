@@ -1,0 +1,15 @@
+# outils compilés / dépendances récupérées
+tools/Musashi/
+tools/build/
+tools/stemu
+tools/dasm
+# données du jeu : jamais dans le dépôt (copyright)
+*.st
+*.msa
+*.PUT
+*.prg
+*.PRG
+*.ppm
+*.bin
+tracks.json
+out/

@@ -1,0 +1,129 @@
+# Stunt Car Racer (Atari ST) — notes de rétro-ingénierie
+
+Version étudiée : compilation « Compact Disk 2.1 » (V8 / Fallen Angels / Highlanders),
+disquette `Stunt_Car_Racer_1989Micro_Styleb2.st` (720 Ko). Aucune donnée du jeu n'est
+reproduite ici : seuls les formats et les adresses sont documentés.
+
+## 1. Disquette
+
+* Image `.st` brute : 80 pistes × 2 faces × 9 secteurs × 512 octets, FAT12 standard
+  **sauf** le BPB qui annonce 0 secteur par cluster (TOS le traite comme 1) :
+  `scr_tool.py` force `spc = 1`.
+* Fichiers :
+
+| Fichier | Rôle |
+|---|---|
+| `AUTO/DEBUT.PRG` | menu de la compilation (« 1) HARD AND HEAVY  2) STUNTCAR ») |
+| `GAME.PUT` | **Stunt Car Racer** (compressé, intro du cracker + jeu) |
+| `HIGHSCOR.ES` | meilleurs scores (512 o.) |
+| `HARD.PUT`, `MAIN.DAT`, `MUSIC.DAT`, `GRAPHIX.IMG`, `TITLE.PIC`, `RELINE.PIC` | l'autre jeu de la compilation (Hard'n'Heavy) |
+
+## 2. Compression
+
+`GAME.PUT` et `DEBUT.PRG` sont des exécutables TOS compressés par **JEK Packer 1.3**,
+qui utilise l'algorithme **ByteKiller** : flux de bits lu à l'envers depuis la fin des
+données, mots longs `longueur`, `checksum`, premier mot de bits ; décompression arrière.
+Codes (bits lus poids fort d'abord) :
+
+| Préfixe | Action |
+|---|---|
+| `00` + 3 bits *n* | *n*+1 octets littéraux |
+| `01` + 8 bits *o* | copie 2 octets depuis +*o* |
+| `1 00` + 9 bits *o* | copie 3 octets |
+| `1 01` + 10 bits *o* | copie 4 octets |
+| `1 10` + 8 bits *n* + 12 bits *o* | copie *n*+1 octets |
+| `1 11` + 8 bits *n* | *n*+9 octets littéraux |
+
+Le checksum (XOR de tous les mots longs lus) doit valoir 0 à la fin.
+
+`GAME.PUT` décompressé (391 763 o.) = intro du cracker (TEXT de $838 octets, texte
+défilant « cracked by Yoda ») dont le segment DATA contient **un second exécutable** :
+le jeu lui-même (TEXT $5D6C6, BSS $5BAA). L'intro le reloge à son adresse de chargement
+(dans l'émulateur : base TEXT = **$10100**) et y saute.
+
+## 3. Le programme du jeu
+
+* Le code 68000 est une **traduction quasi mécanique du code 6502 de la version C64** :
+  variables d'un octet aux adresses absolues ($109xx…$111xx tiennent lieu de page zéro),
+  tables indexées `(An,Dn.w)`, pointeurs 16 bits **petit-boutistes** reconvertis à
+  l'exécution par `rol.w #8` (cf. `$4881C`).
+* Les données 6502 sont restées telles quelles : l'adresse 6502 **$B100** correspond à
+  **$13670** dans le jeu chargé (`adresse = $13670 + (adr6502 − $B100)`).
+* On trouve même des restes de code 6502 et des fragments du source assembleur
+  (`FETCH  move.b 0(a5,d5.w),d0`…) dans le binaire.
+* Au démarrage : somme de contrôle du code (`$0006`…), lecture du secteur 5 piste 0 par
+  `Floprd` (XBIOS 8), puis interception directe du matériel : vecteur clavier `$118`
+  (`$104B4`, table des touches en `$6F02C`, valeur `$B3` = enfoncée), VBL `$70` → `$4EC24`,
+  tables clavier TOS via `Keytbl` (XBIOS 16) pour la saisie du nom.
+
+### Variables utiles (jeu chargé à $10100)
+
+| Adresse | Contenu |
+|---|---|
+| `$10906`, `$10985` | pièce de circuit où se trouve le joueur |
+| `$10A1E` | (probable) section dans la pièce |
+| `$11114` | nombre de pièces du circuit courant |
+| `$11116` | pièce de la ligne de départ |
+| `$10C82[]` | case de grille de chaque pièce (Z×16 + X) |
+| `$10CE6[]` | type de chaque pièce (forme + orientation) |
+| `$10BBA[]`, `$10C1E[]` | profil de hauteur gauche / droit de chaque pièce |
+| `$10D4A[]`, `$10E12[]` | hauteur (mot) du bord gauche / droit au début de chaque pièce |
+| `$10EDA[]` | distance cumulée (mot, en sections × 32) |
+| `$6F02C` | état des 128 touches |
+
+## 4. Les circuits
+
+Table des 8 circuits : `$13790` (pointeurs 6502), dans l'ordre des noms stockés en
+`$13498` : LITTLE RAMP, STEPPING STONES, HUMP BACK, BIG RAMP, SKI JUMP, DRAW BRIDGE,
+HIGH JUMP, ROLLER COASTER. Chaque circuit tient en 130 à 210 octets.
+
+Routine de décodage `$48390` (portée à l'identique dans `tools/scr_tool.py` et
+`replica/js/scrdata.js`, **vérifiée octet par octet** contre la mémoire du jeu pour
+Little Ramp et Hump Back) :
+
+```
+en-tête : nbPièces, ?, pièceDépart, ?        (4 octets → $11114..$11117)
+hauteur initiale : 2 octets petit-boutistes
+pour chaque pièce :
+  type  (1 octet) : bits 0-3 forme, bit 4 parcours inverse, bit 5 profil droit = gauche,
+                    bits 6-7 orientation (quart de tour) ;  type $nF = répéter n fois
+                    la pièce précédente sur les cases suivantes
+  case  (1 octet) : Z<<4 | X  (absente pour une pièce répétée)
+  profil gauche (1 octet), profil droit (1 octet, sauf bit 5)   [formes 12..15 : tables $48802/$48804]
+suivi de 6 octets ($11124..), puis listes optionnelles ($10FA2/$10FC2, $10FE2)
+```
+
+* **Grille** de 16 × 16 cases de $800 unités.
+* **Formes** (`$13670`, pointeurs 6502) : chaque forme liste des sections transversales
+  (point gauche, point droit) en coordonnées locales de case. Formes utilisées :
+  0 droite (8 segments), 1/3 virage de 45° à droite/gauche, 6/7 virages de 45° longs,
+  4 et 10 diagonales. La route fait $180 unités de large, centrée dans la case.
+* **Orientation** : bits 7-6 = rotation (0 : +Z, 1 : (z, $800−x), 2 : demi-tour,
+  3 : ($800−z, x)) ; bit 4 = sections parcourues à l'envers **et** bords gauche/droit
+  permutés. Trouvée par recherche exhaustive en imposant la continuité des pièces :
+  erreur cumulée de 72 unités sur l'ensemble des 8 circuits.
+* **Hauteurs** : profils (`$13690`) indexés par section ; format 1 octet
+  `((b & $0F) << 8) | ((b << 1) & $E0)` ou, si le profil gauche a le bit 7, 2 octets
+  `((b0 & $7F) << 8) | b1`. Le bit 7 d'un octet de profil marque un sommet de rupture de
+  pente (utilisé par le rendu, `$525CC`). Les sauts sont de vraies chutes de hauteur
+  (rampe → fosse au niveau du sol → réception).
+* L'échelle verticale du rendu n'est pas 1:1 : la comparaison de captures donne
+  environ 0,3 (réglable dans la réplique).
+
+## 5. Outils
+
+* `tools/scr_tool.py` : liste/extraction FAT12, décompression, extraction du programme du
+  jeu, décodage des circuits en JSON, aperçu PNG.
+* `tools/stemu.c` : émulateur Atari ST minimal **sans affichage** (CPU Musashi, TOS simulé
+  en C, MFP, IKBD, shifter). Captures d'écran, injection clavier/joystick, vidages mémoire,
+  points d'arrêt, journal des PC exécutés, surveillance des lectures/écritures mémoire.
+  Suffisant pour faire tourner le jeu du menu jusqu'à la course.
+* `tools/stemu_script.py` : scénarios d'entrées (voir `tools/scenarios/`).
+* `tools/dasm` : désassembleur 68000.
+
+## 6. Reste à faire
+
+* Décompiler la physique (vitesse, gravité, suspension, dégâts) pour remplacer le modèle
+  approché de la réplique par les formules d'origine.
+* Décompiler la projection 3D pour l'échelle verticale et le champ de vision exacts.
+* IA des adversaires, pont-levis animé (Draw Bridge), ligue / divisions.

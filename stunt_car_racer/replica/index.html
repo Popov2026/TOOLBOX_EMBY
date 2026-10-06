@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stunt Car Racer — réplique</title>
+<style>
+  :root { --bg: #101418; --panel: #1b2128; --text: #e6e6e6; --muted: #9aa4ad; --accent: #ffd400; --err: #ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, sans-serif; display: flex; min-height: 100vh; }
+  #left { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px; min-width: 0; }
+  #screen { width: 100%; max-width: 1280px; aspect-ratio: 320 / 200; image-rendering: pixelated; background: #000; border: 2px solid #333; }
+  #bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0; width: 100%; max-width: 1280px; }
+  #status { color: var(--muted); }
+  #status.err { color: var(--err); }
+  #side { width: 360px; background: var(--panel); padding: 12px; overflow-y: auto; max-height: 100vh; }
+  h1 { font-size: 16px; margin: 0 0 6px; color: var(--accent); }
+  details { border-top: 1px solid #2c343d; padding: 4px 0; }
+  summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+  .row { display: grid; grid-template-columns: 1fr 90px 64px; gap: 6px; align-items: center; margin: 3px 0; }
+  .row span { font-size: 12px; color: var(--muted); }
+  .row input[type=number] { width: 64px; background: #0e1216; color: var(--text); border: 1px solid #2c343d; }
+  button, select, .file { background: #2a323b; color: var(--text); border: 1px solid #3a444f; padding: 5px 9px; border-radius: 4px; cursor: pointer; font: inherit; }
+  .file input { display: none; }
+  kbd { background: #2a323b; border: 1px solid #3a444f; border-radius: 3px; padding: 0 4px; }
+  .help { color: var(--muted); font-size: 12px; }
+  @media (max-width: 900px) { body { flex-direction: column; } #side { width: 100%; max-height: none; } }
+</style>
+</head>
+<body>
+<div id="left">
+  <canvas id="screen" width="960" height="600"></canvas>
+  <div id="bar">
+    <label class="file">Charger la disquette (.st / GAME.PUT / tracks.json)<input id="file" type="file"></label>
+    <select id="track"></select>
+    <button id="start">Départ</button>
+    <span id="status"></span>
+  </div>
+  <div class="help">
+    <kbd>↑</kbd>/<kbd>W</kbd> accélérer · <kbd>↓</kbd>/<kbd>S</kbd> freiner / reculer · <kbd>←</kbd><kbd>→</kbd> diriger ·
+    <kbd>Espace</kbd> boost · <kbd>C</kbd> caméra · <kbd>R</kbd> grue · <kbd>P</kbd> pause · manette supportée
+  </div>
+</div>
+<div id="side">
+  <h1>Stunt Car Racer — réplique paramétrable</h1>
+  <p class="help">Les circuits originaux sont lus directement depuis <b>votre</b> image disque Atari ST
+  (rien n'est inclus). Tous les réglages sont modifiables en direct et mémorisés.</p>
+  <div id="params"></div>
+  <p>
+    <button id="reset">Valeurs par défaut</button>
+    <button id="export">Exporter</button>
+    <label class="file">Importer<input id="import" type="file" accept=".json"></label>
+  </p>
+</div>
+<script src="js/scrdata.js"></script>
+<script src="js/params.js"></script>
+<script src="js/track.js"></script>
+<script src="js/physics.js"></script>
+<script src="js/render.js"></script>
+<script src="js/game.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
