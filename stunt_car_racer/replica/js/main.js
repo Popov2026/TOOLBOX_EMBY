@@ -8,6 +8,10 @@
   var game = new SCR.Game(canvas, P);
   var tracks = [];
   var current = -1;
+  var diskBytes = null;
+  var mode = 'remake';
+  var orig = new SCR.OriginalMode(canvas, P);
+  var modeSel = document.getElementById('mode');
   window.SCR.game = game;
   window.SCR.params = P;
 
@@ -56,6 +60,8 @@
         list = JSON.parse(new TextDecoder().decode(bytes)).tracks;
       } else {
         list = SCR.data.tracksFromFile(bytes);
+        diskBytes = bytes;                             // pour le mode Original
+        try { localStorage.setItem('scr.disk', toB64(bytes)); } catch (e) { /* quota */ }
       }
       setTracks(list);
       status('Circuits originaux chargés depuis ' + name + ' (' + list.length + ')');
@@ -77,8 +83,43 @@
     if (f) f.arrayBuffer().then(function (b) { loadBytes(new Uint8Array(b), f.name); });
   });
 
-  sel.addEventListener('change', function () { current = +sel.value; game.load(tracks[current]); sel.blur(); });
-  document.getElementById('start').addEventListener('click', function () { if (game.track) { game.load(tracks[current]); game.startRace(); } this.blur(); });
+  function toB64(u8) { var s = ''; for (var i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); }
+  function fromB64(b) { var s = atob(b), u = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
+
+  function setMode(m) {
+    mode = m; modeSel.value = m;
+    game.active = m === 'remake';
+    if (m === 'remake') orig.stop();
+  }
+  function startOriginal(track) {
+    if (!diskBytes) { status('Mode Original : chargez d\'abord votre image disque (.st ou GAME.PUT)', true); return; }
+    try {
+      setMode('original');
+      orig.start(diskBytes, track);
+      status(track === null ? 'Jeu original : écran titre' : 'Jeu original : entraînement sur ' + SCR.data.NAMES[track]);
+    } catch (e) { status('Mode Original : ' + e.message, true); }
+  }
+  modeSel.addEventListener('change', function () {
+    if (modeSel.value === 'original') {
+      var t = tracks[current];
+      startOriginal(t && t.index !== undefined ? t.index : 0);
+    } else setMode('remake');
+    modeSel.blur();
+  });
+
+  sel.addEventListener('change', function () {
+    current = +sel.value; sel.blur();
+    var t = tracks[current];
+    if (mode === 'original' && t && t.index !== undefined) startOriginal(t.index);
+    else { setMode('remake'); game.load(t); }
+  });
+  document.getElementById('start').addEventListener('click', function () {
+    this.blur();
+    var t = tracks[current];
+    if (mode === 'original') { if (t && t.index !== undefined) startOriginal(t.index); return; }
+    if (game.track) { game.load(t); game.startRace(); }
+  });
+  document.getElementById('full').addEventListener('click', function () { this.blur(); startOriginal(null); });
 
   /* ------------------------------------------------------------ réglages */
   var panel = document.getElementById('params');
@@ -132,7 +173,12 @@
   /* démarrage : circuits mémorisés ou démo */
   var saved = null;
   try { saved = JSON.parse(localStorage.getItem('scr.tracks') || 'null'); } catch (e) { saved = null; }
+  try { var d = localStorage.getItem('scr.disk'); if (d) diskBytes = fromB64(d); } catch (e) { diskBytes = null; }
   if (saved && saved.length) { setTracks(saved); status('Circuits originaux (mémorisés dans ce navigateur)'); }
   else { setTracks([]); status('Aucune disquette chargée : circuits de démonstration. Glissez votre image .st ici.'); }
-  game.run();
+  function loop(t) {
+    if (mode === 'original') orig.frame(t); else game.frame(t);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
 })();

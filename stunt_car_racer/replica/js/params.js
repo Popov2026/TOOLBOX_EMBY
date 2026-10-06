@@ -7,7 +7,7 @@ var SCR = window.SCR || (window.SCR = {});
 
 SCR.PARAM_SPEC = [
   { group: 'track', label: 'Circuit', items: [
-    ['verticalScale', 'Échelle verticale (hauteurs du jeu → monde)', 0.3, 0.1, 1.5, 0.01],
+    ['verticalScale', 'Échelle verticale (hauteurs du jeu → monde ; 0,5 = physique d\'origine)', 0.5, 0.1, 1.5, 0.01],
     ['baseHeight', 'Hauteur du point le plus bas au-dessus du sol', 0, 0, 2000, 10],
     ['laps', 'Nombre de tours', 3, 1, 20, 1],
     ['roadWidthScale', 'Largeur de route (×)', 1.0, 0.6, 2.0, 0.05] ] },
@@ -43,6 +43,9 @@ SCR.PARAM_SPEC = [
     ['enabled', 'Adversaire actif (0/1)', 1, 0, 1, 1],
     ['skill', 'Niveau (vitesse relative)', 0.82, 0.3, 1.3, 0.01],
     ['startGap', 'Écart au départ (m)', 0, -100, 100, 1] ] },
+  { group: 'original', label: 'Mode Original (code du jeu)', items: [
+    ['speed', 'Vitesse du jeu (1 = Atari ST, 50 Hz)', 1, 0.25, 3, 0.05],
+    ['smooth', 'Lissage de l\'image agrandie (0/1)', 0, 0, 1, 1] ] },
   { group: 'view', label: 'Affichage', items: [
     ['fov', 'Champ de vision (degrés)', 60, 30, 120, 1],
     ['eyeHeight', 'Hauteur des yeux (m)', 0.8, 0.3, 4, 0.01],

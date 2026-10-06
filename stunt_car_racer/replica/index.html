@@ -32,13 +32,19 @@
   <canvas id="screen" width="960" height="600"></canvas>
   <div id="bar">
     <label class="file">Charger la disquette (.st / GAME.PUT / tracks.json)<input id="file" type="file"></label>
+    <select id="mode" title="Moteur de jeu">
+      <option value="remake">Remake (paramétrable)</option>
+      <option value="original">Original (code du jeu)</option>
+    </select>
     <select id="track"></select>
     <button id="start">Départ</button>
+    <button id="full" title="Mode Original : jeu complet depuis l'écran titre">Jeu complet</button>
     <span id="status"></span>
   </div>
   <div class="help">
     <kbd>↑</kbd>/<kbd>W</kbd> accélérer · <kbd>↓</kbd>/<kbd>S</kbd> freiner / reculer · <kbd>←</kbd><kbd>→</kbd> diriger ·
-    <kbd>Espace</kbd> boost · <kbd>C</kbd> caméra · <kbd>R</kbd> grue · <kbd>P</kbd> pause · manette supportée
+    <kbd>Espace</kbd> boost · <kbd>C</kbd> caméra · <kbd>R</kbd> grue · <kbd>P</kbd> pause · manette supportée.<br>
+    Mode Original : flèches = joystick (haut accélère), <kbd>Espace</kbd> = bouton (boost), clavier ST complet pour les menus.
   </div>
 </div>
 <div id="side">
@@ -58,6 +64,9 @@
 <script src="js/physics.js"></script>
 <script src="js/render.js"></script>
 <script src="js/game.js"></script>
+<script src="js/cpu68k.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/original.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

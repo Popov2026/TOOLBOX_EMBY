@@ -20,7 +20,9 @@ SCR.Game = (function () {
     this.last = 0;
     this.onFinish = null;
     var self = this;
+    this.active = true;
     window.addEventListener('keydown', function (e) {
+      if (!self.active) return;
       if (/^(Arrow|Space)/.test(e.code)) e.preventDefault();
       self.keys[e.code] = true;
       if (e.code === 'KeyC') { self.P.view.chaseCam = self.P.view.chaseCam ? 0 : 1; }
@@ -204,11 +206,6 @@ SCR.Game = (function () {
     g.fillText(t, (r.W - g.measureText(t).width) / 2, r.H - 14 * s);
   };
 
-  Game.prototype.run = function () {
-    var self = this;
-    function loop(t) { self.frame(t); requestAnimationFrame(loop); }
-    requestAnimationFrame(loop);
-  };
 
   return Game;
 })();

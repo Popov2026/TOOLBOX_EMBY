@@ -15,6 +15,17 @@ version **Atari ST**, et réplique jouable sur PC dont tous les réglages sont m
 | `tools/` | outils de rétro-ingénierie : extraction, décompression, décodage des circuits, émulateur ST de test, désassembleur |
 | `docs/RETRO_INGENIERIE.md` | formats, adresses, routines décompilées, méthode de vérification |
 
+## Deux moteurs
+
+* **Original (code du jeu)** : le jeu d'origine complet — menus, course, rendu, tableau de
+  bord — exécuté par un **CPU 68000 écrit en JavaScript** (`replica/js/cpu68k.js`) à partir
+  du programme lu sur votre disquette, avec un TOS minimal simulé. Fidélité totale : validé
+  instruction par instruction contre l'émulateur Musashi. Le clavier et le joystick (flèches,
+  espace, manette) sont injectés directement dans la mémoire du jeu. Bouton **Jeu complet**
+  pour partir de l'écran titre, ou choix d'un circuit pour aller directement à l'entraînement.
+* **Remake (paramétrable)** : moteur réécrit (rendu 3D à polygones, physique réglable),
+  utilisant la géométrie exacte des circuits décodés. Tous les paramètres sont exposés.
+
 ## Lancer la réplique
 
 1. Ouvrir `replica/index.html` dans un navigateur récent (double-clic suffit).
@@ -57,7 +68,10 @@ Tests de la réplique (Node.js) :
 
 ```sh
 cd replica
-node test/sim.js disque.st 150      # pilote automatique sur les 8 circuits (tours, chutes, dégâts)
+node test/sim.js disque.st 150      # Remake : pilote automatique sur les 8 circuits (tours, chutes, dégâts)
+node test/engine_test.js disque.st 0 60     # moteur fidèle : démarrage, entraînement, ticks
+node test/cpu_vs_musashi.js snap/in snap/out 4EEB0   # CPU JS contre Musashi (instantanés stemu --snap)
+node test/engine_vs_emu.js snap/loop disque.st 0 149 # boucle de course JS contre l'émulateur
 node test/trace.js disque.st 0 30   # trace détaillée d'un circuit
 NODE_PATH=$(npm root -g) node test/shot.js disque.st 0 /tmp/capture   # captures Chromium
 ```
@@ -67,7 +81,11 @@ NODE_PATH=$(npm root -g) node test/shot.js disque.st 0 /tmp/capture   # captures
 * Disquette, décompression, isolation du programme du jeu : **fait**.
 * Jeu exécuté dans l'émulateur de test, du menu à la course : **fait**.
 * Décodage des 8 circuits : **fait**, vérifié octet par octet contre le jeu en cours d'exécution.
-* Réplique : rendu 3D façon ST, cockpit, chrono, tours, boost, dégâts, grue, adversaire,
+* Moteur fidèle : CPU 68000 JavaScript + TOS minimal ; le jeu complet tourne dans le
+  navigateur (≈ 20× le temps réel en Node). Validé contre Musashi : la physique d'origine
+  (≈ 2 240 instructions/tick) donne des états identiques, et la boucle de course complète
+  reste identique pendant 78 ticks (seule l'horloge, cadencée par la VBL, diffère ensuite).
+* Remake : rendu 3D façon ST, cockpit, chrono, tours, boost, dégâts, grue, adversaire,
   réglages : **jouable** ; la physique est un modèle approché, réglable.
-* Prochaines étapes : décompiler la physique et la projection d'origine pour remplacer
-  les valeurs approchées (voir `docs/RETRO_INGENIERIE.md`).
+* Prochaines étapes : décompiler la physique d'origine (orientation de la voiture,
+  constantes) pour l'exposer en paramètres et rapprocher le Remake de l'original.

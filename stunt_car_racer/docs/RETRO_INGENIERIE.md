@@ -107,10 +107,34 @@ suivi de 6 octets ($11124..), puis listes optionnelles ($10FA2/$10FC2, $10FE2)
   `((b0 & $7F) << 8) | b1`. Le bit 7 d'un octet de profil marque un sommet de rupture de
   pente (utilisé par le rendu, `$525CC`). Les sauts sont de vraies chutes de hauteur
   (rampe → fosse au niveau du sol → réception).
-* L'échelle verticale du rendu n'est pas 1:1 : la comparaison de captures donne
-  environ 0,3 (réglable dans la réplique).
+* L'échelle verticale n'est pas 1:1 : le code physique utilise hauteur/32 pour 1/16 en
+  x/z, soit une échelle de 0,5 (valeur par défaut de la réplique, réglable).
 
-## 5. Outils
+## 5. Boucle de jeu et moteur fidèle
+
+* Boucle principale `$4A5B6` : menus `$49032` → vue d'ensemble + chargement du circuit
+  `$4A80A` (circuit en `$1112D`, attente « feu » en `$4AF5C`) → course `$4A924` → `$51312`.
+* Course : préparation, grue, puis boucle `$4AA74`…`$4AC0E`. Une itération = un *tick* :
+  entrées `$4AE7E` (joystick `$106A6` → `$10931`), physique `$4EEB0`, …, rendu et suivi de
+  la pièce courante `$51BCC` (≈ 91 000 instructions, contient aussi de la logique), échange
+  d'écrans et attente `$4B0A6` : le compteur `$4EC20`, rechargé à 6 et décrémenté par la VBL
+  (`$4EC24`), cadence la logique à **8,33 ticks/s** (Δt fixe de 0,12 s).
+* La VBL gère aussi le son du moteur (`$10A1E += $109DE`, registres du YM2149) et le
+  chronomètre (`$51F38` : `$109CD += $10A4C`).
+* Position de la voiture : `$10AC2`, `$10AC6`, `$10ACA` (x, y, z en 16.16 ; 128 unités
+  par case, soit 16 unités de géométrie ; y = hauteur brute / 32 → échelle verticale
+  physique **0,5**, cf. `$495F2` qui calcule `(profil + base) >> 5`).
+* Protection Copylock (code chiffré par le mode trace, vecteur `$24`, `$49E38`) neutralisée
+  par le crack via l'octet `$51898`.
+* Le jeu n'utilise que quelques appels système : Super, Cursconf, Keytbl, Jenabint,
+  Physbase et Floprd (secteur 5 piste 0, sert seulement à une clé inutilisée `$4A52C`).
+
+Le moteur fidèle (`replica/js/engine.js`) charge et reloge le programme, simule ce TOS
+minimal et les registres matériels utiles, injecte les VBL, et peut soit exécuter le jeu en
+temps réel (mode Original), soit l'amorcer automatiquement jusqu'à l'entraînement sur un
+circuit donné (utilisateur simulé pour les menus, réponse immédiate à la vue d'ensemble).
+
+## 6. Outils
 
 * `tools/scr_tool.py` : liste/extraction FAT12, décompression, extraction du programme du
   jeu, décodage des circuits en JSON, aperçu PNG.
@@ -121,7 +145,7 @@ suivi de 6 octets ($11124..), puis listes optionnelles ($10FA2/$10FC2, $10FE2)
 * `tools/stemu_script.py` : scénarios d'entrées (voir `tools/scenarios/`).
 * `tools/dasm` : désassembleur 68000.
 
-## 6. Reste à faire
+## 7. Reste à faire
 
 * Décompiler la physique (vitesse, gravité, suspension, dégâts) pour remplacer le modèle
   approché de la réplique par les formules d'origine.

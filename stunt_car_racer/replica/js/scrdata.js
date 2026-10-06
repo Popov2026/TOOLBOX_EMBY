@@ -214,6 +214,41 @@ SCR.data = (function () {
     return tracks;
   }
 
+  /* programme interne (jeu) depuis une image .st, GAME.PUT, ou le programme déjà extrait */
+  function innerProgram(bytes) {
+    if (bytes[0] === 0x60 && bytes[1] === 0x1a) {
+      var r = null;
+      try { r = unpackPrg(bytes); } catch (e) { r = null; }
+      if (r && r.ok) {
+        var out = r.data, tlen = u32be(out, 2);
+        for (var i = Math.max(0, 0x1c + tlen - 0x40); i < out.length - 1; i++)
+          if (out[i] === 0x60 && out[i + 1] === 0x1a) return out.subarray(i);
+      }
+      return bytes;
+    }
+    return gameProgram(bytes);
+  }
+
+  /* applique la table de relocation TOS : TEXT+DATA tels qu'en mémoire à `base` */
+  function relocate(prg, base) {
+    var tlen = u32be(prg, 2), dlen = u32be(prg, 6), blen = u32be(prg, 10), slen = u32be(prg, 14);
+    var img = new Uint8Array(prg.subarray(0x1c, 0x1c + tlen + dlen));
+    var r = 0x1c + tlen + dlen + slen, off = u32be(prg, r); r += 4;
+    if (off) {
+      var a = off;
+      for (;;) {
+        var v = (u32be(img, a) + base) >>> 0;
+        img[a] = v >>> 24; img[a + 1] = (v >>> 16) & 0xff; img[a + 2] = (v >>> 8) & 0xff; img[a + 3] = v & 0xff;
+        var c = prg[r++];
+        if (c === 0) break;
+        while (c === 1) { a += 254; c = prg[r++]; }
+        a += c;
+      }
+    }
+    return { image: img, bss: blen };
+  }
+
   return { fatList: fatList, bytekiller: bytekiller, unpackPrg: unpackPrg, gameProgram: gameProgram,
+           innerProgram: innerProgram, relocate: relocate,
            tracksFromFile: tracksFromFile, NAMES: NAMES, CELL: CELL };
 })();

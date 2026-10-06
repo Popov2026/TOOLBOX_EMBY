@@ -14,6 +14,8 @@
  *   --trace-traps      log TOS calls
  *   --bp ADDR          log when PC reaches ADDR (registers)
  *   --pclog F0:F1:file  log every executed PC (unique counts) between frames
+ *   --calls F0:F1:file  count JSR/BSR targets between frames
+ *   --snap ADDR:N:prefix  RAM + registres les N premières fois que PC atteint ADDR
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -571,6 +573,9 @@ static void do_acia(uint32_t sr, uint32_t pc)
 }
 
 static long bp_addr = -1;
+struct snap { uint32_t addr; int left, n; char prefix[200]; };
+static struct snap snaps[8]; static int nsnaps;
+static uint32_t *call_counts; static long calls_f0 = -1, calls_f1 = -1; static char calls_file[256];
 
 static FILE *pclog_f; static long pclog_f0 = -1, pclog_f1 = -1;
 static uint32_t *pc_counts;
@@ -578,11 +583,29 @@ static uint32_t *pc_counts;
 void instr_hook(unsigned int pc)
 {
     if (pc_counts && frame >= pclog_f0 && frame <= pclog_f1 && pc < RAMSIZE) pc_counts[pc >> 1]++;
+    if (call_counts && frame >= calls_f0 && frame <= calls_f1 && pc < RAMSIZE) {
+        uint32_t op = rd16(pc), t = 0;
+        if (op == 0x4eb9) t = rd32(pc + 2);
+        else if (op == 0x6100) t = pc + 2 + (int16_t)rd16(pc + 2);
+        else if ((op & 0xff00) == 0x6100) t = pc + 2 + (int8_t)(op & 0xff);
+        if (t && t < RAMSIZE) call_counts[t >> 1]++;
+    }
+    for (int k = 0; k < nsnaps; k++) if (pc == snaps[k].addr && snaps[k].left > 0) {
+        char fn[300]; snprintf(fn, sizeof fn, "%s_%03d.ram", snaps[k].prefix, snaps[k].n);
+        FILE *f = fopen(fn, "wb"); fwrite(ram, 1, RAMSIZE, f); fclose(f);
+        snprintf(fn, sizeof fn, "%s_%03d.regs", snaps[k].prefix, snaps[k].n);
+        f = fopen(fn, "w");
+        for (int i = 0; i < 16; i++) fprintf(f, "%u ", m68k_get_reg(NULL, M68K_REG_D0 + i));
+        fprintf(f, "%u %u %u %u %ld\n", m68k_get_reg(NULL, M68K_REG_SR), pc, m68k_get_reg(NULL, M68K_REG_USP), m68k_get_reg(NULL, M68K_REG_ISP), frame);
+        fclose(f);
+        snaps[k].n++; snaps[k].left--;
+    }
     if (pc == bp_addr) {
         fprintf(stderr, "[bp] %06X frame %ld line %ld D:", pc, frame, line_in_frame);
         for (int i = 0; i < 8; i++) fprintf(stderr, " %08X", m68k_get_reg(NULL, M68K_REG_D0 + i));
         fprintf(stderr, " A:"); for (int i = 0; i < 8; i++) fprintf(stderr, " %08X", m68k_get_reg(NULL, M68K_REG_A0 + i));
-        fprintf(stderr, "\n");
+        uint32_t sp = m68k_get_reg(NULL, M68K_REG_A7);
+        fprintf(stderr, " stack: %08X %08X %08X %08X\n", rd32(sp), rd32(sp + 4), rd32(sp + 8), rd32(sp + 12));
     }
     if (pc < ROMBASE || pc >= ROMBASE + 0x100) return;
     uint32_t sp = m68k_get_reg(NULL, M68K_REG_A7);
@@ -802,6 +825,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--disk")) { FILE *f = fopen(argv[++i], "rb"); fseek(f, 0, 2); disksize = ftell(f); fseek(f, 0, 0); diskimg = malloc(disksize); fread(diskimg, 1, disksize, f); fclose(f); }
         else if (!strcmp(argv[i], "--bp")) bp_addr = strtol(argv[++i], 0, 16);
         else if (!strcmp(argv[i], "--shots-every")) { char *s = argv[++i]; every = atoi(s); snprintf(every_prefix, sizeof every_prefix, "%s", strchr(s, ':') + 1); }
+        else if (!strcmp(argv[i], "--snap")) { struct snap *q = &snaps[nsnaps++]; sscanf(argv[++i], "%x:%d:%199s", &q->addr, &q->left, q->prefix); }
+        else if (!strcmp(argv[i], "--calls")) { sscanf(argv[++i], "%ld:%ld:%255s", &calls_f0, &calls_f1, calls_file); call_counts = calloc(RAMSIZE / 2, 4); }
         else if (!strcmp(argv[i], "--pclog")) { char fn[256]; sscanf(argv[++i], "%ld:%ld:%255s", &pclog_f0, &pclog_f1, fn); pclog_f = fopen(fn, "w"); pc_counts = calloc(RAMSIZE / 2, 4); }
         else if (!strcmp(argv[i], "--shot") || !strcmp(argv[i], "--dump")) {
             struct ev *e = &evs[nev++]; e->type = argv[i][2] == 's' ? 0 : 1; sscanf(argv[++i], "%ld:%255s", &e->frame, e->file); }
@@ -844,6 +869,11 @@ int main(int argc, char **argv)
         if (every && frame % every == 0) { char fn[300]; snprintf(fn, sizeof fn, "%s%05ld.ppm", every_prefix, frame); write_ppm(fn); }
     }
     fprintf(stderr, "[emu] stopped at frame %ld pc=%06X sr=%04X\n", frame, m68k_get_reg(NULL, M68K_REG_PC), m68k_get_reg(NULL, M68K_REG_SR));
+    if (call_counts) {
+        FILE *f = fopen(calls_file, "w");
+        for (uint32_t i = 0; i < RAMSIZE / 2; i++) if (call_counts[i]) fprintf(f, "%06X %u\n", i * 2, call_counts[i]);
+        fclose(f);
+    }
     if (pclog_f) {
         for (uint32_t i = 0; i < RAMSIZE / 2; i++) if (pc_counts[i]) fprintf(pclog_f, "%06X %u\n", i * 2, pc_counts[i]);
         fclose(pclog_f);
