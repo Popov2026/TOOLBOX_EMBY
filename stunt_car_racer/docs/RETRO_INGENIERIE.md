@@ -171,6 +171,15 @@ depuis `$1455A` (ligue normale) ou `$1455A+11` (super ligue, drapeau `$110CA`) v
 `$108E2…$108EC` : poussée 240 / 320, allure de l'adversaire (`$108E6/7`, 0x00EC / 0x013A),
 période de consommation du boost (16 / 12 ticks), tolérance aux chocs (0 / 1).
 
+**Port JavaScript** : `replica/js/physics_orig.js` réécrit toute la routine `$4EEB0` et ses
+36 sous-routines en code lisible (`physicsStep`), en virgule fixe identique. Validation :
+`test/shadow_test.js` rejoue chaque routine sur une copie de la mémoire d'entrée et compare
+aux écritures de l'original (8 circuits × 600 ticks : exact) ; `test/jsphysics_test.js`
+joue une partie avec la physique d'origine et une avec le port : trajectoires identiques
+bit à bit. Particularités conservées : `move.b $FF.l,D0` au lieu de `#$FF` (`$497C8`, lit un
+octet de la table des vecteurs), contrôle anti-piratage de la direction, roue « dans le
+vide » (`$49D50` : sol forcé à 0x1000, registre `$10984`).
+
 Ces constantes sont exposées comme réglages du mode Original (`Engine.applyTuning`). Elles
 sont réécrites **après** la somme de contrôle du démarrage (`$10106`, qui couvre tout le
 code et bloquerait le jeu).
@@ -188,6 +197,7 @@ code et bloquerait le jeu).
 
 ## 7. Reste à faire
 
-* Porter la physique décompilée (§8) en code lisible dans le Remake.
+* Porter le reste de la logique par tick (entrées `$4AE7E`, suivi de pièce et tours dans
+  `$51BCC`, adversaire) pour que le Remake tourne entièrement sur le code décompilé.
 * Décompiler la projection 3D pour l'échelle verticale et le champ de vision exacts.
 * IA des adversaires, pont-levis animé (Draw Bridge), ligue / divisions.

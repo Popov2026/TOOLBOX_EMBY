@@ -72,6 +72,8 @@ node test/sim.js disque.st 150      # Remake : pilote automatique sur les 8 circ
 node test/engine_test.js disque.st 0 60     # moteur fidèle : démarrage, entraînement, ticks
 node test/cpu_vs_musashi.js snap/in snap/out 4EEB0   # CPU JS contre Musashi (instantanés stemu --snap)
 node test/engine_vs_emu.js snap/loop disque.st 0 149 # boucle de course JS contre l'émulateur
+node test/shadow_test.js disque.st 0 600    # chaque routine de physique portée contre l'original
+node test/jsphysics_test.js disque.st 0 400 # partie complète : physique 68000 contre physique JS
 node test/trace.js disque.st 0 30   # trace détaillée d'un circuit
 NODE_PATH=$(npm root -g) node test/shot.js disque.st 0 /tmp/capture   # captures Chromium
 ```
@@ -90,4 +92,7 @@ NODE_PATH=$(npm root -g) node test/shot.js disque.st 0 /tmp/capture   # captures
 * Physique d'origine décompilée dans ses grandes lignes (docs §8) ; ses constantes
   (gravité, poussée, freinage, pas de temps, amortissement, boost, tolérance aux chocs)
   sont **réglables dans le mode Original**.
-* Prochaine étape : porter cette physique en code lisible dans le Remake.
+* Physique d'origine **entièrement portée en JavaScript lisible** (`replica/js/physics_orig.js`),
+  validée bit à bit contre l'original ; le mode Original peut l'utiliser à la place du code
+  68000 (réglage « Physique exécutée par le code JS décompilé »), avec une adhérence réglable.
+* Prochaine étape : porter le reste de la logique par tick pour un Remake 100 % décompilé.

@@ -375,13 +375,299 @@ SCR.OrigPhysics = (function () {
     if (M.b(0x10967)) sound(M, K, 3);
   }
 
+
+  /* ------------------------------------------------------------ circuit : paramètres de la pièce ($4D3D2) */
+  function ptr6502(raw) { return 0x13670 + ((((raw & 0xff) << 8) | (raw >>> 8)) + 0x4f00 & 0xffff); }
+  function pieceParams(M, d1) {
+    var bba = M.b(0x10bba + d1);
+    M.wb(0x10963, bba);
+    M.ww(0x10a76, M.w(0x13690 + ((bba << 1) & 0xff)));
+    var c1e = M.b(0x10c1e + d1);
+    M.wb(0x109c6, (c1e >> 7) * 2);
+    M.ww(0x10a7a, M.w(0x13690 + ((c1e << 1) & 0xff)));
+    M.ww(0x109f8, M.w(0x10d4a + ((d1 << 1) & 0xff)));
+    M.ww(0x109fa, M.w(0x10e12 + ((d1 << 1) & 0xff)));
+    var ce6 = M.b(0x10ce6 + d1);
+    M.wb(0x10a34, ce6 & 0xc0);
+    M.wb(0x10a1c, ((ce6 & 0x10) << 3) & 0xff);
+    var t = ce6 & 0xf;
+    M.wb(0x10970, t);
+    M.ww(0x10aa6, M.w(0x13670 + 2 * t));
+    var a = ptr6502(M.w(0x10aa6));
+    M.wb(0x10937, M.b(a + 1));
+    var d2 = M.b(a), n = M.b(a + d2); d2++;
+    M.wb(0x10981, n); M.wb(0x10943, (n << 1) & 0xff);
+    M.wb(0x10982, (n - 2) & 0xff); M.wb(0x10944, ((n - 2) << 1) & 0xff);
+    M.wb(0x10954, ((n >> 1) - 1) & 0xff);
+    M.wb(0x10a2e, (M.b(a + d2) & 1) << 7); d2++;
+    M.wb(0x10965, M.b(a + d2)); d2++;
+    M.wb(0x109c3, M.b(a + d2)); d2 += 3;
+    M.wb(0x109be, M.b(a + d2));
+  }
+  function nextPiece(M) { var d = (M.b(0x1096f) + 1) & 0xff; if (((d << 24) >> 24) >= M.sb(0x11114)) d = 0; M.wb(0x1096f, d); return d; }
+  function prevPiece(M) { var d = (M.b(0x1096f) - 1) & 0xff; if (d & 0x80) d = (M.b(0x11114) - 1) & 0xff; M.wb(0x1096f, d); return d; }
+
+  /* hauteur de la route à la section d1 (bord gauche si d1 pair, droit si impair), en y-jeu ($495F2) */
+  function sectionHeight(M, A4, A5, d1) {
+    var v, x;
+    if (M.sb(0x10963) < 0) {
+      var d2 = d1 & 0xfe, P = (d1 & 1) ? A5 : A4;
+      v = (((M.b(P + d2) & 0x7f) << 8) | M.b(P + d2 + 1)) + M.w((d1 & 1) ? 0x109fa : 0x109f8);
+    } else {
+      var i = (d1 & 0xff) >>> 1;
+      x = M.b(((d1 & 1) ? A5 : A4) + i);
+      v = (((x & 0xf) << 8) | ((x << 1) & 0xe0)) + M.w((d1 & 1) ? 0x109fa : 0x109f8);
+    }
+    return s16(v) >> 5;
+  }
+
+  /* $499CC : la roue a franchi le bout de la pièce -> pièce suivante / précédente */
+  function crossPiece(M) {
+    var forward = ((M.b(0x10a2a) ^ M.b(0x10a1c)) & 0x80) === 0, toEnd;
+    if (forward) { pieceParams(M, nextPiece(M)); toEnd = M.sb(0x10a1c) < 0; }
+    else { pieceParams(M, prevPiece(M)); toEnd = M.sb(0x10a1c) >= 0; }
+    if (toEnd) { M.wb(0x1098d, (M.b(0x10981) - 4) & 0xff); if (M.sb(0x10a2a) < 0) return; }
+    else { M.wb(0x1098d, 0); if (M.sb(0x10a2a) >= 0) return; }
+    var b = (-M.b(0x10a2b)) & 0xff; M.wb(0x10a2b, b || 0xff);
+    b = (-M.b(0x10a37)) & 0xff; M.wb(0x10a37, b || 0xff);
+  }
+
+  /* $49A9C : interpolation bilinéaire de la hauteur sous la roue -> $10902 (y 24.8) */
+  function interpolate(M) {
+    var t = M.b(0x10a37);
+    var d5 = (s16(M.w(0x109ee) - M.w(0x109ec)) * t + (M.sw(0x109ec) << 8)) | 0;
+    var d0 = (s16(M.w(0x109f2) - M.w(0x109f0)) * t + (M.sw(0x109f0) << 8)) | 0;
+    var u = M.b(0x10a2b);
+    d0 = (d0 - d5) | 0;
+    var big = Math.abs(d0) >= 0x8000;
+    if (big) d0 = d0 >> 3;
+    var lw = d0 & 0xffff, r;
+    if (lw & 0x8000) { lw = (-lw) & 0xffff; r = -(((lw * u) >>> 0) & 0xffffff00); }
+    else r = (lw * u) >>> 0;
+    r = r | 0;
+    if (big) r = (r << 3) | 0;
+    M.wl(0x10902, ((r >> 8) + d5) | 0);
+  }
+
+  /* $49D50 : roue au bord de la route */
+  function roadEdge(M) {
+    var d0 = M.w(0x10a0c);
+    if (!(d0 & 0x8000)) { d0 = (0x180 - d0) & 0xffff; if (d0 & 0x8000) d0 = (-d0) & 0xffff; }
+    else d0 = (-d0) & 0xffff;
+    var d3 = (M.l(0x10902) - ((d0 & 0xff) << 4) - 0x100) | 0;
+    if (s16(d0) > 0x30 || d3 < 0x1000) {            // roue dans le vide : le sol se dérobe
+      M.wl(0x10902, 0x1000);
+      M.wb(0x10984, (M.b(0x10984) >>> 1) | 0x80);
+      return;
+    }
+    M.wl(0x10902, d3);
+    var f = (M.b(0x10a1c) ^ M.b(0x10a0c)) & 0x80;
+    M.wb(0x109c4, f || 0x40);
+  }
+
+  /* $49B3A : hauteur du sol sous la roue (lissée si la voiture est presque à plat) */
+  function groundHeight(M, d1) {
+    interpolate(M);
+    var off = (d1 << 1) & 0xff, a = 0x10a8e + off;
+    var f = M.b(0x1094f); M.wb(0x1094f, f & 0x7f);
+    if (f & 0x80) roadEdge(M);
+    if (M.sb(0x10b46) >= 10) { M.wl(a, M.l(0x10902)); return; }
+    var p = M.sb(0x10ace); if (p < 0) p = (((-p) << 24) >> 24);
+    if (p > 5) { M.wl(a, M.l(0x10902)); return; }
+    var sum = (M.l(a) >>> 0) + (M.l(0x10902) >>> 0);
+    M.wl(a, Math.floor(sum / 2) | 0);
+  }
+
+  /* $49718 : position des trois roues sur la route (pièce, section, hauteur) */
+  function wheelContacts(M) {
+    var d1 = M.b(0x10906); M.wb(0x1096f, d1); pieceParams(M, d1);
+    M.wb(0x10984, 0);
+    for (var w = 4; w >= 0; w -= 2) {
+      M.wb(0x109e3, w);
+      if (M.b(0x10906) !== M.b(0x1096f)) { M.wb(0x1096f, M.b(0x10906)); pieceParams(M, M.b(0x10906)); }
+      M.wb(0x10904, M.b(0x10965));
+      var d0 = (s16(M.w(0x10aec + w)) >> 4) + M.w(0x10a48) & 0xffff, b;
+      if (d0 >= 0x180) {                               // hors de la largeur de route
+        M.wb(0x1094f, M.b(0x1094f) | 0x80); M.ww(0x10a0c, d0);
+        b = (d0 & 0x8000) ? 0 : 0xff;
+      } else {
+        var q = q15(d0, (M.b(0x10904) << 7) & 0x7fff);
+        b = (q >= 0x100 ? M.b(0xff) : q) & 0xff;         // sic : l'original lit l'octet $FF (et non #$FF)
+      }
+      M.wb(0x10a37, b);
+      if (M.sb(0x10a1c) < 0) b ^= 0xff;
+      if (w === 4) M.wb(0x1098b, b);
+      M.wb(0x10904, M.b(0x109c3));
+      var d = q15(s16(M.w(0x10af2 + w)) >> 3, (M.b(0x10904) << 7) & 0x7fff);
+      M.ww(0x10a2a, (d + M.w(0x108fa)) & 0xffff);
+      var sec = (M.b(0x10a2a) << 1) & 0xff;
+      M.wb(0x1098d, sec);
+      if ((sec & 0x80) || ((sec << 24) >> 24) >= M.sb(0x10982)) crossPiece(M);
+      var A4 = ptr6502(M.w(0x10a76)), A5 = ptr6502(M.w(0x10a7a)), k, h = [0x109ec, 0x109ee, 0x109f0, 0x109f2];
+      if (M.sb(0x10a1c) >= 0) { k = M.b(0x1098d); for (var i = 0; i < 4; i++) M.ww(h[i], sectionHeight(M, A4, A5, (k + i) & 0xff) & 0xffff); }
+      else { k = (M.b(0x10981) - M.b(0x1098d) - 4) & 0xff; for (var j = 0; j < 4; j++) M.ww(h[3 - j], sectionHeight(M, A4, A5, (k + j) & 0xff) & 0xffff); }
+      groundHeight(M, w);
+    }
+  }
+
+  /* $4EF22 : positions latérales/longitudinales des roues */
+  function wheelOffsets(M) {
+    var d4 = s16((M.sw(0x6ef1a) >> 1) - (M.sw(0x6ef10) >> 1)) >> 5;
+    var d5 = s16((M.sw(0x6ef14) >> 1) - (M.sw(0x6ef1e) >> 1)) >> 5;
+    var d0 = M.sw(0x6ef20) >> 5, d3 = M.sw(0x6ef22) >> 5;
+    M.ww(0x10af0, -d0 & 0xffff); M.ww(0x10af6, -d3 & 0xffff);
+    M.ww(0x10aec, (d0 - d4) & 0xffff); M.ww(0x10aee, (d0 + d4) & 0xffff);
+    M.ww(0x10af2, (d3 - d5) & 0xffff); M.ww(0x10af4, (d3 + d5) & 0xffff);
+  }
+
+  /* $4F1C4 : hauteur des trois roues (caisse inclinée) */
+  function wheelHeights(M, K) {
+    var c = cos(M, K, M.w(0x10ace));
+    M.ww(0x109e0, c & 0xffff);
+    var r = cos(M, K, M.w(0x10ad2)) * 8, d3 = c * 16, y = M.l(0x10ac6);
+    M.wl(0x10a86, ((y - d3) | 0) >> 8);
+    var d4 = (y + d3) | 0;
+    M.wl(0x10a82, ((d4 - r) | 0) >> 8);
+    M.wl(0x10a7e, ((d4 + r) | 0) >> 8);
+  }
+
+  /* $4E508 : vitesse latérale absolue ; décroissance du compteur $10A4C en l'air */
+  function lateralSpeed(M) {
+    var v = M.sw(0x10b1a); if (v < 0) v = s16(-v);
+    M.ww(0x10b46, v & 0xffff);
+    if (!M.b(0x10968)) { M.ww(0x10a4c, (M.w(0x10a4c) - (M.w(0x10a4c) >>> 2)) & 0xffff); return; }
+    // au sol : niveau du crissement des pneus
+    if (s16(v) < 0x800) M.ww(0x10a4c, (v << 3) & 0xffff);
+    else { var t = ((v << 1) & 0xffff) + 0x3000; M.ww(0x10a4c, t > 0xffff ? 0xff00 : t); }
+  }
+
+  /* limite d'adhérence = 2 × charge, nulle en l'air ($4F7E4) */
+  var gripScale = 1;                                  // réglage de la réplique (1 = original)
+  function gripLimit(M) {
+    if (!M.b(0x10968)) return 0;
+    var g = (M.w(0x10b2c) << 1) & 0xffff;
+    return gripScale === 1 ? g : Math.min(0xffff, Math.round(g * gripScale));
+  }
+
+  /* $4F6C2 / $4F784 : forces de propulsion et latérale, bornées par l'adhérence */
+  function tyreForces(M) {
+    M.ww(0x10b1e, (M.w(0x10afa) + M.w(0x10b2c)) & 0xffff);
+    var hb = M.b(0x10b14) | M.b(0x10b1a);
+    if (!(hb & 0x80) && M.b(0x10b15)) M.ww(0x10b14, (M.w(0x10b14) - hb) & 0xffff);   // résistance
+    var t = M.sw(0x10b14); t = t < 0 ? (-t) & 0xffff : t;
+    var lim = gripLimit(M);
+    if (t >= lim) M.ww(0x10b14, (M.sb(0x10b14) < 0 ? -lim : lim) & 0xffff);         // patinage
+    M.ww(0x10b20, (M.w(0x10b14) + M.w(0x10b2e) + M.w(0x10afc)) & 0xffff);
+    var d4 = (M.w(0x10af8) + M.w(0x10b2a)) & 0xffff, d3 = s16(d4 - M.w(0x10b16));
+    d3 = d3 < 0 ? (-d3) & 0xffff : d3;
+    lim = gripLimit(M);
+    if (d3 < lim) { M.ww(0x10b1c, (M.w(0x10b2a) - M.w(0x10b16)) & 0xffff); M.wb(0x109ab, 0); }
+    else { M.ww(0x10b1c, (d4 - (M.sb(0x10b16) < 0 ? -lim : lim)) & 0xffff); M.wb(0x109ab, 0x80); }   // dérapage
+  }
+
+  /* $4F742 : couples de tangage et de roulis */
+  function torques(M) {
+    var d0 = (M.w(0x10b10) - (M.sw(0x10ada) >> 4)) & 0xffff;
+    if (M.b(0x10968)) d0 = (d0 + (M.sw(0x10b20) >> 2)) & 0xffff;
+    M.ww(0x10ae6, d0);
+    M.ww(0x10aea, (M.w(0x10b12) - (M.sw(0x10ade) >> 4)) & 0xffff);
+  }
+
+  /* $4F7FE : frottement (proportionnel à la vitesse) */
+  function friction(M) {
+    var d7 = 1, d0;
+    var heavy = false;
+    if (M.b(0x10968)) {
+      var b = M.b(0x10b30); if (b & 0x80) b ^= 0xff;
+      if (((b << 24) >> 24) >= 3 || M.sb(0x10986) < 0) heavy = true;
+      else if (M.b(0x10a8c)) { d7 = 3; heavy = true; }
+      else if (M.b(0x109c9)) { d7 = 3; heavy = true; }
+    } else if (M.b(0x109c9)) { d7 = 3; heavy = true; }
+    if (heavy) d0 = 0x6000;
+    else {
+      d0 = 0;
+      [0x10b16, 0x10b18, 0x10b1a].forEach(function (a) { var v = M.sw(a); v = v < 0 ? s16(-v) : v; if (v > d0 || d0 === 0 && v < 0) d0 = Math.max(d0, v); });
+      d0 = Math.max(abs16(M.sw(0x10b16)), abs16(M.sw(0x10b18)), abs16(M.sw(0x10b1a)));
+      d7 = 5;
+      if (M.sb(0x109b1) < 0 && M.sb(0x109a2) >= 0) { d0 = d0 - 0xa00; if (d0 < 0) d0 = 0; }
+    }
+    for (var i = 0; i < 3; i++) {
+      var p = (M.sw(0x10ad4 + 2 * i) * s16(d0)) >> 16;
+      M.ww(0x10ae0 + 2 * i, (M.w(0x10ae0 + 2 * i) - (s16(p) >> d7)) & 0xffff);
+    }
+  }
+  function abs16(v) { return v < 0 ? s16(-v) : v; }
+
+  /* $4E55C : direction (rotation imposée + couple de lacet) */
+  function steering(M) {
+    var d1 = M.b(0x10906); M.wb(0x1096f, d1); pieceParams(M, d1);
+    var d3 = M.w(0x10a1c), d4 = ((M.w(0x10b44) - M.w(0x10ad0)) ^ d3) & 0xffff, d2 = 0;
+    if (M.sb(0x10937) < 0) { d2 = 2; if ((M.w(0x10a2e) ^ d3) & 0x8000) d2 = 4; }
+    d4 = (d4 + M.w(0x4e7a4 + d2)) & 0xffff;
+    var d0 = s16(d4) < 0 ? (-d4) & 0xffff : d4;
+    M.ww(0x10a14, d0); M.ww(0x109e0, d4);
+    M.ww(0x10a26, d0 >= 0x800 ? 0x7fff : (d0 << 4) & 0xffff);
+    if ((((M.b(0x10954) - M.b(0x108f4)) & 0xff) >>> 0) < 2) pieceParams(M, nextPiece(M));
+    M.wb(0x10947, M.b(0x10a2e) ^ M.b(0x10a1c));
+    var inp = M.b(0x109b0), v, path;
+    if (inp) {
+      M.wb(0x10905, inp ^ M.b(0x109e0));
+      if (M.sb(0x10937) < 0) {
+        if (((M.b(0x109b0) ^ M.b(0x10947)) & 0x80) === 0) { v = (M.b(0x109be) + 0x2d) & 0xff; if (M.sb(0x10905) >= 0) v = (v + M.b(0x10a26)) & 0xff; }
+        else { M.wb(0x109b0, M.b(0x10947)); v = (M.b(0x109be) - 0x23) & 0xff; }
+      } else { v = M.b(0x109be); if (M.sb(0x10905) >= 0) v = (v + M.b(0x10a26)) & 0xff; }
+      path = 'turn';
+    } else {
+      d4 = 0;
+      if (M.sb(0x10937) < 0) { M.wb(0x109b0, M.b(0x10947)); v = M.b(0x109be); path = 'turn'; }
+      else path = 'align';
+    }
+    if (path === 'turn') {                            // $4E766
+      M.wb(0x10904, v);
+      var q = q15(M.sw(0x10b1a), (v << 7) & 0x7fff);
+      if (M.sb(0x109b0) < 0) q = s16(-q);
+      d4 = (s16(q) >> 3) & 0xffff;
+      path = M.b(0x10a14) < 0x1e ? 'torque' : 'align';
+    }
+    if (path === 'align') {                           // $4E6AA : la voiture s'aligne sur la route
+      M.wb(0x109b0, M.b(0x109e0));
+      var a = M.w(0x10a14), d2b = a & 0xff, rot, done = false;
+      if (M.b(0x10a14)) { a = (a - 0x1e00) & 0xffff; if (!(a & 0x8000)) { rot = a; done = true; } else d2b = 0xff; }
+      if (!done) {
+        M.wb(0x10904, d2b);
+        var s = abs16(M.sw(0x10b1a)); s = (s + 0xa00) & 0xffff; if (s & 0x8000) s = 0x7f00;
+        rot = (q15(s16(s), (M.b(0x10904) << 7) & 0x7fff) & 0xffff) >>> 7;
+        if ((rot & 0xff) === 0) rot = (rot & 0xff00) | ((rot + 1) & 0xff);
+      }
+      if (M.sb(0x109e0) < 0) rot = (-rot) & 0xffff;
+      M.ww(0x10ad0, (M.w(0x10ad0) + rot) & 0xffff);
+    }
+    d4 = (d4 - M.w(0x10adc)) & 0xffff;               // $4E71E
+    if ((M.l(0x51894) >>> 0) !== 0xc0be145f || !M.b(0x10968)) d4 = 0;   // contrôle anti-piratage
+    M.ww(0x10ae8, d4);
+  }
+
+  /* $4EEB0 : un pas complet de la physique de la voiture */
+  function physicsStep(M, K) {
+    gripScale = K.grip === undefined ? 1 : K.grip;
+    buildMatrix(M, K); wheelOffsets(M); wheelContacts(M); wheelHeights(M, K);
+    localVelocity(M); lateralSpeed(M); gravity(M, K); suspension(M, K);
+    if (M.b(0x1095c)) {
+      tyreForces(M); steering(M); worldAcceleration(M); friction(M); torques(M);
+      integrateAngularVelocity(M, K); angleRates(M);
+    }
+    integrateVelocity(M, K); integratePosition(M, K);
+  }
+
   /* routines portées, par adresse d'origine */
   var ROUTINES = {
     0x4e8b2: buildMatrix, 0x4eb30: gravity, 0x4ead6: localVelocity, 0x4eb62: worldAcceleration,
     0x4ebbc: angleRates, 0x4f130: integrateVelocity, 0x4f17a: integrateAngularVelocity,
     0x4efa4: integratePosition, 0x4f220: suspension, 0x4f8e6: contactForces, 0x48878: crane,
-    0x50c34: collisionImpulse
+    0x50c34: collisionImpulse, 0x49718: wheelContacts,
+    0x4ef22: wheelOffsets, 0x4f1c4: wheelHeights, 0x4e508: lateralSpeed, 0x4f6c2: tyreForces, 0x4f742: torques,
+    0x4f7fe: friction, 0x4e55c: steering, 0x4eeb0: physicsStep
   };
 
-  return { Mem: Mem, V: V, constants: constants, ROUTINES: ROUTINES, cos: cos, sin: sin };
+  return { Mem: Mem, V: V, constants: constants, ROUTINES: ROUTINES, cos: cos, sin: sin, physicsStep: physicsStep };
 })();

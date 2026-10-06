@@ -56,7 +56,9 @@ SCR.PARAM_SPEC = [
     ['timeStep', 'Pas de temps de la simulation (× ; original 0xEE/256)', 1, 0.3, 1.07, 0.01],
     ['damping', 'Amortissement de la suspension (× ; original 0x114)', 1, 0, 3, 0.05],
     ['boostUse', 'Consommation du boost (×)', 1, 0, 4, 0.05],
-    ['shockTolerance', 'Tolérance aux chocs (+ ; dégâts des réceptions)', 0, -5, 20, 1] ] },
+    ['shockTolerance', 'Tolérance aux chocs (+ ; dégâts des réceptions)', 0, -5, 20, 1],
+    ['jsPhysics', 'Physique exécutée par le code JS décompilé (0/1)', 0, 0, 1, 1],
+    ['grip', 'Adhérence des pneus (× ; seulement avec la physique JS)', 1, 0.2, 4, 0.05] ] },
   { group: 'view', label: 'Affichage', items: [
     ['fov', 'Champ de vision (degrés)', 60, 30, 120, 1],
     ['eyeHeight', 'Hauteur des yeux (m)', 0.8, 0.3, 4, 0.01],

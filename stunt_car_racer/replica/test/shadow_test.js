@@ -10,6 +10,8 @@ const e = new SCR.Engine(new Uint8Array(fs.readFileSync(disk)));
 e.boot(); e.startPractice(+(track || 0));
 const c = e.cpu, R = SCR.OrigPhysics.ROUTINES, K = SCR.OrigPhysics.constants(c.mem);
 const LO = 0x10000, HI = 0x74000;
+// octets écrits par l'interruption VBL ($4EC24) si elle tombe pendant la routine
+const VBL = new Set([0x4ec20, 0x4ec21, 0x4ec22, 0x4ec23, 0x10a1e, 0x10a1f, 0x4ed0e, 0x4ed0f, 0x4edd0, 0x109cd]);
 const stats = {}; let pending = [];
 const step0 = c.step.bind(c);
 c.step = function () {
@@ -24,8 +26,10 @@ c.step = function () {
       p.fn(new SCR.OrigPhysics.Mem(copy), K);
       const st = stats[p.addr] || (stats[p.addr] = { calls: 0, bad: 0, ex: '' });
       st.calls++;
-      for (let a = LO; a < HI; a++) if (copy[a] !== this.mem[a] && !(a >= p.sp - 0x100 && a < p.sp + 8)) {
-        st.bad++; if (!st.ex) st.ex = '$' + a.toString(16) + ' port=' + copy[a].toString(16) + ' orig=' + this.mem[a].toString(16); break;
+      for (let a = LO; a < HI; a++) if (copy[a] !== this.mem[a] && !VBL.has(a) && !(a >= p.sp - 0x100 && a < p.sp + 8)) {
+        st.bad++;
+        if (!st.ex) { const l = []; for (let b = LO; b < HI && l.length < 12; b++) if (copy[b] !== this.mem[b] && !(b >= p.sp - 0x100 && b < p.sp + 8)) l.push('$' + b.toString(16) + ':' + copy[b].toString(16) + '/' + this.mem[b].toString(16)); st.ex = l.join(' '); }
+        break;
       }
     }
   }

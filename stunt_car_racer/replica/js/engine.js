@@ -152,6 +152,7 @@ SCR.Engine = (function () {
         c.pc = c.r32(c.a[7]); c.a[7] = (c.a[7] + 4) >>> 0; continue;
       }
       if (!this.renderOriginal && c.pc === A.render3d) { c.pc = c.r32(c.a[7]); c.a[7] = (c.a[7] + 4) >>> 0; continue; }
+      if (this.hooks && this.hooks[c.pc]) { this.callHook(c.pc); this.sinceVbl += 2230; continue; }
       c.step();
       if (c.stopped) { this.vbl(); this.sinceVbl = 0; continue; }
       if (++this.sinceVbl >= this.vblEvery) { this.sinceVbl = 0; this.vbl(); }
@@ -240,6 +241,22 @@ SCR.Engine = (function () {
     }
   };
 
+  /* remplace des routines du jeu par leur port JavaScript (physique décompilée) */
+  Engine.prototype.useJsPhysics = function (on, K) {
+    if (!on) { this.hooks = null; return; }
+    var base = SCR.OrigPhysics.constants(this.cpu.mem);
+    this.physK = Object.assign(base, K || {});
+    this.physM = new SCR.OrigPhysics.Mem(this.cpu.mem);
+    var self = this;
+    this.hooks = {};
+    this.hooks[0x4eeb0] = function () { SCR.OrigPhysics.physicsStep(self.physM, self.physK); };
+  };
+  Engine.prototype.callHook = function (pc) {
+    var c = this.cpu;
+    this.hooks[pc]();
+    c.pc = c.r32(c.a[7]); c.a[7] = (c.a[7] + 4) >>> 0;   // rts
+  };
+
   /* entrées : joystick {up, down, left, right, fire} */
   Engine.prototype.setInput = function (j) {
     var b = (j.up ? 1 : 0) | (j.down ? 2 : 0) | (j.left ? 4 : 0) | (j.right ? 8 : 0) | (j.fire ? 0x10 : 0);
@@ -263,6 +280,7 @@ SCR.Engine = (function () {
     while (k < n) {
       if (c.stopped) break;
       if (!this.renderOriginal && c.pc === A.render3d) { c.pc = c.r32(c.a[7]); c.a[7] = (c.a[7] + 4) >>> 0; continue; }
+      if (this.hooks && this.hooks[c.pc]) { this.callHook(c.pc); k += 2000; continue; }
       c.step(); k++;
     }
     this.vbl();

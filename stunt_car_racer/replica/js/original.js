@@ -88,7 +88,15 @@ SCR.OriginalMode = (function () {
     this.acc += dt * hz;
     var e = this.engine, n = 0;
     var key = JSON.stringify(this.P.physOrig);
-    if (key !== this.tuneKey) { this.tuneKey = key; e.setTuning(this.P.physOrig); }
+    if (key !== this.tuneKey) {
+      this.tuneKey = key; e.setTuning(this.P.physOrig);
+      var t = this.P.physOrig;
+      // physique décompilée : les constantes deviennent des paramètres JS (voir physics_orig.js)
+      if (t.jsPhysics) {
+        var k0 = SCR.OrigPhysics.constants(e.cpu.mem);
+        e.useJsPhysics(true, { grip: t.grip, dt: k0.dt, gravity: k0.gravity, damping: k0.damping });
+      } else e.useJsPhysics(false);
+    }
     while (this.acc >= 1 && n < 20) {
       e.setInput(this.joystick());
       e.runFrame();
