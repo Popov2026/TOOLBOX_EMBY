@@ -34,10 +34,16 @@ int scr_int_ack(int level);
 #define M68K_INT_ACK_CALLBACK(l) scr_int_ack(l)
 ")
 
-add_executable(m68kmake ${MUSASHI}/m68kmake.c)
+# m68kmake génère m68kops.c ; en compilation croisée, fournir un m68kmake compilé pour l'hôte (-DSCR_M68KMAKE=...)
+if(SCR_M68KMAKE)
+  set(M68KMAKE ${SCR_M68KMAKE})
+else()
+  add_executable(m68kmake ${MUSASHI}/m68kmake.c)
+  set(M68KMAKE m68kmake)
+endif()
 add_custom_command(OUTPUT ${GEN}/m68kops.c ${GEN}/m68kops.h
-  COMMAND m68kmake ${GEN} ${MUSASHI}/m68k_in.c
-  DEPENDS m68kmake ${MUSASHI}/m68k_in.c)
+  COMMAND ${M68KMAKE} ${GEN} ${MUSASHI}/m68k_in.c
+  DEPENDS ${M68KMAKE} ${MUSASHI}/m68k_in.c)
 add_library(musashi STATIC ${MUSASHI}/m68kcpu.c ${MUSASHI}/m68kdasm.c ${MUSASHI}/softfloat/softfloat.c ${GEN}/m68kops.c)
 target_include_directories(musashi PUBLIC ${GEN} ${MUSASHI})
 if(MSVC)
