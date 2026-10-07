@@ -35,6 +35,8 @@ hd.ini (facultatif)
   wind = 1          ; effet du vent de la course : l'image se couche vers l'extérieur et s'aplatit
                     ; avec la vitesse (1 par défaut pour les flammes, 0 = sans)
 
-Sans image ici, les flammes du boost sont les sprites d'origine agrandis en haute définition :
-même forme, même place, mêmes couleurs, même animation, contours lissés et léger halo.
-Vos images sont prioritaires.
+Les flammes du boost sont les sprites d'origine agrandis en haute définition : même forme,
+même place, mêmes couleurs, même animation, contours lissés et léger halo. Les images de
+flammes de ce dossier (sprite_06, 07, 08, 09, 49, 50) sont IGNORÉES, sauf avec la ligne
+hdflammes = 1 dans scr.ini. Les anciennes versions déposaient ici leurs propres flammes :
+vous pouvez supprimer ces fichiers.

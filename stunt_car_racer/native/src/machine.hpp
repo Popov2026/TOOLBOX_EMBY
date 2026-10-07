@@ -91,6 +91,7 @@ class Machine {
   bool spritePixels(int id, std::vector<int> &px, int &w, int &h) const;
   enum : uint8_t { W_OTHER = 0, W_SCENE = 1, W_SPRITE = 2, W_OPPONENT = 3 };
   bool inOpponent_ = false;       // dans la routine de dessin de la voiture adverse ($546DA)
+  bool inCrack_ = false;          // fissure du cadre (dégâts, $52F00-$52FA4) : tracée avec la routine de points du décor
   uint32_t oppReturn_ = 0;
   uint8_t *layers_ = nullptr;     // [RAMSIZE] classe ; [RAMSIZE..2×) valeur du décor ; [2×..3×) écrit par le décor
   static constexpr uint32_t RAMSIZE = 0x100000;

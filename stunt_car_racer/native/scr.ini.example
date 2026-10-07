@@ -10,6 +10,8 @@ volume = 0.8                  # 0 à 2
 hd = 0                        # 1 : démarrer en mode HD (touche F1 pour basculer)
 hdres = 1920x1080             # définition du mode HD (16/9)
 # hddir = hd                  # dossier des images de remplacement (défaut : hd à côté de scr.exe)
+# hdflammes = 0               # 1 = flammes dessinées avec les images sprite_06/07/08/09/49/50 du dossier hd
+#                              (par défaut : sprites d'origine agrandis, les images de flammes sont ignorées)
 
 # --- physique d'origine (1 = valeur du jeu)
 gravity = 1

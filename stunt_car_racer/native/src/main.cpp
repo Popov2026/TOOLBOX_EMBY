@@ -28,6 +28,8 @@
 #include <string>
 #include <vector>
 
+#define SCR_VERSION "v12"
+
 #include "hdview.hpp"
 #include "machine.hpp"
 
@@ -43,6 +45,7 @@ struct Options {
   double volume = 0.8;
   int hdW = 1920, hdH = 1080;
   std::string hdDir;
+  bool hdFlames = false;   // images de flammes du dossier hd/ (sinon : sprites d'origine agrandis)
   double speed = 1;
   Tuning tuning;
 };
@@ -55,6 +58,7 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "smooth") o.smooth = val != "0";
   else if (key == "hd") o.hd = val != "0";
   else if (key == "hddir") o.hdDir = val;
+  else if (key == "hdflammes" || key == "hdflames") o.hdFlames = val != "0";
   else if (key == "sound" || key == "son") o.sound = val != "0";
   else if (key == "volume") o.volume = std::clamp(d(), 0.0, 2.0);
   else if (key == "hdres") { int w = 0, h = 0; if (std::sscanf(val.c_str(), "%dx%d", &w, &h) == 2 && w >= 320 && h >= 200) { o.hdW = w; o.hdH = h; } }
@@ -215,6 +219,7 @@ int main(int argc, char **argv) {
   int hdImages = 0;
   auto newView = [&] {
     view = std::make_unique<HdView>(*m);
+    view->params.flameImages = o.hdFlames;
     m->enableLayers(true);   // couches toujours suivies : F1 bascule sans délai
     hdImages = view->loadAssets(*m, hdDir);
     if (!view->assets.report.empty()) std::fprintf(stderr, "images HD (%s) :\n%s", hdDir.c_str(), view->assets.report.c_str());
@@ -225,7 +230,7 @@ int main(int argc, char **argv) {
     fail(std::string("SDL : ") + SDL_GetError());
     return 1;
   }
-  SDL_Window *win = SDL_CreateWindow("Stunt Car Racer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 320 * o.scale,
+  SDL_Window *win = SDL_CreateWindow("Stunt Car Racer " SCR_VERSION, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 320 * o.scale,
                                      200 * o.scale, SDL_WINDOW_RESIZABLE | (o.fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0));
   SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, o.smooth ? "1" : "0");
   SDL_Renderer *ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
@@ -322,7 +327,7 @@ int main(int argc, char **argv) {
           else if (sc == SDL_SCANCODE_F1) {
             hd = !hd;
             applyMode(true);
-            if (!hd) SDL_SetWindowTitle(win, "Stunt Car Racer");
+            if (!hd) SDL_SetWindowTitle(win, "Stunt Car Racer " SCR_VERSION);
           }
           else if (sc == SDL_SCANCODE_F11 || sc == SDL_SCANCODE_F4 ||
                    ((sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER) && (ev.key.keysym.mod & KMOD_ALT))) {   // plein écran
@@ -387,8 +392,8 @@ int main(int argc, char **argv) {
       double el = double(SDL_GetPerformanceCounter() - fpsT0) / double(freq);
       if (el >= 1) {
         char title[160];
-        std::snprintf(title, sizeof title, "Stunt Car Racer - HD %dx%d - %.0f i/s - %d sprite(s) HD (F2 : recharger)", o.hdW,
-                      o.hdH, fpsN / el, hdImages);
+        std::snprintf(title, sizeof title, "Stunt Car Racer " SCR_VERSION " - HD %dx%d - %.0f i/s - flammes : %s", o.hdW,
+                      o.hdH, fpsN / el, o.hdFlames ? "images du dossier hd" : "sprites d'origine");
         SDL_SetWindowTitle(win, title);
         if (fpsLog) std::fprintf(stderr, "%s\n", title);
         fpsN = 0; fpsT0 = SDL_GetPerformanceCounter();

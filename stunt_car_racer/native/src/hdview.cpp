@@ -368,17 +368,25 @@ void HdView::addCar(const OppPose &o, double hs, const Machine &m) {
       Vec3 q[4] = {a[k], a[(k + 1) % 8], b[(k + 1) % 8], b[k]};
       r3d_.poly(q, 4, black);
     }
-    r3d_.poly(a, 8, grey);
-    r3d_.poly(b, 8, grey);
+    r3d_.poly(a, 8, black);   // roues noires, comme l'original
+    r3d_.poly(b, 8, black);
   };
-  const double wx = 78, rearZ = -90, frontZ = 95;
-  wheel(-wx, rearZ, 30, 34); wheel(wx, rearZ, 30, 34);
-  wheel(-wx + 4, frontZ, 24, 26); wheel(wx - 4, frontZ, 24, 26);
-  box(-52, 52, 14, 34, -130, 120, redLight, red, dark);      // châssis
-  box(-34, 34, 14, 30, 120, 150, redLight, red, dark);        // nez
-  box(-46, 46, 34, 58, -120, -10, red, dark, red);            // moteur / habitacle
-  box(-40, 40, 58, 64, -70, -20, pink, red, pink);            // arceau
-  box(-60, 60, 50, 56, -138, -118, redLight, dark, dark);     // aileron
+  // proportions mesurées sur la voiture d'origine vue de derrière : roues carrées aussi larges que
+  // hautes, cabine aussi large que deux roues et deux fois plus haute qu'elles, dont le toit (rose)
+  // descend vers l'avant
+  wheel(-69, -85, 25, 50); wheel(69, -85, 25, 50);
+  wheel(-66, 105, 23, 44); wheel(66, 105, 23, 44);
+  box(-44, 44, 12, 28, -110, 140, black, black, black);        // châssis sous la cabine
+  {   // cabine en coin : arrière haut, avant bas
+    const double x0 = -44, x1 = 44, yb = 28, zr = -120, zf = 150, yr = 99, yf = 45;
+    Vec3 rb0 = W(x0, yb, zr), rb1 = W(x1, yb, zr), rt0 = W(x0, yr, zr), rt1 = W(x1, yr, zr);
+    Vec3 fb0 = W(x0, yb, zf), fb1 = W(x1, yb, zf), ft0 = W(x0, yf, zf), ft1 = W(x1, yf, zf);
+    Vec3 rear[4] = {rb0, rb1, rt1, rt0}, front[4] = {fb0, ft0, ft1, fb1}, top[4] = {rt0, rt1, ft1, ft0};
+    Vec3 left[4] = {rb0, rt0, ft0, fb0}, right[4] = {rb1, fb1, ft1, rt1}, bottom[4] = {rb0, fb0, fb1, rb1};
+    r3d_.poly(rear, 4, red); r3d_.poly(front, 4, red); r3d_.poly(top, 4, redLight);
+    r3d_.poly(left, 4, pink); r3d_.poly(right, 4, pink); r3d_.poly(bottom, 4, black);
+  }
+  (void)dark; (void)grey;
 }
 
 void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, double focal, double cx, double cy,
@@ -515,8 +523,9 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
   const double xa = 32, xb = 288, la = ox + xa * s, lb = ox + xb * s;
   auto fx = [&](double u) { return u < xa ? u / xa * la : u >= xb ? lb + (u - xb) / (320 - xb) * (W - lb) : la + (u - xa) * s; };
   for (const SpriteDraw &e : visible_) {
-    const HdSprite *spr = spriteFor(e.id, m);
     bool flameId = std::find(std::begin(FLAME_IDS), std::end(FLAME_IDS), e.id) != std::end(FLAME_IDS);
+    // flammes : images du dossier hd/ seulement si demandé (d'anciennes versions y laissaient les leurs)
+    const HdSprite *spr = flameId && !params.flameImages ? nullptr : spriteFor(e.id, m);
     if (!spr && flameId && params.builtinFlames) {
       // image d'animation choisie par le jeu (6/7/49 à gauche, 8/9/50 à droite), à sa place exacte
       drawFlame(e.id, fx(e.x), e.y * s, s, m, out, W, H);

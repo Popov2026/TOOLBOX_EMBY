@@ -35,7 +35,8 @@ struct HdParams {
   bool cockpit = true;                     // incruster le cockpit d'origine
   double interpDelay = 1.0;                // retard d'affichage en ticks (interpolation)
   double minClearance = 18;                // l'œil reste au moins à cette hauteur au-dessus de la route
-  bool builtinFlames = true;               // flammes du boost calculées si hd/ n'en fournit pas
+  bool builtinFlames = true;               // flammes du boost : sprites d'origine agrandis en HD
+  bool flameImages = false;                // utiliser les images de flammes du dossier hd/ (sinon ignorées)
   bool opponent3D = true;                  // voiture adverse redessinée en 3D (sinon : pixels d'origine)
 };
 

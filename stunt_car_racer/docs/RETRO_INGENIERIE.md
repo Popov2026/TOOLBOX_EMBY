@@ -226,3 +226,8 @@ code et bloquerait le jeu).
   centre ≈ (153, 82), focale verticale ≈ 0,9 × horizontale, hauteurs ≈ 0,26 × brutes, œil
   ≈ 40 unités au-dessus de la position de la voiture. Ciel 7, sol 13, collines 5, route 1/2
   (alternance par pièce), flancs 10/15 (rouge/blanc), lignes 3.
+* **Dégâts** : trois compteurs `$10939`, `$1093A`, `$1093B` (augmentés par les chocs en `$50C08`) ;
+  leur moyenne donne `$109A0`, la longueur de la fissure du haut du cadre. `$52E5C` la prolonge
+  pixel par pixel (`$1093F` = longueur déjà tracée) avec la routine de points du décor `$5313E`,
+  dans les deux écrans. Tout est remis à zéro au début de chaque course (`$4AD0E` efface
+  `$108E2`-`$10BBA`). En mode HD, ces points sont classés « cockpit » et non « décor ».

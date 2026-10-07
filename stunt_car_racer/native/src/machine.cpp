@@ -32,7 +32,7 @@ static inline void markWrite(Machine *m, uint32_t a, uint32_t v, uint32_t pc, bo
   if (!changed && pc >= 0x567b0 && pc < 0x56880 && m->layers_[a] == Machine::W_OTHER) return;
   uint8_t cls = (pc >= 0x567b0 && pc < 0x56880) ? Machine::W_SPRITE
                 : m->inOpponent_                    ? Machine::W_OPPONENT
-                : scene                             ? Machine::W_SCENE
+                : scene && !m->inCrack_             ? Machine::W_SCENE
                                                     : Machine::W_OTHER;
   m->layers_[a] = cls;
   if (cls == Machine::W_SCENE) { m->layers_[Machine::RAMSIZE + a] = uint8_t(v); m->layers_[2 * Machine::RAMSIZE + a] = 1; }
@@ -159,8 +159,12 @@ void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const
     int x = i % 320, y = i / 320;
     return y < 16 || (y < 150 ? (x < 32 || x >= 288) : (x < 16 || x >= 304));
   };
+  // le noir n'est « vitre » que dans les coins hors de l'arceau : les encoches noires du haut du cadre
+  // (entre les rivets) restent opaques
   auto seed = [&](int i) {
-    if (!clear[i] && outside(i) && cls[i] != W_SCENE && (idx[i] == 7 || idx[i] == 0)) { clear[i] = 1; st.push_back(i); }
+    int x = i % 320;
+    bool blackOk = idx[i] == 0 && (x < 36 || x >= 284);
+    if (!clear[i] && outside(i) && cls[i] != W_SCENE && (idx[i] == 7 || blackOk)) { clear[i] = 1; st.push_back(i); }
   };
   for (int x = 0; x < 320; x++) seed(x);
   for (int y = 0; y < 200; y++) { seed(y * 320); seed(y * 320 + 319); }
@@ -387,6 +391,9 @@ void Machine::hook(uint32_t pc) {
       oppReturn_ = (uint32_t(ram[sp]) << 24 | ram[sp + 1] << 16 | ram[sp + 2] << 8 | ram[sp + 3]) & 0xffffff;
       inOpponent_ = true;
     } else if (inOpponent_ && pc == oppReturn_) inOpponent_ = false;
+    // fissure des dégâts dans le haut du cadre : fait partie du cockpit (opaque), pas du décor
+    if (pc == 0x52f00) inCrack_ = true;
+    else if (pc == 0x52fa4 || pc == 0x52e5c) inCrack_ = false;
   }
   if ((pc == A_SPRITE || pc == A_SPRITE_XY) && (layers_ || spriteWatch_.any())) recordSprite(pc);
   if (pc == A_DRAW_OPPONENT) oppDrawnInRace_ = true;
