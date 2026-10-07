@@ -377,10 +377,10 @@ void HdView::addCar(const OppPose &o, double hs, const Machine &m) {
   wheel(-69, -85, 25, 50); wheel(69, -85, 25, 50);
   wheel(-66, 105, 23, 44); wheel(66, 105, 23, 44);
   box(-44, 44, 12, 28, -110, 140, black, black, black);        // châssis sous la cabine
-  {   // cabine en coin : arrière haut, avant bas
-    const double x0 = -44, x1 = 44, yb = 28, zr = -120, zf = 150, yr = 99, yf = 45;
-    Vec3 rb0 = W(x0, yb, zr), rb1 = W(x1, yb, zr), rt0 = W(x0, yr, zr), rt1 = W(x1, yr, zr);
-    Vec3 fb0 = W(x0, yb, zf), fb1 = W(x1, yb, zf), ft0 = W(x0, yf, zf), ft1 = W(x1, yf, zf);
+  {   // cabine en coin : arrière haut en trapèze (plus étroit en haut et incliné vers l'avant), avant bas
+    const double x0 = -44, x1 = 44, xt = 37, yb = 28, zr = -120, zrt = -95, zf = 150, yr = 99, yf = 45;
+    Vec3 rb0 = W(x0, yb, zr), rb1 = W(x1, yb, zr), rt0 = W(-xt, yr, zrt), rt1 = W(xt, yr, zrt);
+    Vec3 fb0 = W(x0, yb, zf), fb1 = W(x1, yb, zf), ft0 = W(-xt, yf, zf), ft1 = W(xt, yf, zf);
     Vec3 rear[4] = {rb0, rb1, rt1, rt0}, front[4] = {fb0, ft0, ft1, fb1}, top[4] = {rt0, rt1, ft1, ft0};
     Vec3 left[4] = {rb0, rt0, ft0, fb0}, right[4] = {rb1, fb1, ft1, rt1}, bottom[4] = {rb0, fb0, fb1, rb1};
     r3d_.poly(rear, 4, red); r3d_.poly(front, 4, red); r3d_.poly(top, 4, redLight);
