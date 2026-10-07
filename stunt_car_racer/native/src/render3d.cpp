@@ -60,12 +60,37 @@ void Renderer3D::addClipped(const Vec3 *in, int n, uint32_t color, float fixedDe
     }
   }
   if (m < 3) return;
-  // projection + boîte englobante
+  // projection en double, puis découpage aux bords d'une zone un peu plus grande que l'écran : un sommet
+  // proche du plan proche se projette à des milliards de pixels, et en flottants simple précision les
+  // bords du polygone deviendraient des escaliers de gros blocs (sol vu avec un fort roulis)
   const double f = cam_.focal, fy = cam_.focalY;
+  double PX[48], PY[48], QX[48], QY[48];
+  int k = m;
+  for (int i = 0; i < m; i++) { PX[i] = cam_.cx + f * out[i].x / out[i].z; PY[i] = cam_.cy - fy * out[i].y / out[i].z; }
+  const double gx0 = -W_ - 64.0, gx1 = 2.0 * W_ + 64, gy0 = -H_ - 64.0, gy1 = 2.0 * H_ + 64;
+  for (int e = 0; e < 4 && k >= 3; e++) {
+    auto inside = [&](double x, double y) { return e == 0 ? x >= gx0 : e == 1 ? x <= gx1 : e == 2 ? y >= gy0 : y <= gy1; };
+    auto cut = [&](double ax, double ay, double bx, double by, double &x, double &y) {
+      double lim = e == 0 ? gx0 : e == 1 ? gx1 : e == 2 ? gy0 : gy1;
+      double t = e < 2 ? (lim - ax) / (bx - ax) : (lim - ay) / (by - ay);
+      x = ax + (bx - ax) * t; y = ay + (by - ay) * t;
+      if (e < 2) x = lim; else y = lim;
+    };
+    int q = 0;
+    for (int i = 0; i < k && q < 46; i++) {
+      int j = (i + 1) % k;
+      bool ai = inside(PX[i], PY[i]), bi = inside(PX[j], PY[j]);
+      if (ai) { QX[q] = PX[i]; QY[q] = PY[i]; q++; }
+      if (ai != bi) { cut(PX[i], PY[i], PX[j], PY[j], QX[q], QY[q]); q++; }
+    }
+    k = q;
+    for (int i = 0; i < k; i++) { PX[i] = QX[i]; PY[i] = QY[i]; }
+  }
+  if (k < 3) return;
   float xmin = 1e30f, xmax = -1e30f, ymin = 1e30f, ymax = -1e30f;
   int first = (int)sx_.size();
-  for (int i = 0; i < m; i++) {
-    float X = float(cam_.cx + f * out[i].x / out[i].z), Y = float(cam_.cy - fy * out[i].y / out[i].z);
+  for (int i = 0; i < k; i++) {
+    float X = float(PX[i]), Y = float(PY[i]);
     sx_.push_back(X); sy_.push_back(Y);
     xmin = std::min(xmin, X); xmax = std::max(xmax, X); ymin = std::min(ymin, Y); ymax = std::max(ymax, Y);
   }
@@ -85,7 +110,7 @@ void Renderer3D::addClipped(const Vec3 *in, int n, uint32_t color, float fixedDe
     ia = float(nx / (f * d)); ib = float(-ny / (fy * d));
     ic = float((nz - nx * cam_.cx / f + ny * cam_.cy / fy) / d);
   }
-  polys_.push_back({first, m, color, ia, ib, ic, ymin, ymax, fixedDepth});
+  polys_.push_back({first, k, color, ia, ib, ic, ymin, ymax, fixedDepth});
 }
 
 void Renderer3D::rasterBand(uint32_t *out, int y0, int y1) {

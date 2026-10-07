@@ -45,161 +45,109 @@ const Hills HILLS;
 
 }  // namespace
 
-HdView::HdView(const Machine &m) : tracks_(decodeTracks(m.image())) {
-  // bruit de valeur périodique (128×128, 4 octaves) pour les flammes
-  const int N = 128;
-  std::vector<float> g(size_t(N) * N);
-  uint32_t r = 12345;
-  for (auto &v : g) { r = r * 1664525u + 1013904223u; v = float((r >> 8) & 0xffff) / 65535.f; }
-  noise_.assign(size_t(N) * N, 0.f);
-  for (int oct = 0, cell = 32; oct < 4; oct++, cell /= 2) {
-    float amp = 0.5f / float(1 << oct);
-    for (int y = 0; y < N; y++)
-      for (int x = 0; x < N; x++) {
-        float fx = float(x) / cell, fy = float(y) / cell;
-        int x0 = int(fx), y0 = int(fy);
-        float tx = fx - x0, ty = fy - y0;
-        tx = tx * tx * (3 - 2 * tx); ty = ty * ty * (3 - 2 * ty);
-        int cn = N / cell;
-        auto G = [&](int a, int b) { return g[size_t((b % cn) * 37 + oct * 911) % g.size() * 0 + size_t(((b % cn) * cn + (a % cn)) * 7 + oct * 131) % g.size()]; };
-        float v = (G(x0, y0) * (1 - tx) + G(x0 + 1, y0) * tx) * (1 - ty) + (G(x0, y0 + 1) * (1 - tx) + G(x0 + 1, y0 + 1) * tx) * ty;
-        noise_[size_t(y) * N + x] += v * amp;
-      }
-  }
-  for (auto &v : noise_) v /= 0.9375f;
-}
+HdView::HdView(const Machine &m) : tracks_(decodeTracks(m.image())) {}
 
-float HdView::noiseAt(float x, float y) const {
-  const int N = 128;
-  float fx = x - std::floor(x / N) * N, fy = y - std::floor(y / N) * N;
-  int x0 = int(fx) % N, y0 = int(fy) % N, x1 = (x0 + 1) % N, y1 = (y0 + 1) % N;
-  float tx = fx - std::floor(fx), ty = fy - std::floor(fy);
-  return (noise_[size_t(y0) * N + x0] * (1 - tx) + noise_[size_t(y0) * N + x1] * tx) * (1 - ty) +
-         (noise_[size_t(y1) * N + x0] * (1 - tx) + noise_[size_t(y1) * N + x1] * tx) * ty;
-}
-
-// bouches d'échappement : taches de la silhouette du sprite de flamme d'origine (composantes 8-connexes)
-const std::vector<HdView::Jet> &HdView::jetsFor(int id, const Machine &m) {
-  auto it = jets_.find(id);
-  if (it != jets_.end()) return it->second;
-  std::vector<Jet> &out = jets_[id];
+// flamme du boost en haute définition, tirée pixel pour pixel du sprite d'origine : même silhouette
+// (les 4 flammes de chaque côté), même place, mêmes couleurs (bord jaune, cœur blanc) ; les contours
+// en escalier sont lissés par un agrandissement filtré, avec un léger halo autour.
+const HdView::FlameImg &HdView::flameFor(int id, double s, const Machine &m) {
+  FlameImg &F = flames_[id];
+  if (F.scale == s && !F.px.empty()) return F;
+  F = FlameImg{};
+  F.scale = s;
   std::vector<int> px;
   int w, h;
-  if (!m.spritePixels(id, px, w, h)) return out;
-  std::vector<int> lab(px.size(), 0);
-  int n = 0;
-  for (int i = 0; i < int(px.size()); i++) {
-    if (px[i] < 0 || lab[i]) continue;
-    n++;
-    std::vector<int> st{i};
-    lab[i] = n;
-    double sx = 0, sy = 0; int cnt = 0, ymaxB = 0;
-    std::vector<int> members;
-    while (!st.empty()) {
-      int k = st.back(); st.pop_back();
-      int x = k % w, y = k / w;
-      sx += x; sy += y; cnt++; ymaxB = std::max(ymaxB, y); members.push_back(k);
-      for (int dy = -1; dy <= 1; dy++)
-        for (int dx = -1; dx <= 1; dx++) {
-          int xx = x + dx, yy = y + dy;
-          if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
-          int q = yy * w + xx;
-          if (px[q] >= 0 && !lab[q]) { lab[q] = n; st.push_back(q); }
-        }
+  if (!m.spritePixels(id, px, w, h)) return F;
+  // champs à la résolution d'origine : présence de flamme et cœur blanc, avec un pixel de marge
+  const int M = 4, sw = w + 2 * M, sh = h + 2 * M;
+  std::vector<float> fire(size_t(sw) * sh, 0.f), core(fire.size(), 0.f);
+  for (int y = 0; y < h; y++)
+    for (int x = 0; x < w; x++) {
+      int v = px[size_t(y) * w + x];
+      if (v < 0) continue;
+      uint32_t c = m.paletteARGB(v);
+      int r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
+      size_t k = size_t(y + M) * sw + x + M;
+      fire[k] = 1.f;
+      core[k] = (b > 128 && r > 128 && g > 128) ? 1.f : 0.f;
     }
-    if (cnt >= 12) {
-      // base : milieu des 3 rangées les plus basses de la tache (la flamme naît au-dessus de la bouche)
-      double bx = 0; int bn = 0;
-      for (int k : members) if (k / w >= ymaxB - 2) { bx += k % w; bn++; }
-      // la flamme naît au centre de la bouche (entre le centre de la tache et sa base)
-      double r = std::sqrt(cnt / 3.14159);
-      out.push_back({(bx / bn + sx / cnt) / 2 + 0.5, std::min(double(ymaxB), sy / cnt + r * 0.35) + 0.5, r});
+  // flou gaussien séparable (sigma en pixels d'origine)
+  auto blur = [&](const std::vector<float> &in, double sigma) {
+    int rad = std::max(1, int(std::ceil(sigma * 3)));
+    std::vector<float> k(2 * rad + 1), tmp(in.size()), out(in.size());
+    float sum = 0;
+    for (int i = -rad; i <= rad; i++) sum += k[i + rad] = float(std::exp(-i * i / (2 * sigma * sigma)));
+    for (auto &v : k) v /= sum;
+    for (int y = 0; y < sh; y++)
+      for (int x = 0; x < sw; x++) {
+        float a = 0;
+        for (int i = -rad; i <= rad; i++) a += k[i + rad] * in[size_t(y) * sw + std::clamp(x + i, 0, sw - 1)];
+        tmp[size_t(y) * sw + x] = a;
+      }
+    for (int y = 0; y < sh; y++)
+      for (int x = 0; x < sw; x++) {
+        float a = 0;
+        for (int i = -rad; i <= rad; i++) a += k[i + rad] * tmp[size_t(std::clamp(y + i, 0, sh - 1)) * sw + x];
+        out[size_t(y) * sw + x] = a;
+      }
+    return out;
+  };
+  std::vector<float> fireS = blur(fire, 0.6), coreS = blur(core, 0.7), halo = blur(fire, 2.0);
+  auto sample = [&](const std::vector<float> &f, double u, double v) {   // bilinéaire, u/v en pixels d'origine
+    u -= 0.5; v -= 0.5;
+    int x0 = int(std::floor(u)), y0 = int(std::floor(v));
+    double tx = u - x0, ty = v - y0;
+    auto at = [&](int x, int y) { return (x < 0 || y < 0 || x >= sw || y >= sh) ? 0.f : f[size_t(y) * sw + x]; };
+    return (at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx) * (1 - ty) + (at(x0, y0 + 1) * (1 - tx) + at(x0 + 1, y0 + 1) * tx) * ty;
+  };
+  auto smooth = [](double a, double b, double x) { double t = std::clamp((x - a) / (b - a), 0.0, 1.0); return t * t * (3 - 2 * t); };
+  // couleurs du jeu : jaune (bord) et blanc (cœur)
+  uint32_t yel = 0xffffff00u, wht = 0xffffffffu;
+  for (int y = 0; y < h; y++)
+    for (int x = 0; x < w; x++) {
+      int v = px[size_t(y) * w + x];
+      if (v < 0) continue;
+      uint32_t c = m.paletteARGB(v);
+      if ((c & 255) > 128) wht = c; else yel = c;
     }
-  }
-  return out;
+  F.ox = -M * s; F.oy = -M * s;
+  F.w = int(std::ceil(sw * s)); F.h = int(std::ceil(sh * s));
+  F.px.assign(size_t(F.w) * F.h * 4, 0.f);
+  for (int Y = 0; Y < F.h; Y++)
+    for (int X = 0; X < F.w; X++) {
+      double u = (X + 0.5) / s, v = (Y + 0.5) / s;
+      double a = smooth(0.38, 0.62, sample(fireS, u, v));          // contour lissé de la silhouette d'origine
+      double wc = smooth(0.30, 0.65, sample(coreS, u, v));         // cœur blanc
+      double g = sample(halo, u, v) * 0.35 * (1 - a);               // halo (lumière ajoutée)
+      auto ch = [&](int sh8) {
+        double cy = (yel >> sh8) & 255, cw = (wht >> sh8) & 255;
+        return float((cy + (cw - cy) * wc) / 255.0);
+      };
+      float *o = &F.px[(size_t(Y) * F.w + X) * 4];
+      o[0] = float(a);                                   // couverture
+      o[1] = float(a) * ch(16); o[2] = float(a) * ch(8); o[3] = float(a) * ch(0);   // couleur prémultipliée
+      // halo : jaune orangé additif
+      o[1] += float(g * 1.0); o[2] += float(g * 0.75); o[3] += float(g * 0.15);
+    }
+  return F;
 }
 
-// jets de feu : cœur incandescent dans la bouche, cône qui s'évase vers le spectateur (à l'opposé du
-// point de fuite), mèches turbulentes, plus long et plus large avec le vent ; mélange additif
-void HdView::drawJets(const std::vector<Jet> &jets, double ox0, double oy0, double strength, double t, uint32_t *out, int W,
-                      int H, double s, double vpx, double vpy, const std::function<double(double)> &fx) {
-  const double wk = std::clamp(wind_, 0.0, 1.0);
-  struct P { double cx, cy, R, dx, dy, L, spread; int seed, x0, x1, y0, y1; };
-  std::vector<P> ps;
-  int seed = 0, ymin = H, ymax = 0;
-  for (const Jet &j : jets) {
-    seed++;
-    P p;
-    p.cx = fx(ox0 + j.x); p.cy = (oy0 + j.y) * s; p.R = std::max(4.0, j.r * s); p.seed = seed;
-    // direction : le feu monte au-dessus de la bouche ; en roulant, le vent l'incline un peu vers
-    // l'extérieur (l'arrière de la voiture)
-    double side = p.cx < vpx ? -1 : 1;
-    double dx = side * 0.35 * wk, dy = -1, dl = std::hypot(dx, dy);
-    p.dx = dx / dl; p.dy = dy / dl;
-    double flick = 0.75 + 0.5 * noiseAt(float(t * 9 + seed * 17), float(seed * 31));   // vacillement de chaque jet
-    p.L = p.R * (2.9 + 1.5 * wk) * strength * flick;
-    p.spread = 0;
-    double ext = p.R * 1.3 + p.spread * p.L;
-    p.x0 = std::max(0, int(std::min(p.cx - p.R * 1.4, p.cx + p.dx * p.L - ext)));
-    p.x1 = std::min(W, int(std::max(p.cx + p.R * 1.4, p.cx + p.dx * p.L + ext)) + 1);
-    p.y0 = std::max(0, int(std::min(p.cy - p.R * 1.4, p.cy + p.dy * p.L - ext)));
-    p.y1 = std::min(H, int(std::max(p.cy + p.R * 1.4, p.cy + p.dy * p.L + ext)) + 1);
-    ymin = std::min(ymin, p.y0); ymax = std::max(ymax, p.y1);
-    ps.push_back(p);
-  }
-  if (ps.empty()) return;
-  auto band = [&](int ya, int yb) {
-    for (const P &p : ps) {
-      const double nx = -p.dy, ny = p.dx, iR2 = 1.0 / (p.R * p.R);
-      for (int y = std::max(ya, p.y0); y < std::min(yb, p.y1); y++) {
-        uint32_t *o = out + size_t(y) * W;
-        for (int x = p.x0; x < p.x1; x++) {
-          double vx = x + 0.5 - p.cx, vy = y + 0.5 - p.cy;
-          double a = vx * p.dx + vy * p.dy, b = vx * nx + vy * ny, d2 = (vx * vx + vy * vy) * iR2;
-          // lueur dans la bouche (juste sous la base de la flamme)
-          double core = d2 < 3.0 ? std::exp(-d2 * 2.0) * 1.2 : 0.0;
-          double jet = 0;
-          if (a > -0.35 * p.R && a < p.L) {
-            double u = std::max(0.0, a) / p.L;
-            float n1 = noiseAt(float(a / p.R * 6 - t * 55 + p.seed * 40), float(p.seed * 23));
-            float n2 = noiseAt(float(a / p.R * 9 - t * 80 + p.seed * 11), float(b / p.R * 3 + p.seed * 7));
-            float n3 = noiseAt(float(a / p.R * 22 - t * 140), float(b / p.R * 14 + p.seed * 5));
-            // flamme de bougie : large à la base, effilée au bout, qui ondule de plus en plus vers la pointe
-            double width = p.R * 0.95 * std::pow(1 - u, 0.6) * (0.85 + 0.35 * n1) + 1e-6;
-            double bb = std::fabs(b + (n2 - 0.5) * p.R * 1.6 * u) / width;
-            if (bb < 1.3) {
-              double body = std::clamp(1.15 - bb, 0.0, 1.0);
-              double start = std::clamp((a + 0.35 * p.R) / (0.7 * p.R), 0.0, 1.0);
-              start = start * start * (3 - 2 * start);
-              double lick = std::clamp(0.7 + (n3 - 0.5) * 1.6 * u, 0.0, 1.0);   // mèches à la pointe
-              jet = std::pow(body, 0.6) * start * lick * (1.6 - 0.9 * u);
-            }
-          }
-          double hgt = std::max(core, jet) * strength;
-          if (hgt <= 0.01) continue;
-          hgt = std::min(hgt, 1.3);
-          // couleur du feu : rouge sombre -> orange -> jaune -> blanc
-          double r = std::clamp(hgt * 2.2, 0.0, 1.0), g = std::clamp(hgt * 2.0 - 0.6, 0.0, 1.0), bl = std::clamp(hgt * 2.2 - 1.7, 0.0, 1.0);
-          // le feu dense couvre le fond (visible même sur la route claire), le reste s'ajoute en lueur
-          double cover = std::clamp(hgt * 1.6 - 0.25, 0.0, 0.92), glow = std::clamp(hgt * 1.2, 0.0, 1.0) * 0.45;
-          uint32_t c = o[x];
-          double R0 = (c >> 16) & 255, G0 = (c >> 8) & 255, B0 = c & 255;
-          int R8 = std::min(255, int(R0 * (1 - cover) + 255 * r * (cover + glow)));
-          int G8 = std::min(255, int(G0 * (1 - cover) + 255 * g * (cover + glow)));
-          int B8 = std::min(255, int(B0 * (1 - cover) + 255 * bl * (cover + glow)));
-          o[x] = 0xff000000u | (uint32_t(R8) << 16) | (uint32_t(G8) << 8) | uint32_t(B8);
-        }
-      }
+void HdView::drawFlame(int id, double x0, double y0, double s, const Machine &m, uint32_t *out, int W, int H) {
+  const FlameImg &F = flameFor(id, s, m);
+  if (F.px.empty()) return;
+  int bx = int(std::lround(x0 + F.ox)), by = int(std::lround(y0 + F.oy));
+  for (int Y = std::max(0, -by); Y < F.h && by + Y < H; Y++) {
+    uint32_t *o = out + size_t(by + Y) * W;
+    for (int X = std::max(0, -bx); X < F.w && bx + X < W; X++) {
+      const float *f = &F.px[(size_t(Y) * F.w + X) * 4];
+      if (f[0] <= 0.f && f[1] <= 0.f) continue;
+      uint32_t c = o[bx + X];
+      auto mix = [&](int sh8, float add) {
+        return uint32_t(std::clamp(int(((c >> sh8) & 255) * (1 - f[0]) + add * 255 + 0.5f), 0, 255)) << sh8;
+      };
+      o[bx + X] = 0xff000000u | mix(16, f[1]) | mix(8, f[2]) | mix(0, f[3]);
     }
-  };
-  // bandes horizontales sur tous les cœurs (les jets se recouvrent : chaque bande les traite tous)
-  int nt = std::max(1, std::min(int(std::thread::hardware_concurrency()), 16));
-  std::vector<std::thread> th;
-  for (int k = 0; k < nt; k++) {
-    int ya = ymin + (ymax - ymin) * k / nt, yb = ymin + (ymax - ymin) * (k + 1) / nt;
-    th.emplace_back(band, ya, yb);
   }
-  for (auto &tt : th) tt.join();
 }
 
 void HdView::afterFrame(const Machine &m) {
@@ -270,7 +218,7 @@ int HdView::loadAssets(Machine &m, const std::string &dir) {
   return n;
 }
 
-// image HD d'un sprite : celle du dossier hd/ (les flammes sans image sont dessinées par drawJets)
+// image HD d'un sprite : celle du dossier hd/ (les flammes sans image sont dessinées par drawFlame)
 const HdSprite *HdView::spriteFor(int id, const Machine &) { return assets.sprite(id); }
 
 bool HdView::racing() const { return !snaps_.empty() && frame_ - lastTickFrame_ < 40; }
@@ -439,7 +387,7 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
   // couleurs : palette courante du jeu
   auto pal = [&](int i) { return m.paletteARGB(i); };
   uint32_t sky = pal(7), ground = pal(13), hill = pal(5), hillFar = shadeARGB(pal(5), 1.25), road = pal(1),
-           road2 = pal(2), line = pal(3), wall = pal(10), wall2 = pal(15);
+           road2 = pal(2), line = pal(3), line2 = pal(9), wall = pal(10), wall2 = pal(15);
 
   // caméra : position de la voiture + œil, dans le repère de la voiture
   Camera c;
@@ -481,6 +429,7 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
   const double lw = 0.035;    // largeur des lignes de bord (fraction de la largeur de route)
   for (size_t i = 0; i < n; i++) {
     const Section &A = tr.secs[i], &B = tr.secs[(i + 1) % n];
+    uint32_t lc = (i & 1) ? line : line2;   // lignes de bord : jaune et rouge sombre, une section sur deux (comme l'original)
     Vec3 aL{A.lx, A.ly * HSCALE, A.lz}, aR{A.rx, A.ry * HSCALE, A.rz}, bL{B.lx, B.ly * HSCALE, B.lz}, bR{B.rx, B.ry * HSCALE, B.rz};
     // flancs jusqu'au sol, rouges et blancs en alternance par pièce
     uint32_t wc = (A.piece & 1) ? wall2 : wall;
@@ -506,9 +455,9 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
     };
     quad(mid, rc);
     Vec3 ql[4] = {aL, aL1, bL1, bL};
-    quad(ql, line);
+    quad(ql, lc);
     Vec3 qr[4] = {aR1, aR, bR, bR1};
-    quad(qr, line);
+    quad(qr, lc);
   }
   if (opp && opp->valid) addCar(*opp, HSCALE, m);
   r3d_.finish(out);
@@ -569,9 +518,8 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
     const HdSprite *spr = spriteFor(e.id, m);
     bool flameId = std::find(std::begin(FLAME_IDS), std::end(FLAME_IDS), e.id) != std::end(FLAME_IDS);
     if (!spr && flameId && params.builtinFlames) {
-      // intensité selon l'image d'animation du jeu (6/8 la plus forte, 49/50 la plus faible)
-      double strength = (e.id == 6 || e.id == 8) ? 1.0 : (e.id == 7 || e.id == 9) ? 0.85 : 0.72;
-      drawJets(jetsFor(e.id, m), e.x, e.y, strength, T / 50.0, out, W, H, s, fx(params.cx), params.cy * s, fx);
+      // image d'animation choisie par le jeu (6/7/49 à gauche, 8/9/50 à droite), à sa place exacte
+      drawFlame(e.id, fx(e.x), e.y * s, s, m, out, W, H);
       continue;
     }
     if (!spr) continue;

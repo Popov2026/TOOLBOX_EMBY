@@ -6,7 +6,6 @@
 #include <deque>
 #include <map>
 #include <memory>
-#include <functional>
 #include <vector>
 
 #include "hdassets.hpp"
@@ -87,14 +86,11 @@ class HdView {
   Renderer3D r3d_;
   std::vector<uint32_t> overlay_;
   std::vector<SpriteDraw> visible_;
-  // flammes du boost calculées : jets sortant des bouches d'échappement, repérées sur les sprites d'origine
-  struct Jet { double x, y, r; };            // centre et rayon de la bouche (pixels d'origine, relatifs au sprite)
-  std::map<int, std::vector<Jet>> jets_;
-  std::vector<float> noise_;                 // bruit périodique 128×128
-  float noiseAt(float x, float y) const;
-  const std::vector<Jet> &jetsFor(int id, const Machine &m);
-  void drawJets(const std::vector<Jet> &jets, double ox0, double oy0, double strength, double t, uint32_t *out, int W, int H,
-                double s, double vpx, double vpy, const std::function<double(double)> &fx);
+  // flammes du boost en HD, calculées à partir des sprites d'origine (mises en cache par échelle)
+  struct FlameImg { double scale = 0, ox = 0, oy = 0; int w = 0, h = 0; std::vector<float> px; };   // a, r, g, b prémultipliés
+  std::map<int, FlameImg> flames_;
+  const FlameImg &flameFor(int id, double s, const Machine &m);
+  void drawFlame(int id, double x0, double y0, double s, const Machine &m, uint32_t *out, int W, int H);
   double windTarget_ = 0, wind_ = 0;   // vent relatif (0 à l'arrêt, 1 à pleine vitesse)
   const HdSprite *spriteFor(int id, const Machine &m);
   std::vector<int> mapX_, mapY_;
