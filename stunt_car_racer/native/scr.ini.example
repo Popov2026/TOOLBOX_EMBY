@@ -5,6 +5,8 @@ scale = 3                     # taille de la fenêtre (× 320×200)
 fullscreen = 0
 smooth = 0                    # 1 : lissage à l'agrandissement
 speed = 1                     # vitesse de la machine (1 = 50 Hz d'origine)
+hd = 0                        # 1 : démarrer en mode HD (touche F1 pour basculer)
+hdres = 1920x1080             # définition du mode HD (16/9)
 
 # --- physique d'origine (1 = valeur du jeu)
 gravity = 1

@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 extern "C" {
 #include "m68k.h"
@@ -16,7 +17,23 @@ namespace {
 constexpr uint32_t BASE = 0x10100;
 constexpr uint32_t A_BOOT = 0x103dc, A_CHECKSUM_DONE = 0x1041e, A_PREMENU = 0x4a5c6;
 constexpr uint32_t A_OVERVIEW = 0x4a80a, A_OVERVIEW_WAIT = 0x4af5c, A_RACE = 0x4a924, A_LOOPTOP = 0x4aa74;
-constexpr uint32_t A_WAITVBL = 0x4b0a6, A_VBLCOUNTER = 0x4ec20, A_TRACKSEL = 0x1112d;
+constexpr uint32_t SCREEN_LO = 0x40000;
+constexpr uint32_t A_DRAW_OPPONENT = 0x546da, A_RENDER = 0x51bcc, A_PHYSICS = 0x4eeb0, A_WAITVBL = 0x4b0a6, A_VBLCOUNTER = 0x4ec20, A_TRACKSEL = 0x1112d;
+
+// routines d'écriture à l'écran du jeu : remplissages de polygones du décor ($53166, $533EC-$53456,
+// $5461A-$546BE, $553D8-$55442 ; $53212-$5327C dessinent le tableau de bord)
+// et blits de sprites masqués du cockpit ($567B0-$56880)
+static inline void markWrite(Machine *m, uint32_t a, uint32_t v, uint32_t pc) {
+  bool scene = (pc >= 0x53100 && pc < 0x531a0) || (pc >= 0x533a0 && pc < 0x53460) || (pc >= 0x54600 && pc < 0x546c0) ||
+               (pc >= 0x553a0 && pc < 0x55450);
+  uint8_t cls = (pc >= 0x567b0 && pc < 0x56880) ? Machine::W_SPRITE
+                : m->inOpponent_                    ? Machine::W_OPPONENT
+                : scene                             ? Machine::W_SCENE
+                                                    : Machine::W_OTHER;
+  m->layers_[a] = cls;
+  if (cls == Machine::W_SCENE) m->layers_[Machine::RAMSIZE + a] = uint8_t(v);
+}
+
 constexpr uint32_t A_JOYSTICK = 0x106a6, A_KEYS = 0x6f02c;
 constexpr uint32_t HLE = 0xffe00;                 // « ROM » : RTE en fin de RAM
 constexpr uint32_t HLE_GEMDOS = HLE + 0x10, HLE_XBIOS = HLE + 0x20, HLE_LINEA = HLE + 0x30, SENTINEL = HLE + 0x40;
@@ -30,12 +47,62 @@ constexpr uint32_t CAR_TABLE = 0x1455a, CAR_BLOCK = 0x108e2;
 
 Machine *Machine::current = nullptr;
 
+void Machine::enableLayers(bool on) {
+  if (on && !layers_) layers_ = new uint8_t[2 * RAMSIZE]();
+  if (!on && layers_) { delete[] layers_; layers_ = nullptr; }
+}
+
+void Machine::overlayARGB(uint32_t *out) const {
+  static uint8_t idx[320 * 200], sidx[320 * 200], cls[320 * 200];
+  screenIndex(idx);
+  uint32_t base = vbase();
+  for (int y = 0; y < 200; y++)
+    for (int g = 0; g < 20; g++) {
+      uint32_t a = base + y * 160 + g * 8;
+      for (int px = 0; px < 16; px++) {
+        int bit = 15 - px, o = px < 8 ? 0 : 1;
+        int i = y * 320 + g * 16 + px;
+        cls[i] = layers_ ? layers_[a + o] : W_OTHER;
+        if (layers_) {
+          const uint8_t *sh = layers_ + RAMSIZE + a;
+          uint16_t p0 = (sh[0] << 8) | sh[1], p1 = (sh[2] << 8) | sh[3], p2 = (sh[4] << 8) | sh[5], p3 = (sh[6] << 8) | sh[7];
+          sidx[i] = uint8_t(((p0 >> bit) & 1) | (((p1 >> bit) & 1) << 1) | (((p2 >> bit) & 1) << 2) | (((p3 >> bit) & 1) << 3));
+        }
+      }
+    }
+  // vitres latérales : bleu statique relié aux bords de l'écran (remplissage par diffusion)
+  static uint8_t clear[320 * 200];
+  std::memset(clear, 0, sizeof clear);
+  std::vector<int> st;
+  auto seed = [&](int i) {
+    if (!clear[i] && cls[i] != W_SCENE && (idx[i] == 7 || idx[i] == 0)) { clear[i] = 1; st.push_back(i); }
+  };
+  for (int x = 0; x < 320; x++) { seed(x); seed(199 * 320 + x); }
+  for (int y = 0; y < 200; y++) { seed(y * 320); seed(y * 320 + 319); }
+  while (!st.empty()) {
+    int i = st.back(); st.pop_back();
+    int x = i % 320, y = i / 320;
+    if (x > 0) seed(i - 1);
+    if (x < 319) seed(i + 1);
+    if (y > 0) seed(i - 320);
+    if (y < 199) seed(i + 320);
+  }
+  for (int i = 0; i < 64000; i++) {
+    // voiture adverse : seules les couleurs de la carrosserie sont gardées (pas le ciel, le sol, les collines, la route)
+    bool oppBg = cls[i] == W_OPPONENT && (idx[i] == 7 || idx[i] == 13 || idx[i] == 5 || idx[i] == 1 || idx[i] == 2 || idx[i] == 3);
+    bool transparent = clear[i] || cls[i] == W_SCENE || oppBg || (cls[i] == W_SPRITE && idx[i] == sidx[i]);
+    out[i] = transparent ? 0 : paletteARGB(idx[i]);
+  }
+}
+
+
 Machine::Machine(const Bytes &file) {
   ram = new uint8_t[RAMSIZE]();
   if (!(file.size() > 2 && file[0] == 0x60 && file[1] == 0x1a)) disk_ = file;
   Bytes prg = innerProgram(file);
   uint32_t bss = 0;
   Bytes img = relocate(prg, BASE, bss);
+  image_ = img;
   if (BASE + img.size() + bss > HLE) throw std::runtime_error("programme trop grand");
   std::memcpy(ram + BASE, img.data(), img.size());
   // contrôle : noms des circuits à l'adresse attendue
@@ -48,6 +115,7 @@ Machine::Machine(const Bytes &file) {
 }
 
 Machine::~Machine() {
+  enableLayers(false);
   if (current == this) current = nullptr;
   delete[] ram;
 }
@@ -81,15 +149,20 @@ uint32_t Machine::read8(uint32_t a) {
 
 void Machine::write8(uint32_t a, uint32_t v) {
   a &= 0xffffff; v &= 0xff;
-  if (a < RAMSIZE) { ram[a] = uint8_t(v); return; }
+  if (a < RAMSIZE) {
+    ram[a] = uint8_t(v);
+    if (a >= tagLo && a < tagHi) tags_[a - tagLo] = m68k_get_reg(nullptr, M68K_REG_PPC);
+    if (layers_ && a >= SCREEN_LO) markWrite(this, a, v, m68k_get_reg(nullptr, M68K_REG_PPC));
+    return;
+  }
   if (a >= 0xff8240 && a < 0xff8260) {
     int i = (a - 0xff8240) >> 1;
     palette_[i] = (a & 1) ? uint16_t((palette_[i] & 0xff00) | v) : uint16_t((palette_[i] & 0xff) | (v << 8));
     return;
   }
   switch (a) {
-    case 0xff8201: vbase_ = (vbase_ & 0xffff) | (v << 16); return;
-    case 0xff8203: vbase_ = (vbase_ & 0xff00ff) | (v << 8); return;
+    case 0xff8201: vbase_ = (vbase_ & 0xffff) | (v << 16); std::memcpy(dispSnap_, renderSnap_, 18); return;
+    case 0xff8203: vbase_ = (vbase_ & 0xff00ff) | (v << 8); std::memcpy(dispSnap_, renderSnap_, 18); return;
     case 0xff8800: ymSel_ = uint8_t(v); return;
     case 0xff8802: ym_[ymSel_ & 15] = uint8_t(v); return;
   }
@@ -173,6 +246,16 @@ void Machine::hook(uint32_t pc) {
   if (pc == stopAt_) {     // Musashi exécute l'instruction après le crochet : on la remplace par bra.s *
     reached_ = true; m68k_set_reg(M68K_REG_PC, PARK); m68k_end_timeslice(); return;
   }
+  if (debugHook) debugHook(*this, pc);
+  if (layers_) {   // voiture adverse : de l'entrée de $546DA jusqu'au retour à l'appelant
+    if (pc == A_DRAW_OPPONENT && !inOpponent_) {
+      uint32_t sp = m68k_get_reg(nullptr, M68K_REG_A7);
+      oppReturn_ = (uint32_t(ram[sp]) << 24 | ram[sp + 1] << 16 | ram[sp + 2] << 8 | ram[sp + 3]) & 0xffffff;
+      inOpponent_ = true;
+    } else if (inOpponent_ && pc == oppReturn_) inOpponent_ = false;
+  }
+  if (pc == A_PHYSICS) ticks_++;
+  if (pc == A_RENDER) { std::memcpy(renderSnap_, ram + 0x10ac2, 18); inOpponent_ = false; }
   if (skipWaits_ && pc == A_WAITVBL) ram[A_VBLCOUNTER] = 0;
   if (pc < HLE || pc >= HLE + 0x40) return;
   uint32_t sp = m68k_get_reg(nullptr, M68K_REG_A7);
@@ -281,13 +364,13 @@ void Machine::setJoystick(const Joystick &j) {
 
 void Machine::setKey(int sc, bool down) { ram[A_KEYS + (sc & 0x7f)] = down ? 0xb3 : 0; }
 
-void Machine::screenARGB(uint32_t *out) const {
-  uint32_t pal[16];
-  for (int i = 0; i < 16; i++) {
-    uint16_t c = palette_[i];
-    uint32_t r = ((c >> 8) & 7) * 255 / 7, g = ((c >> 4) & 7) * 255 / 7, bl = (c & 7) * 255 / 7;
-    pal[i] = 0xff000000u | (r << 16) | (g << 8) | bl;
-  }
+uint32_t Machine::paletteARGB(int i) const {
+  uint16_t c = palette_[i & 15];
+  uint32_t r = ((c >> 8) & 7) * 255 / 7, g = ((c >> 4) & 7) * 255 / 7, bl = (c & 7) * 255 / 7;
+  return 0xff000000u | (r << 16) | (g << 8) | bl;
+}
+
+void Machine::screenIndex(uint8_t *out) const {
   uint32_t base = vbase_ & 0xfffffe;
   for (int y = 0; y < 200; y++)
     for (int x = 0; x < 20; x++) {
@@ -295,11 +378,16 @@ void Machine::screenARGB(uint32_t *out) const {
       if (a + 7 >= RAMSIZE) continue;
       uint16_t p0 = (ram[a] << 8) | ram[a + 1], p1 = (ram[a + 2] << 8) | ram[a + 3];
       uint16_t p2 = (ram[a + 4] << 8) | ram[a + 5], p3 = (ram[a + 6] << 8) | ram[a + 7];
-      for (int bit = 15; bit >= 0; bit--) {
-        int ci = ((p0 >> bit) & 1) | (((p1 >> bit) & 1) << 1) | (((p2 >> bit) & 1) << 2) | (((p3 >> bit) & 1) << 3);
-        out[y * 320 + x * 16 + (15 - bit)] = pal[ci];
-      }
+      for (int bit = 15; bit >= 0; bit--)
+        out[y * 320 + x * 16 + (15 - bit)] =
+            uint8_t(((p0 >> bit) & 1) | (((p1 >> bit) & 1) << 1) | (((p2 >> bit) & 1) << 2) | (((p3 >> bit) & 1) << 3));
     }
+}
+
+void Machine::screenARGB(uint32_t *out) const {
+  static uint8_t idx[320 * 200];
+  screenIndex(idx);
+  for (int i = 0; i < 320 * 200; i++) out[i] = paletteARGB(idx[i]);
 }
 
 // ------------------------------------------------------------------- réglages (docs §8)
@@ -349,7 +437,20 @@ unsigned int m68k_read_memory_32(unsigned int a) { return (m68k_read_memory_16(a
 void m68k_write_memory_8(unsigned int a, unsigned int v) { Machine::current->write8(a, v); }
 void m68k_write_memory_16(unsigned int a, unsigned int v) {
   a &= 0xffffff;
-  if (a + 1 < Machine::RAMSIZE) { Machine::current->ram[a] = uint8_t(v >> 8); Machine::current->ram[a + 1] = uint8_t(v); return; }
+  Machine *m = Machine::current;
+  if (a + 1 < Machine::RAMSIZE) {
+    m->ram[a] = uint8_t(v >> 8); m->ram[a + 1] = uint8_t(v);
+    if (a >= m->tagLo && a < m->tagHi) {
+      uint32_t pc = m68k_get_reg(nullptr, M68K_REG_PPC);
+      m->tags_[a - m->tagLo] = pc;
+      if (a + 1 < m->tagHi) m->tags_[a + 1 - m->tagLo] = pc;
+    }
+    if (m->layers_ && a >= scr::SCREEN_LO) {
+      uint32_t pc = m68k_get_reg(nullptr, M68K_REG_PPC);
+      scr::markWrite(m, a, v >> 8, pc); scr::markWrite(m, a + 1, v & 0xff, pc);
+    }
+    return;
+  }
   Machine::current->write8(a, v >> 8); Machine::current->write8(a + 1, v);
 }
 void m68k_write_memory_32(unsigned int a, unsigned int v) { m68k_write_memory_16(a, v >> 16); m68k_write_memory_16(a + 2, v & 0xffff); }

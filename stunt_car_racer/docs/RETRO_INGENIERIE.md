@@ -201,3 +201,26 @@ code et bloquerait le jeu).
   `$51BCC`, adversaire) pour que le Remake tourne entièrement sur le code décompilé.
 * Décompiler la projection 3D pour l'échelle verticale et le champ de vision exacts.
 * IA des adversaires, pont-levis animé (Draw Bridge), ligue / divisions.
+
+## 9. Rendu : couches de l'image, adversaire (mode HD natif)
+
+* **Qui écrit à l'écran** (relevé en marquant chaque octet de la mémoire vidéo avec le PC de
+  l'instruction qui l'a écrit) :
+  * décor 3D : remplissages de polygones `$53166`, `$533EC`-`$53456`, `$5461A`-`$546BE`
+    (remplissage de lignes déroulé), `$553D8`-`$55442` ;
+  * cockpit (roues, avant de la voiture, montants) : blits de sprites masqués `$567B4`
+    (alignés sur 16 pixels) et `$567DC` (décalés) ;
+  * tableau de bord : `$46C3E`-`$46D06` (chiffres), `$4B890` (barre de vitesse), `$53212`-`$5327C`.
+* **Synchronisation** : le rendu (`$51BCC`) part de l'état du tick courant, l'écran est échangé
+  (`$FF8201/03`) au tick suivant ; l'image affichée a donc un tick de retard sur la physique.
+  Le rendu dure plus de 6 trames dans les scènes chargées : le tick s'allonge alors.
+* **Adversaire** : pièce `$10907` (joueur : `$10906`), section dans la pièce `$108F6` et fraction
+  `$108F7`/256 (joueur : `$108F4`/`$108F5`) ; la conversion en position le long du circuit est
+  exacte (écart < 1 unité, vérifié sur la voiture du joueur). Décalage latéral du joueur :
+  mot signé `$10A46` (unités de géométrie, route de 384). La voiture adverse est dessinée par
+  `$546DA`, appelée depuis le tri en profondeur (`$55D7A`, emplacement `$109FC` fixé par
+  `$53C84` lorsque le rendu atteint la section de l'adversaire, `$10966`).
+* **Projection** (calée par optimisation sur ~80 % de pixels identiques) : focale ≈ 259 px,
+  centre ≈ (153, 82), focale verticale ≈ 0,9 × horizontale, hauteurs ≈ 0,26 × brutes, œil
+  ≈ 40 unités au-dessus de la position de la voiture. Ciel 7, sol 13, collines 5, route 1/2
+  (alternance par pièce), flancs 10/15 (rouge/blanc), lignes 3.

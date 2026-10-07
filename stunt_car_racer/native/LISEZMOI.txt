@@ -7,7 +7,8 @@ Lancement : placez l'image .st à côté de scr.exe et double-cliquez sur scr.ex
 
 Commandes : flèches = joystick (haut accélère, bas freine, gauche/droite),
 Espace ou Ctrl = bouton (boost), clavier ST complet pour les menus.
-Manette XInput reconnue. F11 plein écran, F5 recommencer,
+Manette XInput reconnue. F1 mode HD (1920x1080, 16/9, image fluide à la
+fréquence de l'écran), F11 plein écran, F5 recommencer,
 Page préc./suiv. circuit précédent/suivant (mode entraînement), F12 quitter.
 
 Réglages : scr.ini (gravité, poussée, freinage, pas de temps, amortissement,

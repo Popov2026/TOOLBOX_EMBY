@@ -15,6 +15,7 @@
 //           circuit précédent/suivant (entraînement), F5 recommencer.
 #include <SDL.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -27,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "hdview.hpp"
 #include "machine.hpp"
 
 using namespace scr;
@@ -37,7 +39,8 @@ struct Options {
   std::string disk;
   int track = -1;  // -1 : jeu complet
   int scale = 3;
-  bool fullscreen = false, smooth = false;
+  bool fullscreen = false, smooth = false, hd = false;
+  int hdW = 1920, hdH = 1080;
   double speed = 1;
   Tuning tuning;
 };
@@ -48,6 +51,8 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "scale") o.scale = std::atoi(val.c_str());
   else if (key == "fullscreen") o.fullscreen = val != "0";
   else if (key == "smooth") o.smooth = val != "0";
+  else if (key == "hd") o.hd = val != "0";
+  else if (key == "hdres") { int w = 0, h = 0; if (std::sscanf(val.c_str(), "%dx%d", &w, &h) == 2 && w >= 320 && h >= 200) { o.hdW = w; o.hdH = h; } }
   else if (key == "speed") o.speed = d();
   else if (key == "gravity") o.tuning.gravity = d();
   else if (key == "thrust") o.tuning.thrust = d();
@@ -146,9 +151,9 @@ int main(int argc, char **argv) {
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     if (a == "--ini") { i++; continue; }
-    if (a == "--fullscreen" || a == "--smooth") { setOption(o, a.substr(2), "1"); continue; }
+    if (a == "--fullscreen" || a == "--smooth" || a == "--hd") { setOption(o, a.substr(2), "1"); continue; }
     if (a == "--help" || a == "-h") {
-      std::puts("usage : scr [--track N] [--scale N] [--fullscreen] [--speed X] [--smooth]\n"
+      std::puts("usage : scr [--track N] [--scale N] [--fullscreen] [--speed X] [--smooth] [--hd] [--hdres 1920x1080]\n"
                 "            [--gravity X] [--thrust X] [--brake X] [--timestep X] [--damping X]\n"
                 "            [--boostuse X] [--shock N] [--ini FICHIER] DISQUE.st|GAME.PUT");
       return 0;
@@ -174,6 +179,14 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  std::unique_ptr<HdView> view;
+  bool hd = o.hd;
+  auto newView = [&] {
+    view = std::make_unique<HdView>(*m);
+    m->enableLayers(true);   // couches toujours suivies : F1 bascule sans délai
+  };
+  try { newView(); } catch (std::exception &e) { fail(std::string("Erreur : ") + e.what()); return 1; }
+
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
     fail(std::string("SDL : ") + SDL_GetError());
     return 1;
@@ -183,8 +196,40 @@ int main(int argc, char **argv) {
   SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, o.smooth ? "1" : "0");
   SDL_Renderer *ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
   if (!ren) ren = SDL_CreateRenderer(win, -1, 0);
-  SDL_RenderSetLogicalSize(ren, 320, 200);
   SDL_Texture *tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 320, 200);
+  SDL_Texture *texHd = nullptr;
+  std::vector<uint32_t> hdPixels;
+  // bascule d'affichage : 320×200 d'origine ou HD 16/9
+  auto applyMode = [&](bool resizeWindow) {
+    if (hd) {
+      if (!texHd) {
+        texHd = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, o.hdW, o.hdH);
+        hdPixels.assign(size_t(o.hdW) * o.hdH, 0);
+      }
+      SDL_RenderSetLogicalSize(ren, o.hdW, o.hdH);
+    } else {
+      SDL_RenderSetLogicalSize(ren, 320, 200);
+    }
+    if (resizeWindow && !(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP)) {
+      SDL_Rect ub;
+      int w = hd ? o.hdW : 320 * o.scale, h = hd ? o.hdH : 200 * o.scale;
+      if (SDL_GetDisplayUsableBounds(SDL_GetWindowDisplayIndex(win), &ub) == 0) {
+        double k = std::min({1.0, ub.w * 0.95 / w, ub.h * 0.9 / h});
+        w = int(w * k); h = int(h * k);
+      }
+      SDL_SetWindowSize(win, w, h);
+      SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    }
+  };
+  applyMode(hd);
+  int refresh = 60;
+  {
+    SDL_DisplayMode dm;
+    if (SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(win), &dm) == 0 && dm.refresh_rate > 0) refresh = dm.refresh_rate;
+  }
+  uint64_t lastPresent = 0, fpsT0 = SDL_GetPerformanceCounter();
+  int fpsN = 0;
+  bool fpsLog = std::getenv("SCR_FPS") != nullptr;
   SDL_GameController *pad = nullptr;
   for (int i = 0; i < SDL_NumJoysticks() && !pad; i++)
     if (SDL_IsGameController(i)) pad = SDL_GameControllerOpen(i);
@@ -206,14 +251,21 @@ int main(int argc, char **argv) {
         keys[sc] = down;
         if (down && !ev.key.repeat) {
           if (sc == SDL_SCANCODE_F12) running = false;
+          else if (sc == SDL_SCANCODE_F1) {
+            hd = !hd;
+            applyMode(true);
+            if (!hd) SDL_SetWindowTitle(win, "Stunt Car Racer");
+          }
           else if (sc == SDL_SCANCODE_F11) {
             bool fs = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP;
             SDL_SetWindowFullscreen(win, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
           } else if (sc == SDL_SCANCODE_F5 || ((sc == SDL_SCANCODE_PAGEUP || sc == SDL_SCANCODE_PAGEDOWN) && track >= 0)) {
             if (sc == SDL_SCANCODE_PAGEUP) track = (track + 7) % 8;
             if (sc == SDL_SCANCODE_PAGEDOWN) track = (track + 1) % 8;
+            view.reset();
             m.reset();
             m = start(disk, o, track);
+            newView();
           }
         }
         if (int st = stScancode(sc)) m->setKey(st, down);
@@ -240,17 +292,40 @@ int main(int argc, char **argv) {
     last = now;
     if (acc > 0.25) acc = 0.25;
     int n = 0;
-    while (acc >= framePeriod && n < 10) { m->runFrame(); acc -= framePeriod; n++; }
+    while (acc >= framePeriod && n < 10) { m->runFrame(); view->afterFrame(*m); acc -= framePeriod; n++; }
 
-    m->screenARGB(pixels);
-    SDL_UpdateTexture(tex, nullptr, pixels, 320 * 4);
-    SDL_RenderClear(ren);
-    SDL_RenderCopy(ren, tex, nullptr, nullptr);
-    SDL_RenderPresent(ren);
-    if (!n) SDL_Delay(1);
+    if (hd) {
+      // une image par rafraîchissement de l'écran (la synchro verticale cadence la boucle ; sinon limiteur)
+      uint64_t t = SDL_GetPerformanceCounter();
+      if (lastPresent && double(t - lastPresent) / double(freq) < 0.9 / refresh) { SDL_Delay(1); continue; }
+      lastPresent = t;
+      view->render(*m, view->now() + acc / framePeriod, hdPixels.data(), o.hdW, o.hdH);
+      SDL_UpdateTexture(texHd, nullptr, hdPixels.data(), o.hdW * 4);
+      SDL_RenderClear(ren);
+      SDL_RenderCopy(ren, texHd, nullptr, nullptr);
+      SDL_RenderPresent(ren);
+      // compteur d'images par seconde dans le titre
+      fpsN++;
+      double el = double(SDL_GetPerformanceCounter() - fpsT0) / double(freq);
+      if (el >= 1) {
+        char title[96];
+        std::snprintf(title, sizeof title, "Stunt Car Racer - HD %dx%d - %.0f i/s", o.hdW, o.hdH, fpsN / el);
+        SDL_SetWindowTitle(win, title);
+        if (fpsLog) std::fprintf(stderr, "%s\n", title);
+        fpsN = 0; fpsT0 = SDL_GetPerformanceCounter();
+      }
+    } else {
+      m->screenARGB(pixels);
+      SDL_UpdateTexture(tex, nullptr, pixels, 320 * 4);
+      SDL_RenderClear(ren);
+      SDL_RenderCopy(ren, tex, nullptr, nullptr);
+      SDL_RenderPresent(ren);
+      if (!n) SDL_Delay(1);
+    }
   }
   if (pad) SDL_GameControllerClose(pad);
   SDL_DestroyTexture(tex);
+  if (texHd) SDL_DestroyTexture(texHd);
   SDL_DestroyRenderer(ren);
   SDL_DestroyWindow(win);
   SDL_Quit();

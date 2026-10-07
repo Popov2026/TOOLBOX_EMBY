@@ -48,8 +48,25 @@ native/build/scr_headless Stunt_Car_Racer.st --track 1 --frames 1500 --up --shot
 ```
 
 Commandes : **flèches** = joystick (haut accélère, bas freine), **Espace/Ctrl** = bouton
-(boost), clavier ST complet pour les menus, manette reconnue. **F11** plein écran,
+(boost), clavier ST complet pour les menus, manette reconnue. **F1** mode HD, **F11** plein écran,
 **F5** recommencer, **Page préc./suiv.** changer de circuit, **F12** quitter.
+
+### Mode HD (touche F1)
+
+**F1** bascule en **1920×1080, 16/9, image fluide** (60 i/s ou la fréquence de l'écran) :
+
+* la logique et la physique restent celles du jeu d'origine, exécutées à l'identique ;
+* la scène 3D est redessinée en haute définition par un moteur logiciel multi-cœur
+  (tampon de profondeur), à partir de la géométrie exacte des circuits lue sur la disquette
+  et de l'état de la voiture lu en mémoire ; elle est **interpolée** entre deux ticks du jeu
+  (8,33 par seconde) au lieu de sauter d'une image à la suivante ;
+* le champ de vision est élargi au 16/9 : on voit la piste à travers les vitres latérales ;
+* le cockpit, les roues, le tableau de bord et la voiture adverse sont ceux que dessine le
+  jeu d'origine, isolés pixel par pixel (chaque écriture à l'écran est attribuée à la routine
+  qui l'a faite) et incrustés par-dessus.
+
+Options : `hd = 1` (démarrer en HD), `hdres = 2560x1440` (autre définition 16/9). Le titre de
+la fenêtre affiche le nombre d'images par seconde.
 
 Réglages dans `scr.ini` (modèle : `native/scr.ini.example`) ou en ligne de commande :
 `--gravity --thrust --brake --timestep --damping --boostuse --shock` (facteurs, 1 = jeu
