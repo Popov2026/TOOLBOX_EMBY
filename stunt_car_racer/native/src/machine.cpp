@@ -1,6 +1,7 @@
 // machine.cpp — voir machine.hpp.  Adresses : jeu chargé à $10100 (docs/RETRO_INGENIERIE.md).
 #include "machine.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
@@ -251,7 +252,11 @@ void Machine::write8(uint32_t a, uint32_t v) {
     case 0xff8201: vbase_ = (vbase_ & 0xffff) | (v << 16); std::memcpy(dispSnap_, renderSnap_, 18); return;
     case 0xff8203: vbase_ = (vbase_ & 0xff00ff) | (v << 8); std::memcpy(dispSnap_, renderSnap_, 18); return;
     case 0xff8800: ymSel_ = uint8_t(v); return;
-    case 0xff8802: ym_[ymSel_ & 15] = uint8_t(v); return;
+    case 0xff8802:
+      ym_[ymSel_ & 15] = uint8_t(v);
+      ymWrites_.push_back({uint32_t(frameCycleBase_ + m68k_cycles_run()), uint8_t(ymSel_ & 15), uint8_t(v)});
+      if (ymWrites_.size() > 100000) ymWrites_.erase(ymWrites_.begin(), ymWrites_.begin() + 50000);
+      return;
   }
   if (a >= 0xfffa00 && a < 0xfffa40) mfp_[a & 63] = uint8_t(v);
 }
@@ -377,9 +382,34 @@ void Machine::vblTick() {
 }
 
 void Machine::runFrame() {
+  // écritures restées d'avant (démarrage) : appliquées en début de trame
+  for (auto &w : ymWrites_) ym2149_.write(w.reg, w.val);
+  ymWrites_.clear();
   uint64_t done = 0;
-  while (done < CYCLES_PER_FRAME) done += m68k_execute(int(CYCLES_PER_FRAME - done));
+  frameCycleBase_ = 0;
+  while (done < CYCLES_PER_FRAME) { done += m68k_execute(int(CYCLES_PER_FRAME - done)); frameCycleBase_ = done; }
+  frameCycleBase_ = 0;
+  renderAudio();
   vblTick();
+}
+
+// son de la trame : les écritures dans la YM2149 sont appliquées à l'échantillon correspondant à leur cycle
+void Machine::renderAudio() {
+  if (!audioRate_) { ymWrites_.clear(); audio_.clear(); return; }
+  audioFrac_ += double(audioRate_) / 50.0;   // PAL : 50 trames/s
+  int n = int(audioFrac_);
+  audioFrac_ -= n;
+  mix_.assign(size_t(n), 0.f);
+  int pos = 0;
+  for (auto &w : ymWrites_) {
+    int at = std::min(n, int(double(w.cycle) / CYCLES_PER_FRAME * n));
+    if (at > pos) { ym2149_.render(mix_.data() + pos, at - pos, audioRate_); pos = at; }
+    ym2149_.write(w.reg, w.val);
+  }
+  if (pos < n) ym2149_.render(mix_.data() + pos, n - pos, audioRate_);
+  ymWrites_.clear();
+  audio_.resize(size_t(n));
+  for (int i = 0; i < n; i++) audio_[i] = int16_t(std::clamp(mix_[i] * volume_ * 32767.0, -32768.0, 32767.0));
 }
 
 void Machine::runUntil(uint32_t stopAt, uint64_t maxCycles) {

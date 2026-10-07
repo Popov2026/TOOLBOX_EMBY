@@ -1,7 +1,7 @@
 // headless.cpp — exécute le jeu sans fenêtre (tests, captures, calage du mode HD).
 // usage : scr_headless DISQUE.st [--track N] [--frames N] [--up] [--shot f.ppm]
 //         [--hd f.ppm] [--cmp f.ppm] [--focal F] [--cx X] [--cy Y] [--eyeup H] [--eyefwd D] [--psign ±1] [--rsign ±1]
-//         [--bench-hd N] [--fire] [--hddir DOSSIER]
+//         [--bench-hd N] [--fire] [--hddir DOSSIER] [--wav son.wav]
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
   std::string disk, shot, hd, cmp;
   int track = -1, frames = 500, benchHd = 0;
   bool up = false, fire = false;
-  std::string hdDir;
+  std::string hdDir, wav;
   scr::HdParams hp;  // valeurs par défaut calées
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
@@ -46,6 +46,7 @@ int main(int argc, char **argv) {
     else if (a == "--bench-hd" && i + 1 < argc) benchHd = std::atoi(argv[++i]);
     else if (a == "--up") up = true;
     else if (a == "--fire") fire = true;
+    else if (a == "--wav" && i + 1 < argc) wav = argv[++i];
     else if (a == "--hddir" && i + 1 < argc) hdDir = argv[++i];
     else disk = a;
   }
@@ -62,11 +63,24 @@ int main(int argc, char **argv) {
     }
     auto t1 = std::chrono::steady_clock::now();
     scr::Joystick j; j.up = up;
+    std::vector<int16_t> pcm;
+    if (!wav.empty()) m.setAudioRate(44100);
     for (int f = 0; f < frames; f++) {
       j.fire = fire && f > 600;   // boost après le départ
       m.setJoystick(j);
       m.runFrame();
       if (view) view->afterFrame(m);
+      if (!wav.empty()) pcm.insert(pcm.end(), m.frameAudio().begin(), m.frameAudio().end());
+    }
+    if (!wav.empty()) {   // WAV 44,1 kHz mono 16 bits
+      FILE *o = std::fopen(wav.c_str(), "wb");
+      auto u32 = [&](uint32_t v) { std::fwrite(&v, 4, 1, o); };
+      auto u16 = [&](uint16_t v) { std::fwrite(&v, 2, 1, o); };
+      uint32_t bytes = uint32_t(pcm.size() * 2);
+      std::fwrite("RIFF", 1, 4, o); u32(36 + bytes); std::fwrite("WAVEfmt ", 1, 8, o);
+      u32(16); u16(1); u16(1); u32(44100); u32(88200); u16(2); u16(16);
+      std::fwrite("data", 1, 4, o); u32(bytes); std::fwrite(pcm.data(), 2, pcm.size(), o);
+      std::fclose(o);
     }
     auto t2 = std::chrono::steady_clock::now();
     double ds = std::chrono::duration<double>(t1 - t0).count(), rs = std::chrono::duration<double>(t2 - t1).count();

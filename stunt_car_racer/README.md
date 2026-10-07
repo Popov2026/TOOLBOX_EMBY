@@ -48,8 +48,12 @@ native/build/scr_headless Stunt_Car_Racer.st --track 1 --frames 1500 --up --shot
 ```
 
 Commandes : **flèches** = joystick (haut accélère, bas freine), **Espace/Ctrl** = bouton
-(boost), clavier ST complet pour les menus, manette reconnue. **F1** mode HD, **F11** plein écran,
+(boost), clavier ST complet pour les menus, manette reconnue. **F1** mode HD, **F3** son coupé/rétabli, **F11** plein écran,
 **F5** recommencer, **Page préc./suiv.** changer de circuit, **F12** quitter.
+
+**Son** : la puce YM2149 de l'Atari ST est émulée (3 voix carrées, bruit, enveloppe, volumes
+logarithmiques) ; chaque écriture du jeu dans ses registres est horodatée au cycle près et
+appliquée à l'échantillon correspondant (44,1 kHz). Options `son = 0`, `volume = 0.8`.
 
 ### Mode HD (touche F1)
 

@@ -57,7 +57,7 @@ if(NOT MSVC)
 endif()
 
 # --- cœur du jeu (sans dépendance graphique)
-add_library(scrcore STATIC src/scrdata.cpp src/machine.cpp src/track.cpp src/render3d.cpp src/hdview.cpp src/hdassets.cpp)
+add_library(scrcore STATIC src/scrdata.cpp src/machine.cpp src/track.cpp src/render3d.cpp src/hdview.cpp src/hdassets.cpp src/ym2149.cpp)
 find_package(Threads REQUIRED)
 target_link_libraries(scrcore PUBLIC Threads::Threads)
 target_include_directories(scrcore PUBLIC src)

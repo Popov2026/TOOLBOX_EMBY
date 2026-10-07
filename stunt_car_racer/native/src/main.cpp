@@ -39,7 +39,8 @@ struct Options {
   std::string disk;
   int track = -1;  // -1 : jeu complet
   int scale = 3;
-  bool fullscreen = false, smooth = false, hd = false;
+  bool fullscreen = false, smooth = false, hd = false, sound = true;
+  double volume = 0.8;
   int hdW = 1920, hdH = 1080;
   std::string hdDir;
   double speed = 1;
@@ -54,6 +55,8 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "smooth") o.smooth = val != "0";
   else if (key == "hd") o.hd = val != "0";
   else if (key == "hddir") o.hdDir = val;
+  else if (key == "sound" || key == "son") o.sound = val != "0";
+  else if (key == "volume") o.volume = std::clamp(d(), 0.0, 2.0);
   else if (key == "hdres") { int w = 0, h = 0; if (std::sscanf(val.c_str(), "%dx%d", &w, &h) == 2 && w >= 320 && h >= 200) { o.hdW = w; o.hdH = h; } }
   else if (key == "speed") o.speed = d();
   else if (key == "gravity") o.tuning.gravity = d();
@@ -220,7 +223,7 @@ int main(int argc, char **argv) {
   };
   try { newView(); } catch (std::exception &e) { fail(std::string("Erreur : ") + e.what()); return 1; }
 
-  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
+  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_AUDIO) != 0) {
     fail(std::string("SDL : ") + SDL_GetError());
     return 1;
   }
@@ -260,6 +263,32 @@ int main(int argc, char **argv) {
     SDL_DisplayMode dm;
     if (SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(win), &dm) == 0 && dm.refresh_rate > 0) refresh = dm.refresh_rate;
   }
+  // son : puce YM2149 émulée, échantillons de chaque trame mis en file (latence ~60 ms)
+  SDL_AudioDeviceID audio = 0;
+  const int AUDIO_RATE = 44100;
+  bool muted = !o.sound;
+  auto setupAudio = [&] {
+    if (!audio) {
+      SDL_AudioSpec want{}, have{};
+      want.freq = AUDIO_RATE; want.format = AUDIO_S16SYS; want.channels = 1; want.samples = 512;
+      audio = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
+      if (audio) {
+        std::vector<int16_t> silence(AUDIO_RATE / 50 * 2, 0);
+        SDL_QueueAudio(audio, silence.data(), Uint32(silence.size() * 2));
+        SDL_PauseAudioDevice(audio, 0);
+      }
+    }
+    m->setAudioRate(audio ? AUDIO_RATE : 0);
+    m->setVolume(muted ? 0.0 : o.volume);
+  };
+  setupAudio();
+  auto queueAudio = [&] {
+    if (!audio) return;
+    const auto &pcm = m->frameAudio();
+    // file trop longue (émulation en avance) : on saute la trame pour garder une latence faible
+    if (SDL_GetQueuedAudioSize(audio) > Uint32(AUDIO_RATE / 50 * 2 * 6)) return;
+    if (!pcm.empty()) SDL_QueueAudio(audio, pcm.data(), Uint32(pcm.size() * 2));
+  };
   uint64_t lastPresent = 0, fpsT0 = SDL_GetPerformanceCounter();
   int fpsN = 0;
   bool fpsLog = std::getenv("SCR_FPS") != nullptr;
@@ -284,6 +313,10 @@ int main(int argc, char **argv) {
         keys[sc] = down;
         if (down && !ev.key.repeat) {
           if (sc == SDL_SCANCODE_F12) running = false;
+          else if (sc == SDL_SCANCODE_F3) {   // couper / rétablir le son
+            muted = !muted;
+            m->setVolume(muted ? 0.0 : o.volume);
+          }
           else if (sc == SDL_SCANCODE_F2) {   // recharge le dossier hd/ (images modifiées pendant le jeu)
             if (hdDir.empty()) hdDir = findHdDir(o.hdDir);
             if (!hdDir.empty()) hdImages = view->loadAssets(*m, hdDir);
@@ -303,6 +336,7 @@ int main(int argc, char **argv) {
             m.reset();
             m = start(disk, o, track);
             newView();
+            setupAudio();
           }
         }
         if (int st = stScancode(sc)) m->setKey(st, down);
@@ -329,7 +363,12 @@ int main(int argc, char **argv) {
     last = now;
     if (acc > 0.25) acc = 0.25;
     int n = 0;
-    while (acc >= framePeriod && n < 10) { m->runFrame(); view->afterFrame(*m); acc -= framePeriod; n++; }
+    while (acc >= framePeriod && n < 10) {
+      m->runFrame();
+      view->afterFrame(*m);
+      queueAudio();
+      acc -= framePeriod; n++;
+    }
 
     if (hd) {
       // une image par rafraîchissement de l'écran (la synchro verticale cadence la boucle ; sinon limiteur)
@@ -364,6 +403,7 @@ int main(int argc, char **argv) {
   if (pad) SDL_GameControllerClose(pad);
   SDL_DestroyTexture(tex);
   if (texHd) SDL_DestroyTexture(texHd);
+  if (audio) SDL_CloseAudioDevice(audio);
   SDL_DestroyRenderer(ren);
   SDL_DestroyWindow(win);
   SDL_Quit();

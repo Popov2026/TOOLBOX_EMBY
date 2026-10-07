@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "scrdata.hpp"
+#include "ym2149.hpp"
 
 namespace scr {
 
@@ -36,6 +37,10 @@ class Machine {
   void startPractice(int track);
 
   void runFrame();                          // une trame vidéo (1/50 s)
+  // son : échantillons de la dernière trame (mono, 16 bits) à la fréquence choisie (0 = sans son)
+  void setAudioRate(int hz) { audioRate_ = hz; }
+  const std::vector<int16_t> &frameAudio() const { return audio_; }
+  void setVolume(double v) { volume_ = v; }
   void setJoystick(const Joystick &j);
   void setKey(int scancode, bool down);
   void screenARGB(uint32_t *out) const;     // 320×200
@@ -98,6 +103,15 @@ class Machine {
   void hleReturn(uint32_t sr, uint32_t pc, uint32_t d0);
 
   Bytes image_;
+  YM2149 ym2149_;
+  struct YmWrite { uint32_t cycle; uint8_t reg, val; };
+  std::vector<YmWrite> ymWrites_;
+  uint64_t frameCycleBase_ = 0;
+  int audioRate_ = 0;
+  double audioFrac_ = 0, volume_ = 0.8;
+  std::vector<int16_t> audio_;
+  std::vector<float> mix_;
+  void renderAudio();
   std::bitset<256> spriteWatch_;
   mutable std::vector<SpriteDraw> spriteDraws_;
   void recordSprite(uint32_t pc);
