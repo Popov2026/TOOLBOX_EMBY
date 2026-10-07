@@ -74,10 +74,15 @@ void Machine::overlayARGB(uint32_t *out) const {
   static uint8_t clear[320 * 200];
   std::memset(clear, 0, sizeof clear);
   std::vector<int> st;
-  auto seed = [&](int i) {
-    if (!clear[i] && cls[i] != W_SCENE && (idx[i] == 7 || idx[i] == 0)) { clear[i] = 1; st.push_back(i); }
+  // limité à l'extérieur de l'arceau (bandeau du haut, côtés) : ne jamais déborder sur le tableau de bord
+  auto outside = [](int i) {
+    int x = i % 320, y = i / 320;
+    return y < 16 || (y < 150 ? (x < 32 || x >= 288) : (x < 16 || x >= 304));
   };
-  for (int x = 0; x < 320; x++) { seed(x); seed(199 * 320 + x); }
+  auto seed = [&](int i) {
+    if (!clear[i] && outside(i) && cls[i] != W_SCENE && (idx[i] == 7 || idx[i] == 0)) { clear[i] = 1; st.push_back(i); }
+  };
+  for (int x = 0; x < 320; x++) seed(x);
   for (int y = 0; y < 200; y++) { seed(y * 320); seed(y * 320 + 319); }
   while (!st.empty()) {
     int i = st.back(); st.pop_back();

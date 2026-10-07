@@ -24,12 +24,14 @@ struct HdParams {
   int pitchSign = 1, rollSign = 1;
   bool cockpit = true;                     // incruster le cockpit d'origine
   double interpDelay = 1.0;                // retard d'affichage en ticks (interpolation)
+  double minClearance = 18;                // l'œil reste au moins à cette hauteur au-dessus de la route
 };
 
 class HdView {
  public:
   explicit HdView(const Machine &m);
   HdParams params;
+  int clampCount = 0;   // nombre d'images où l'œil a été remonté au-dessus de la route
 
   // à appeler après chaque trame émulée
   void afterFrame(const Machine &m);
@@ -48,6 +50,9 @@ class HdView {
   void renderScene(const Pose &p, int track, uint32_t *out, int W, int H, double focal, double cx, double cy, const Machine &m);
 
  private:
+  // hauteur brute de la route sous (x, z), la plus proche de yRef ; faux hors de la route
+  bool surfaceRaw(const Track &t, double x, double z, double yRef, double &y);
+  int hint_ = -1;
   struct Snap { double t; Pose p; int track; };
   std::vector<Track> tracks_;
   std::deque<Snap> snaps_;

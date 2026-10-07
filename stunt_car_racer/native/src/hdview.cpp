@@ -121,6 +121,34 @@ Pose HdView::poseAt(double t) const {
   return snaps_.back().p;
 }
 
+bool HdView::surfaceRaw(const Track &t, double x, double z, double yRef, double &y) {
+  const int n = int(t.secs.size());
+  if (!n) return false;
+  int from = 0, to = n - 1;
+  if (hint_ >= 0 && hint_ < n) { from = hint_ - 24; to = hint_ + 24; }
+  double best = 1e30;
+  bool found = false;
+  for (int k = from; k <= to; k++) {
+    int i = ((k % n) + n) % n;
+    const Section &A = t.secs[i], &B = t.secs[(i + 1) % n];
+    const double P[4][3] = {{A.lx, A.ly, A.lz}, {A.rx, A.ry, A.rz}, {B.rx, B.ry, B.rz}, {B.lx, B.ly, B.lz}};
+    static const int tri[2][3] = {{0, 1, 2}, {0, 2, 3}};
+    for (const auto &T : tri) {
+      const double *a = P[T[0]], *b = P[T[1]], *c = P[T[2]];
+      double v0x = b[0] - a[0], v0z = b[2] - a[2], v1x = c[0] - a[0], v1z = c[2] - a[2], v2x = x - a[0], v2z = z - a[2];
+      double den = v0x * v1z - v1x * v0z;
+      if (std::fabs(den) < 1e-9) continue;
+      double u = (v2x * v1z - v1x * v2z) / den, v = (v0x * v2z - v2x * v0z) / den;
+      if (u < -1e-6 || v < -1e-6 || u + v > 1 + 1e-6) continue;
+      double h = a[1] + u * (b[1] - a[1]) + v * (c[1] - a[1]);
+      double score = std::fabs(h - yRef) + (h > yRef + 400 ? 1e6 : 0);   // pas une route bien au-dessus (croisements)
+      if (score < best) { best = score; y = h; hint_ = i; found = true; }
+    }
+  }
+  if (!found && hint_ >= 0) { hint_ = -1; return surfaceRaw(t, x, z, yRef, y); }   // recherche complète
+  return found;
+}
+
 void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, double focal, double cx, double cy,
                          const Machine &m) {
   const HdParams &P = params;
@@ -135,6 +163,12 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
   double sy = std::sin(p.yaw), cyw = std::cos(p.yaw);
   const double HSCALE = P.hScale;
   c.pos = {p.x + sy * P.eyeFwd + cyw * P.eyeSide, p.y * HSCALE / 0.5 + P.eyeUp, p.z + cyw * P.eyeFwd - sy * P.eyeSide};
+  // suspension très comprimée (réception de saut) : l'œil ne doit jamais passer sous la route
+  {
+    double yRaw = 0;
+    if (surfaceRaw(tracks_[track & 7], c.pos.x, c.pos.z, p.y * 2, yRaw))
+      if (c.pos.y < yRaw * HSCALE + P.minClearance) { c.pos.y = yRaw * HSCALE + P.minClearance; clampCount++; }
+  }
   c.yaw = p.yaw + P.yawOffset; c.pitch = pitch + P.pitchOffset; c.roll = roll;
   c.focal = focal; c.focalY = focal * P.aspect; c.cx = cx; c.cy = cy; c.nearZ = 2;
   r3d_.begin(W, H, c, sky);
@@ -211,7 +245,16 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
   if (mapW_ != W || mapH_ != H) {
     mapW_ = W; mapH_ = H;
     mapX_.assign(W, -1); mapY_.assign(H, -1);
-    for (int x = 0; x < W; x++) { double u = (x + 0.5 - ox) / s; if (u >= 0 && u < 320) mapX_[x] = int(u); }
+    // 16/9 : la partie centrale (fenêtre, x 32..287) garde l'échelle ; les montants et les bords
+    // du tableau de bord sont étirés jusqu'aux bords de l'image
+    const double xa = 32, xb = 288, la = ox + xa * s, lb = ox + xb * s;
+    for (int x = 0; x < W; x++) {
+      double X = x + 0.5, u;
+      if (X < la) u = la > 0 ? X / la * xa : 0;
+      else if (X >= lb) u = xb + (X - lb) / std::max(1.0, W - lb) * (320 - xb);
+      else u = xa + (X - la) / s;
+      mapX_[x] = std::clamp(int(u), 0, 319);
+    }
     for (int y = 0; y < H; y++) mapY_[y] = std::min(199, int((y + 0.5) / s));
   }
   for (int y = 0; y < H; y++) {
