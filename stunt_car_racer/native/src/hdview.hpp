@@ -38,6 +38,7 @@ struct HdParams {
   bool builtinFlames = true;               // flammes du boost : sprites d'origine agrandis en HD
   bool flameImages = false;                // utiliser les images de flammes du dossier hd/ (sinon ignorées)
   bool opponent3D = true;                  // voiture adverse redessinée en 3D (sinon : pixels d'origine)
+  bool highDetail = false;                 // détails élevés (F5) : sols et voiture texturés, roues rondes
 };
 
 class HdView {

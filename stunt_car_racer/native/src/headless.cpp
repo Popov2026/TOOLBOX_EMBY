@@ -47,6 +47,7 @@ int main(int argc, char **argv) {
     else if (a == "--bench-hd" && i + 1 < argc) benchHd = std::atoi(argv[++i]);
     else if (a == "--up") up = true;
     else if (a == "--fire") fire = true;
+    else if (a == "--details") hp.highDetail = true;
     else if (a == "--wav" && i + 1 < argc) wav = argv[++i];
     else if (a == "--hddir" && i + 1 < argc) hdDir = argv[++i];
     else disk = a;

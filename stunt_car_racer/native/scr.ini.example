@@ -8,6 +8,7 @@ speed = 1                     # vitesse de la machine (1 = 50 Hz d'origine)
 son = 1                       # 0 : sans son (F3 en jeu)
 volume = 0.8                  # 0 à 2
 hd = 0                        # 1 : démarrer en mode HD (touche F1 pour basculer)
+details = 0                   # 1 : démarrer en détails élevés (touche F5 : sols et voiture texturés, roues rondes)
 hdres = 1920x1080             # définition du mode HD (16/9)
 # hddir = hd                  # dossier des images de remplacement (défaut : hd à côté de scr.exe)
 # hdflammes = 0               # 1 = flammes dessinées avec les images sprite_06/07/08/09/49/50 du dossier hd

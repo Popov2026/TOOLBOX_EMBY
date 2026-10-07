@@ -12,7 +12,7 @@
 //
 // Touches : flèches = joystick (haut accélère), Espace/Ctrl/Maj/Alt = bouton (boost),
 //           clavier ST pour les menus, F4/F11/Alt+Entrée plein écran, F12 quitter, PageUp/PageDown
-//           circuit précédent/suivant (entraînement), F5 recommencer.
+//           circuit précédent/suivant (entraînement), F5 détails élevés, F6 recommencer.
 #include <SDL.h>
 
 #include <algorithm>
@@ -28,7 +28,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v14"
+#define SCR_VERSION "v15"
 
 #include "hdview.hpp"
 #include "machine.hpp"
@@ -46,6 +46,7 @@ struct Options {
   int hdW = 1920, hdH = 1080;
   std::string hdDir;
   bool hdFlames = false;   // images de flammes du dossier hd/ (sinon : sprites d'origine agrandis)
+  bool highDetail = false; // détails élevés au démarrage (touche F5)
   double speed = 1;
   Tuning tuning;
 };
@@ -59,6 +60,7 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "hd") o.hd = val != "0";
   else if (key == "hddir") o.hdDir = val;
   else if (key == "hdflammes" || key == "hdflames") o.hdFlames = val != "0";
+  else if (key == "details" || key == "détails") o.highDetail = val != "0";
   else if (key == "sound" || key == "son") o.sound = val != "0";
   else if (key == "volume") o.volume = std::clamp(d(), 0.0, 2.0);
   else if (key == "hdres") { int w = 0, h = 0; if (std::sscanf(val.c_str(), "%dx%d", &w, &h) == 2 && w >= 320 && h >= 200) { o.hdW = w; o.hdH = h; } }
@@ -110,7 +112,7 @@ int stScancode(SDL_Scancode s) {
         {SDL_SCANCODE_M, 0x32}, {SDL_SCANCODE_COMMA, 0x33}, {SDL_SCANCODE_PERIOD, 0x34}, {SDL_SCANCODE_SLASH, 0x35},
         {SDL_SCANCODE_RSHIFT, 0x36}, {SDL_SCANCODE_LALT, 0x38}, {SDL_SCANCODE_SPACE, 0x39}, {SDL_SCANCODE_CAPSLOCK, 0x3a},
         {SDL_SCANCODE_F1, 0x3b}, {SDL_SCANCODE_F2, 0x3c}, {SDL_SCANCODE_F3, 0x3d},
-        {SDL_SCANCODE_F6, 0x40}, {SDL_SCANCODE_F7, 0x41}, {SDL_SCANCODE_F8, 0x42}, {SDL_SCANCODE_F9, 0x43},
+        {SDL_SCANCODE_F7, 0x41}, {SDL_SCANCODE_F8, 0x42}, {SDL_SCANCODE_F9, 0x43},
         {SDL_SCANCODE_F10, 0x44}, {SDL_SCANCODE_HOME, 0x47}, {SDL_SCANCODE_UP, 0x48}, {SDL_SCANCODE_LEFT, 0x4b},
         {SDL_SCANCODE_RIGHT, 0x4d}, {SDL_SCANCODE_DOWN, 0x50}, {SDL_SCANCODE_INSERT, 0x52}, {SDL_SCANCODE_DELETE, 0x53}};
     for (auto &e : t) m[e.s] = e.st;
@@ -214,12 +216,13 @@ int main(int argc, char **argv) {
   }
 
   std::unique_ptr<HdView> view;
-  bool hd = o.hd;
+  bool hd = o.hd, highDetail = o.highDetail;
   std::string hdDir = findHdDir(o.hdDir);
   int hdImages = 0;
   auto newView = [&] {
     view = std::make_unique<HdView>(*m);
     view->params.flameImages = o.hdFlames;
+    view->params.highDetail = highDetail;
     m->enableLayers(true);   // couches toujours suivies : F1 bascule sans délai
     hdImages = view->loadAssets(*m, hdDir);
     if (!view->assets.report.empty()) std::fprintf(stderr, "images HD (%s) :\n%s", hdDir.c_str(), view->assets.report.c_str());
@@ -333,7 +336,11 @@ int main(int argc, char **argv) {
                    ((sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER) && (ev.key.keysym.mod & KMOD_ALT))) {   // plein écran
             bool fs = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP;
             SDL_SetWindowFullscreen(win, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
-          } else if (sc == SDL_SCANCODE_F5 || ((sc == SDL_SCANCODE_PAGEUP || sc == SDL_SCANCODE_PAGEDOWN) && track >= 0)) {
+          } else if (sc == SDL_SCANCODE_F5) {   // détails élevés (textures, roues rondes) ; passe en HD si besoin
+            highDetail = !highDetail;
+            view->params.highDetail = highDetail;
+            if (highDetail && !hd) { hd = true; applyMode(true); }
+          } else if (sc == SDL_SCANCODE_F6 || ((sc == SDL_SCANCODE_PAGEUP || sc == SDL_SCANCODE_PAGEDOWN) && track >= 0)) {
             if (sc == SDL_SCANCODE_PAGEUP) track = (track + 7) % 8;
             if (sc == SDL_SCANCODE_PAGEDOWN) track = (track + 1) % 8;
             view.reset();
@@ -391,9 +398,10 @@ int main(int argc, char **argv) {
       fpsN++;
       double el = double(SDL_GetPerformanceCounter() - fpsT0) / double(freq);
       if (el >= 1) {
-        char title[160];
-        std::snprintf(title, sizeof title, "Stunt Car Racer " SCR_VERSION " - HD %dx%d - %.0f i/s - flammes : %s", o.hdW,
-                      o.hdH, fpsN / el, o.hdFlames ? "images du dossier hd" : "sprites d'origine");
+        char title[200];
+        std::snprintf(title, sizeof title, "Stunt Car Racer " SCR_VERSION " - HD %dx%d%s - %.0f i/s - flammes : %s", o.hdW,
+                      o.hdH, highDetail ? " - détails élevés (F5)" : "", fpsN / el,
+                      o.hdFlames ? "images du dossier hd" : "sprites d'origine");
         SDL_SetWindowTitle(win, title);
         if (fpsLog) std::fprintf(stderr, "%s\n", title);
         fpsN = 0; fpsT0 = SDL_GetPerformanceCounter();

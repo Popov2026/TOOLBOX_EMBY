@@ -11,7 +11,8 @@ Si la direction semble bloquée pendant le boost avec Espace, c'est le clavier q
 pas trois touches à la fois : prenez Maj ou Alt pour le boost.
 Manette XInput reconnue. F1 mode HD (1920x1080, 16/9, image fluide à la
 fréquence de l'écran), F2 recharger les images HD, F3 couper le son,
-F4, F11 ou Alt+Entrée plein écran, F5 recommencer,
+F4, F11 ou Alt+Entrée plein écran, F5 détails élevés (sols, route et voiture
+adverse texturés, roues rondes ; active le mode HD), F6 recommencer,
 Page préc./suiv. circuit précédent/suivant (mode entraînement), F12 quitter.
 
 Son : puce sonore YM2149 de l'Atari ST émulée (moteur, chocs...).

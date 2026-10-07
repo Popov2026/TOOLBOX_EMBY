@@ -45,7 +45,7 @@ const Hills HILLS;
 
 }  // namespace
 
-HdView::HdView(const Machine &m) : tracks_(decodeTracks(m.image())) {}
+HdView::HdView(const Machine &m) : tracks_(decodeTracks(m.image())) { Renderer3D::warmTextures(); }
 
 // flamme du boost en haute définition, tirée pixel pour pixel du sprite d'origine : même silhouette
 // (les 4 flammes de chaque côté), même place, mêmes couleurs (bord jaune, cœur blanc) ; les contours
@@ -357,19 +357,35 @@ void HdView::addCar(const OppPose &o, double hs, const Machine &m) {
     uint32_t col[6] = {top, side, side, end, end, black};
     for (int k = 0; k < 6; k++) r3d_.poly(q[k], 4, col[k]);
   };
-  // roue : prisme octogonal d'axe latéral
+  const bool hd = params.highDetail;
+  // roue : prisme d'axe latéral (octogonal comme l'original, rond et texturé en détails élevés)
   auto wheel = [&](double xc, double zc, double rad, double wid) {
-    Vec3 a[8], b[8];
-    for (int k = 0; k < 8; k++) {
-      double ang = (k + 0.5) * 3.14159265 / 4, yy = rad + std::sin(ang) * rad, zz = zc + std::cos(ang) * rad;
+    const int N = hd ? 28 : 8;
+    Vec3 a[32], b[32];
+    for (int k = 0; k < N; k++) {
+      double ang = (k + 0.5) * 2 * 3.14159265 / N, yy = rad + std::sin(ang) * rad, zz = zc + std::cos(ang) * rad;
       a[k] = W(xc - wid / 2, yy, zz); b[k] = W(xc + wid / 2, yy, zz);
     }
-    for (int k = 0; k < 8; k++) {
-      Vec3 q[4] = {a[k], a[(k + 1) % 8], b[(k + 1) % 8], b[k]};
-      r3d_.poly(q, 4, black);
+    TexInfo tire; tire.kind = TEX_TIRE; tire.o = W(xc, rad, zc); tire.u = f; tire.v = u; tire.r = rad * K;
+    for (int k = 0; k < N; k++) {
+      Vec3 q[4] = {a[k], a[(k + 1) % N], b[(k + 1) % N], b[k]};
+      if (hd) r3d_.polyTex(q, 4, black, tire); else r3d_.poly(q, 4, black);
     }
-    r3d_.poly(a, 8, black);   // roues noires, comme l'original
-    r3d_.poly(b, 8, black);
+    if (hd) {   // flancs : pneu, jante et moyeu
+      TexInfo rim = tire; rim.kind = TEX_RIM;
+      rim.o = W(xc - wid / 2, rad, zc); r3d_.polyTex(a, N, black, rim);
+      rim.o = W(xc + wid / 2, rad, zc); r3d_.polyTex(b, N, black, rim);
+    } else {
+      r3d_.poly(a, N, black);   // roues noires, comme l'original
+      r3d_.poly(b, N, black);
+    }
+  };
+  // face peinte (détails élevés) : repère local o + s·ax + w·ay, étendue [s0,s1]×[w0,w1] en unités voiture
+  auto paint = [&](const Vec3 *q, int n, uint32_t col, Vec3 ax, Vec3 ay, double s0, double s1, double w0, double w1) {
+    if (!hd) { r3d_.poly(q, n, col); return; }
+    TexInfo t; t.kind = TEX_PAINT; t.o = W(0, 0, 0); t.u = ax; t.v = ay;
+    t.s0 = s0 * K; t.s1 = s1 * K; t.w0 = w0 * K; t.w1 = w1 * K;
+    r3d_.polyTex(q, n, col, t);
   };
   // proportions mesurées sur la voiture d'origine vue de derrière : roues carrées aussi larges que
   // hautes, cabine aussi large que deux roues et deux fois plus haute qu'elles, dont le toit (rose)
@@ -383,9 +399,9 @@ void HdView::addCar(const OppPose &o, double hs, const Machine &m) {
     Vec3 fb0 = W(x0, yb, zf), fb1 = W(x1, yb, zf), ft0 = W(-xt, yf, zf), ft1 = W(xt, yf, zf);
     Vec3 rear[4] = {rb0, rb1, rt1, rt0}, front[4] = {fb0, ft0, ft1, fb1}, top[4] = {rt0, rt1, ft1, ft0};
     Vec3 left[4] = {rb0, rt0, ft0, fb0}, right[4] = {rb1, fb1, ft1, rt1}, bottom[4] = {rb0, fb0, fb1, rb1};
-    r3d_.poly(rear, 4, red); r3d_.poly(front, 4, red); r3d_.poly(top, 4, pink);
+    paint(rear, 4, red, r, u, x0, x1, yb, yr); r3d_.poly(front, 4, red); paint(top, 4, pink, r, f, x0, x1, zrt, zf);
     // comme l'original : seul le flanc droit (rose) est dessiné, jamais le gauche
-    r3d_.poly(right, 4, pink); r3d_.poly(bottom, 4, black); (void)left;
+    paint(right, 4, pink, f, u, zr, zf, yb, yr); r3d_.poly(bottom, 4, black); (void)left;
   }
   (void)dark; (void)grey;
 }
@@ -419,7 +435,8 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
   // sol et collines (au plus loin, dans l'ordre)
   const double gy = GROUND_RAW * HSCALE, R = 2e6;
   Vec3 g[4] = {{c.pos.x - R, gy, c.pos.z - R}, {c.pos.x + R, gy, c.pos.z - R}, {c.pos.x + R, gy, c.pos.z + R}, {c.pos.x - R, gy, c.pos.z + R}};
-  r3d_.polyFar(g, 4, ground, 1e-12f);
+  if (P.highDetail) { TexInfo tg; tg.kind = TEX_GROUND; r3d_.polyFarTex(g, 4, ground, 1e-12f, tg, gy); }
+  else r3d_.polyFar(g, 4, ground, 1e-12f);
   const double dist = 1e6;
   for (int l = 1; l >= 0; l--) {
     for (int i = 0; i < 64; i++) {
@@ -445,7 +462,8 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
     auto wallQuad = [&](const Vec3 &p0, const Vec3 &p1) {
       if (p0.y <= gy + 0.5 && p1.y <= gy + 0.5) return;
       Vec3 q[4] = {p0, p1, {p1.x, gy, p1.z}, {p0.x, gy, p0.z}};
-      r3d_.poly(q, 4, wc);
+      if (P.highDetail) { TexInfo tw; tw.kind = TEX_WALL; r3d_.polyTex(q, 4, wc, tw); }
+      else r3d_.poly(q, 4, wc);
     };
     wallQuad(aL, bL);
     wallQuad(bR, aR);
@@ -459,8 +477,17 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
     // en triangles : sur un virage relevé, les 4 coins d'une section ne sont pas coplanaires
     auto quad = [&](const Vec3 *q, uint32_t col) {
       Vec3 t1[3] = {q[0], q[1], q[2]}, t2[3] = {q[0], q[2], q[3]};
-      r3d_.poly(t1, 3, col);
-      r3d_.poly(t2, 3, col);
+      if (P.highDetail) {
+        // repère de la route : u = travers (bord gauche -> droit), pour les traces de pneus
+        TexInfo tr; tr.kind = TEX_ROAD;
+        double wl = std::sqrt((aR.x - aL.x) * (aR.x - aL.x) + (aR.y - aL.y) * (aR.y - aL.y) + (aR.z - aL.z) * (aR.z - aL.z));
+        if (wl > 1e-6) { tr.o = aL; tr.u = {(aR.x - aL.x) / wl, (aR.y - aL.y) / wl, (aR.z - aL.z) / wl}; tr.s0 = 0; tr.s1 = wl; }
+        r3d_.polyTex(t1, 3, col, tr);
+        r3d_.polyTex(t2, 3, col, tr);
+      } else {
+        r3d_.poly(t1, 3, col);
+        r3d_.poly(t2, 3, col);
+      }
     };
     quad(mid, rc);
     Vec3 ql[4] = {aL, aL1, bL1, bL};

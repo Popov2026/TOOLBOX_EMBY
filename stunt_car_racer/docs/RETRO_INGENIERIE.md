@@ -231,3 +231,9 @@ code et bloquerait le jeu).
   pixel par pixel (`$1093F` = longueur déjà tracée) avec la routine de points du décor `$5313E`,
   dans les deux écrans. Tout est remis à zéro au début de chaque course (`$4AD0E` efface
   `$108E2`-`$10BBA`). En mode HD, ces points sont classés « cockpit » et non « décor ».
+* **Détails élevés (F5, version PC)** : textures procédurales calculées au pixel. Pour chaque pixel
+  visible d'une surface texturée, on intersecte le rayon de la caméra avec le plan du polygone, ce
+  qui donne le point du monde. Les textures sont répétables, précalculées et mip-mappées : sol,
+  béton avec traces de pneus, panneaux des flancs. La carrosserie a un dégradé, un reflet et des
+  joints, et les roues sont rondes, avec sculptures et jantes. L'ombrage est différé (un seul calcul
+  par pixel visible) et les lignes sont réparties en entrelacé entre les cœurs.
