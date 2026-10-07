@@ -15,6 +15,7 @@ version **Atari ST**, et réplique jouable sur PC dont tous les réglages sont m
 | `replica/` | la réplique (HTML5 / JavaScript, sans dépendance) |
 | `tools/` | outils de rétro-ingénierie : extraction, décompression, décodage des circuits, émulateur ST de test, désassembleur |
 | `docs/RETRO_INGENIERIE.md` | formats, adresses, routines décompilées, méthode de vérification |
+| `docs/FALCON030.md` | pistes pour une version Falcon030 : ce qui sert, points d'attention 68030, idées (VIDEL, DSP) |
 
 ## Deux moteurs
 
