@@ -218,17 +218,32 @@ uint32_t Renderer3D::shade(const TexPlane &tp, uint32_t color, const Vec3 &p, do
       Vec3 d{p.x - t.o.x, p.y - t.o.y, p.z - t.o.z};
       double s = d.x * t.u.x + d.y * t.u.y + d.z * t.u.z, w = d.x * t.v.x + d.y * t.v.y + d.z * t.v.z;
       double r = std::sqrt(s * s + w * w) / t.r;
+      double a = std::atan2(w, s);                       // angle dans le repère de la roue (tourne avec elle)
+      double sharp = t.contrast * std::clamp(1.4 - std::fabs(t.blur) * 3, 0.0, 1.0);   // net à basse vitesse
       if (r > 0.97) return 0xff181818u;
-      if (r > 0.66) return mulRGB(0xff2a2a2au, 1 + 0.25 * (r - 0.66) / 0.31);   // flanc
-      if (r > 0.6) return 0xff505050u;
-      double a = std::atan2(w, s);
-      if (r > 0.22 && r < 0.55) {   // trois ajours entre les branches, flous de mouvement eux aussi
-        double hole = std::clamp((0.5 - 0.5 * blurCos(a, 6, t.blur) - 0.55) * 4 + 0.5, 0.0, 1.0);
-        hole = 0.45 + (hole - 0.45) * t.contrast;
-        return mulRGB(0xffb8b8b8u, 1 - 0.55 * hole);
+      if (r > 0.66) {   // flanc du pneu, avec deux marquages blancs (lettrage) qui tournent avec la roue
+        double base = 1 + 0.25 * (r - 0.66) / 0.31;
+        if (r > 0.74 && r < 0.9) {
+          double am = std::fmod(a + 2 * 3.14159265, 3.14159265);   // deux marquages opposés
+          if (am > 0.35 && am < 1.25) {
+            double letters = std::sin(am * 45) > -0.2 && std::fabs(r - 0.82) < 0.06 ? 1.0 : 0.0;
+            return mulRGB(0xff2a2a2au, base + 3.5 * letters * sharp + 0.6 * letters * (1 - sharp) * 0.3);
+          }
+        }
+        return mulRGB(0xff2a2a2au, base);
       }
-      uint32_t metal = r < 0.22 ? 0xffd8d8d8u : 0xffb8b8b8u;
-      return mulRGB(metal, 0.85 + 0.3 * (0.5 - w / (t.r * 2)));
+      if (r > 0.6) return 0xff505050u;
+      if (r > 0.24 && r < 0.56) {   // jante à 5 branches : ajours sombres entre les branches (flous en mouvement)
+        double hole = std::clamp((-blurCos(a, 5, t.blur) - 0.15) * 3, 0.0, 1.0);
+        double avg = std::clamp(0.5 - 0.15 * 3, 0.0, 1.0);
+        hole = avg + (hole - avg) * t.contrast;
+        return mulRGB(0xffc0c0c0u, 1 - 0.75 * hole);
+      }
+      if (r < 0.2 && r > 0.11) {    // 5 écrous de roue
+        double nut = std::cos(5 * (a - 3.14159265 / 5));
+        if (nut > 0.8 && sharp > 0.2) return mulRGB(0xff404040u, 1 + (1 - sharp));
+      }
+      return r < 0.24 ? 0xffd8d8d8u : 0xffb0b0b0u;
     }
     default: return color;
   }
