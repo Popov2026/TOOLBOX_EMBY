@@ -93,11 +93,12 @@ const std::vector<HdView::Jet> &HdView::jetsFor(int id, const Machine &m) {
     n++;
     std::vector<int> st{i};
     lab[i] = n;
-    double sx = 0, sy = 0; int cnt = 0;
+    double sx = 0, sy = 0; int cnt = 0, ymaxB = 0;
+    std::vector<int> members;
     while (!st.empty()) {
       int k = st.back(); st.pop_back();
       int x = k % w, y = k / w;
-      sx += x; sy += y; cnt++;
+      sx += x; sy += y; cnt++; ymaxB = std::max(ymaxB, y); members.push_back(k);
       for (int dy = -1; dy <= 1; dy++)
         for (int dx = -1; dx <= 1; dx++) {
           int xx = x + dx, yy = y + dy;
@@ -106,7 +107,14 @@ const std::vector<HdView::Jet> &HdView::jetsFor(int id, const Machine &m) {
           if (px[q] >= 0 && !lab[q]) { lab[q] = n; st.push_back(q); }
         }
     }
-    if (cnt >= 12) out.push_back({sx / cnt + 0.5, sy / cnt + 0.5, std::sqrt(cnt / 3.14159) * 0.85});
+    if (cnt >= 12) {
+      // base : milieu des 3 rangées les plus basses de la tache (la flamme naît au-dessus de la bouche)
+      double bx = 0; int bn = 0;
+      for (int k : members) if (k / w >= ymaxB - 2) { bx += k % w; bn++; }
+      // la flamme naît au centre de la bouche (entre le centre de la tache et sa base)
+      double r = std::sqrt(cnt / 3.14159);
+      out.push_back({(bx / bn + sx / cnt) / 2 + 0.5, std::min(double(ymaxB), sy / cnt + r * 0.35) + 0.5, r});
+    }
   }
   return out;
 }
@@ -123,16 +131,14 @@ void HdView::drawJets(const std::vector<Jet> &jets, double ox0, double oy0, doub
     seed++;
     P p;
     p.cx = fx(ox0 + j.x); p.cy = (oy0 + j.y) * s; p.R = std::max(4.0, j.r * s); p.seed = seed;
-    // direction : le feu monte (à l'arrêt) puis est rabattu par le vent vers le spectateur, à l'opposé
-    // du point de fuite (en roulant)
-    double ax = p.cx - vpx, ay = p.cy - vpy, al = std::hypot(ax, ay);
-    if (al < 1) continue;
-    ax /= al; ay /= al;
-    double dx = ax * (0.35 + 0.65 * wk), dy = ay * (0.35 + 0.65 * wk) - (1.0 - 0.75 * wk), dl = std::hypot(dx, dy);
+    // direction : le feu monte au-dessus de la bouche ; en roulant, le vent l'incline un peu vers
+    // l'extérieur (l'arrière de la voiture)
+    double side = p.cx < vpx ? -1 : 1;
+    double dx = side * 0.35 * wk, dy = -1, dl = std::hypot(dx, dy);
     p.dx = dx / dl; p.dy = dy / dl;
     double flick = 0.75 + 0.5 * noiseAt(float(t * 9 + seed * 17), float(seed * 31));   // vacillement de chaque jet
-    p.L = p.R * (2.6 + 2.6 * wk) * strength * flick;
-    p.spread = 0.30 + 0.35 * wk;
+    p.L = p.R * (2.9 + 1.5 * wk) * strength * flick;
+    p.spread = 0;
     double ext = p.R * 1.3 + p.spread * p.L;
     p.x0 = std::max(0, int(std::min(p.cx - p.R * 1.4, p.cx + p.dx * p.L - ext)));
     p.x1 = std::min(W, int(std::max(p.cx + p.R * 1.4, p.cx + p.dx * p.L + ext)) + 1);
@@ -150,21 +156,23 @@ void HdView::drawJets(const std::vector<Jet> &jets, double ox0, double oy0, doub
         for (int x = p.x0; x < p.x1; x++) {
           double vx = x + 0.5 - p.cx, vy = y + 0.5 - p.cy;
           double a = vx * p.dx + vy * p.dy, b = vx * nx + vy * ny, d2 = (vx * vx + vy * vy) * iR2;
-          double core = d2 < 3.0 ? std::exp(-d2 * 1.8) : 0.0;   // incandescence dans la bouche
+          // lueur dans la bouche (juste sous la base de la flamme)
+          double core = d2 < 3.0 ? std::exp(-d2 * 2.0) * 1.2 : 0.0;
           double jet = 0;
-          if (a > -0.3 * p.R && a < p.L) {
+          if (a > -0.35 * p.R && a < p.L) {
             double u = std::max(0.0, a) / p.L;
-            double width = p.R * 0.8 + p.spread * std::max(0.0, a);
-            double q = std::fabs(b) / width;
-            if (q < 1.2) {
-              double edge = std::clamp((1.2 - q) / 0.8, 0.0, 1.0);
-              float n1 = noiseAt(float(a / p.R * 14 - t * 90 + p.seed * 40), float(b / p.R * 16 + p.seed * 23));
-              float n2 = noiseAt(float(a / p.R * 34 - t * 170), float(b / p.R * 30 + p.seed * 7));
-              // mèches : le bruit découpe le cône en langues qui s'effilent vers le bout
-              double tongue = std::clamp((n1 - 0.5) * 3.2 + (n2 - 0.5) * 1.4 + 0.75 - u * 1.1, 0.0, 1.2);
-              double start = std::clamp((a + 0.3 * p.R) / (0.8 * p.R), 0.0, 1.0);   // naissance douce à la bouche
+            float n1 = noiseAt(float(a / p.R * 6 - t * 55 + p.seed * 40), float(p.seed * 23));
+            float n2 = noiseAt(float(a / p.R * 9 - t * 80 + p.seed * 11), float(b / p.R * 3 + p.seed * 7));
+            float n3 = noiseAt(float(a / p.R * 22 - t * 140), float(b / p.R * 14 + p.seed * 5));
+            // flamme de bougie : large à la base, effilée au bout, qui ondule de plus en plus vers la pointe
+            double width = p.R * 0.95 * std::pow(1 - u, 0.6) * (0.85 + 0.35 * n1) + 1e-6;
+            double bb = std::fabs(b + (n2 - 0.5) * p.R * 1.6 * u) / width;
+            if (bb < 1.3) {
+              double body = std::clamp(1.15 - bb, 0.0, 1.0);
+              double start = std::clamp((a + 0.35 * p.R) / (0.7 * p.R), 0.0, 1.0);
               start = start * start * (3 - 2 * start);
-              jet = edge * start * (1 - u) * tongue * 1.45;
+              double lick = std::clamp(0.7 + (n3 - 0.5) * 1.6 * u, 0.0, 1.0);   // mèches à la pointe
+              jet = std::pow(body, 0.6) * start * lick * (1.6 - 0.9 * u);
             }
           }
           double hgt = std::max(core, jet) * strength;

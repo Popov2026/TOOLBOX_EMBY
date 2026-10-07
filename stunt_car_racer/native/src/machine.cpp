@@ -25,9 +25,11 @@ constexpr uint32_t A_DRAW_OPPONENT = 0x546da, A_RENDER = 0x51bcc, A_PHYSICS = 0x
 // routines d'écriture à l'écran du jeu : remplissages de polygones du décor ($53166, $533EC-$53456,
 // $5461A-$546BE, $553D8-$55442 ; $53212-$5327C dessinent le tableau de bord)
 // et blits de sprites masqués du cockpit ($567B0-$56880)
-static inline void markWrite(Machine *m, uint32_t a, uint32_t v, uint32_t pc) {
+static inline void markWrite(Machine *m, uint32_t a, uint32_t v, uint32_t pc, bool changed = true) {
   bool scene = (pc >= 0x53100 && pc < 0x531a0) || (pc >= 0x533a0 && pc < 0x53460) || (pc >= 0x54600 && pc < 0x546c0) ||
                (pc >= 0x553a0 && pc < 0x55450);
+  // blit de sprite qui réécrit la même valeur sur un pixel fixe du cockpit : il reste fixe (opaque)
+  if (!changed && pc >= 0x567b0 && pc < 0x56880 && m->layers_[a] == Machine::W_OTHER) return;
   uint8_t cls = (pc >= 0x567b0 && pc < 0x56880) ? Machine::W_SPRITE
                 : m->inOpponent_                    ? Machine::W_OPPONENT
                 : scene                             ? Machine::W_SCENE
@@ -104,7 +106,29 @@ void Machine::recordSprite(uint32_t pc) {
   for (auto &e : spriteDraws_)
     if (e.buffer == sd.buffer && e.x == sd.x && e.y == sd.y && e.w == sd.w && e.h == sd.h) { e = std::move(sd); return; }
   spriteDraws_.push_back(std::move(sd));
-  if (spriteDraws_.size() > 160) spriteDraws_.erase(spriteDraws_.begin());
+  if (spriteDraws_.size() > 96) {
+    // ménage : on retire les sprites qui ne sont plus visibles dans leur écran (chaîne qui a bougé...)
+    auto pix = [&](uint32_t buf, int x, int y) {
+      uint32_t a = buf + y * 160 + (x >> 4) * 8;
+      int bit = 15 - (x & 15);
+      return ((w(a) >> bit) & 1) | (((w(a + 2) >> bit) & 1) << 1) | (((w(a + 4) >> bit) & 1) << 2) | (((w(a + 6) >> bit) & 1) << 3);
+    };
+    std::vector<int> px;
+    for (size_t k = 0; k + 1 < spriteDraws_.size();) {   // le sprite qu'on vient d'ajouter n'est pas encore dessiné
+      const SpriteDraw &e = spriteDraws_[k];
+      int sw, sh, tot = 0, ok = 0;
+      if (spritePixels(e.id, px, sw, sh))
+        for (int r = 0; r < sh; r++)
+          for (int c = 0; c < sw; c++) {
+            int x = e.x + c, y = e.y + r, v = px[size_t(r) * sw + c];
+            if (v < 0 || x < 0 || x >= 320 || y < 0 || y >= 200) continue;
+            tot++; ok += pix(e.buffer, x, y) == v;
+          }
+      if (!tot || ok * 4 < tot) spriteDraws_.erase(spriteDraws_.begin() + long(k));
+      else k++;
+    }
+    if (spriteDraws_.size() > 160) spriteDraws_.erase(spriteDraws_.begin());
+  }
 }
 
 void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const {
@@ -148,11 +172,9 @@ void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const
     if (y > 0) seed(i - 320);
     if (y < 199) seed(i + 320);
   }
-  // couleurs utilisées par le décor 3D (ciel, sol, collines, route, lignes, flancs) : un pixel de sprite
-  // d'une autre couleur (noir, gris, bleus, verts du moteur...) n'est jamais de la scène
-  static const bool SCENE_COLOR[16] = {0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1};
-  // sprites du cockpit encore visibles dans l'image affichée (au moins la moitié de leurs pixels) :
-  // leurs pixels opaques restent opaques, même si leur couleur coïncide avec celle de la scène
+  // sprites du cockpit encore visibles dans l'image affichée (au moins le quart de leurs pixels) :
+  // seuls leurs pixels opaques sont gardés. Le reste de ce qu'ont écrit les routines de sprites
+  // (blocs de 16 pixels réécrits en entier, restes d'un sprite qui a bougé) laisse voir la scène.
   static uint8_t sprMask[320 * 200];
   std::memset(sprMask, 0, sizeof sprMask);
   uint32_t vb = vbase();
@@ -170,7 +192,7 @@ void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const
         if (v < 0 || x < 0 || x >= 320 || y < 0 || y >= 200) continue;
         tot++; ok += idx[y * 320 + x] == v;
       }
-    if (!tot || ok * 2 < tot) { spriteDraws_.erase(spriteDraws_.begin() + long(k)); continue; }
+    if (!tot || ok * 4 < tot) { spriteDraws_.erase(spriteDraws_.begin() + long(k)); continue; }
     for (int r = 0; r < sh; r++)
       for (int c = 0; c < sw; c++) {
         int x = e.x + c, y = e.y + r, v = spx[size_t(r) * sw + c];
@@ -182,7 +204,7 @@ void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const
   for (int i = 0; i < 64000; i++) {
     // voiture adverse : seules les couleurs de la carrosserie sont gardées (pas le ciel, le sol, les collines, la route)
     bool oppBg = cls[i] == W_OPPONENT && (hideOpp_ || idx[i] == 7 || idx[i] == 13 || idx[i] == 5 || idx[i] == 1 || idx[i] == 2 || idx[i] == 3);
-    bool transparent = clear[i] || cls[i] == W_SCENE || oppBg || (cls[i] == W_SPRITE && !sprMask[i] && sval[i] && SCENE_COLOR[idx[i]] && idx[i] == sidx[i]);
+    bool transparent = clear[i] || cls[i] == W_SCENE || oppBg || (cls[i] == W_SPRITE && !sprMask[i] && sval[i]);
     out[i] = transparent ? 0 : paletteARGB(idx[i]);
   }
   // sprites remplacés en HD : on efface l'original du cockpit (on remet ce qu'il recouvrait)
@@ -257,9 +279,10 @@ uint32_t Machine::read8(uint32_t a) {
 void Machine::write8(uint32_t a, uint32_t v) {
   a &= 0xffffff; v &= 0xff;
   if (a < RAMSIZE) {
+    bool changed = ram[a] != uint8_t(v);
     ram[a] = uint8_t(v);
     if (a >= tagLo && a < tagHi) tags_[a - tagLo] = m68k_get_reg(nullptr, M68K_REG_PPC);
-    if (layers_ && a >= SCREEN_LO) markWrite(this, a, v, m68k_get_reg(nullptr, M68K_REG_PPC));
+    if (layers_ && a >= SCREEN_LO) markWrite(this, a, v, m68k_get_reg(nullptr, M68K_REG_PPC), changed);
     return;
   }
   if (a >= 0xff8240 && a < 0xff8260) {
@@ -578,6 +601,7 @@ void m68k_write_memory_16(unsigned int a, unsigned int v) {
   a &= 0xffffff;
   Machine *m = Machine::current;
   if (a + 1 < Machine::RAMSIZE) {
+    bool ch0 = m->ram[a] != uint8_t(v >> 8), ch1 = m->ram[a + 1] != uint8_t(v);
     m->ram[a] = uint8_t(v >> 8); m->ram[a + 1] = uint8_t(v);
     if (a >= m->tagLo && a < m->tagHi) {
       uint32_t pc = m68k_get_reg(nullptr, M68K_REG_PPC);
@@ -586,7 +610,7 @@ void m68k_write_memory_16(unsigned int a, unsigned int v) {
     }
     if (m->layers_ && a >= scr::SCREEN_LO) {
       uint32_t pc = m68k_get_reg(nullptr, M68K_REG_PPC);
-      scr::markWrite(m, a, v >> 8, pc); scr::markWrite(m, a + 1, v & 0xff, pc);
+      scr::markWrite(m, a, v >> 8, pc, ch0); scr::markWrite(m, a + 1, v & 0xff, pc, ch1);
     }
     return;
   }
