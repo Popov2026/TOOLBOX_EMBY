@@ -76,6 +76,9 @@ class HdView {
   struct Snap { double t; Pose p; int track; OppPose opp; };
   OppPose opponentFromGame(const Machine &m, int track);
   double oppY_ = 0, oppVy_ = 0;
+  // roues de l'adversaire : distance parcourue (unités du monde) -> angle de rotation
+  double oppRoll_ = 0, oppRollStep_ = 0, oppRollContrast_ = 1;   // angle affiché, pas par image, netteté
+  OppPose oppPrev_;
   bool oppHave_ = false;
   void addCar(const OppPose &o, double hs, const Machine &m);
   std::vector<Track> tracks_;

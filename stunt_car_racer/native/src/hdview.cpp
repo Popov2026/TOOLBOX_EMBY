@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 #include <thread>
+#include <cstdio>
+#include <cstdlib>
 
 namespace scr {
 namespace {
@@ -366,7 +368,14 @@ void HdView::addCar(const OppPose &o, double hs, const Machine &m) {
       double ang = (k + 0.5) * 2 * 3.14159265 / N, yy = rad + std::sin(ang) * rad, zz = zc + std::cos(ang) * rad;
       a[k] = W(xc - wid / 2, yy, zz); b[k] = W(xc + wid / 2, yy, zz);
     }
-    TexInfo tire; tire.kind = TEX_TIRE; tire.o = W(xc, rad, zc); tire.u = f; tire.v = u; tire.r = rad * K;
+    // rotation : angle = distance parcourue / rayon ; le haut de la roue avance
+    // oppRoll_ : angle affiché d'une roue arrière (rayon 25) ; les roues avant, plus petites, tournent plus vite
+    const double phi = oppRoll_ * 25 / rad, cp = std::cos(phi), sp = std::sin(phi);
+    TexInfo tire; tire.kind = TEX_TIRE; tire.o = W(xc, rad, zc); tire.r = rad * K;
+    tire.u = {f.x * cp - u.x * sp, f.y * cp - u.y * sp, f.z * cp - u.z * sp};
+    tire.v = {f.x * sp + u.x * cp, f.y * sp + u.y * cp, f.z * sp + u.z * cp};
+    // flou de mouvement : angle parcouru pendant l'image (le motif est moyenné sur cet angle)
+    tire.blur = 0.5 * oppRollStep_ * 25 / rad; tire.contrast = oppRollContrast_;   // obturateur à 180°
     for (int k = 0; k < N; k++) {
       Vec3 q[4] = {a[k], a[(k + 1) % N], b[(k + 1) % N], b[k]};
       if (hd) r3d_.polyTex(q, 4, black, tire); else r3d_.poly(q, 4, black);
@@ -518,6 +527,21 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
   Pose p = poseAt(T);
   int track = snaps_.back().track;
   OppPose opp = opponentAt(T);
+  {   // roues de l'adversaire : distance parcourue depuis l'image précédente, dans le sens de la marche
+    double step = 0;
+    if (opp.valid && oppPrev_.valid) {
+      double dx = opp.x - oppPrev_.x, dy = (opp.yRaw - oppPrev_.yRaw) * params.hScale, dz = opp.z - oppPrev_.z;
+      step = dx * opp.fwd.x + dy * opp.fwd.y + dz * opp.fwd.z;
+      if (std::fabs(step) > 400) step = 0;   // saut (grue, nouveau départ)
+    }
+    // rotation réelle (distance / rayon) affichée jusqu'à 0,2 rad par image : au-delà, les sculptures
+    // défileraient à l'envers (effet stroboscopique) ; la vitesse en plus se traduit en flou
+    const double CAP = 0.2, dphi = step / (25 * 0.55);
+    oppRollStep_ = std::clamp(dphi, -CAP, CAP);
+    oppRollContrast_ = std::clamp(1 - (std::fabs(dphi) - CAP) / 4, 0.6, 1.0);
+    oppRoll_ = std::fmod(oppRoll_ + oppRollStep_, 2 * PI * 1000);
+    oppPrev_ = opp;
+  }
   const_cast<Machine &>(m).hideOpponentPixels(opp.valid);
   renderScene(p, track, out, W, H, params.focal * s, ox + params.cx * s, params.cy * s, m, &opp);
   if (!params.cockpit) return;

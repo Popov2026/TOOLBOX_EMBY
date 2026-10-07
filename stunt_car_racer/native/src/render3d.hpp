@@ -25,6 +25,8 @@ struct TexInfo {
   Vec3 o{0, 0, 0}, u{1, 0, 0}, v{0, 0, 1};   // repère local (origine, axes unitaires)
   double s0 = 0, s1 = 1, w0 = 0, w1 = 1;     // étendue de la face dans ce repère (peinture : joints)
   double r = 1;                              // rayon (roue)
+  double blur = 0;                           // roue : angle parcouru pendant l'image (flou de mouvement), radians
+  double contrast = 1;                       // roue : netteté du motif (baisse à grande vitesse)
 };
 
 class Renderer3D {

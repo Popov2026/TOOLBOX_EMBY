@@ -101,6 +101,16 @@ inline uint32_t mulRGB(uint32_t c, double k) {
   return 0xff000000u | ch(16) | ch(8) | ch(0);
 }
 
+// sin(n·a) et cos(n·a) moyennés sur [a - d, a] (d = angle parcouru pendant l'image) : flou de mouvement exact
+inline double blurSin(double a, double n, double d) {
+  double nd = n * d;
+  return std::fabs(nd) < 1e-4 ? std::sin(n * a) : (std::cos(n * (a - d)) - std::cos(n * a)) / nd;
+}
+inline double blurCos(double a, double n, double d) {
+  double nd = n * d;
+  return std::fabs(nd) < 1e-4 ? std::cos(n * a) : (std::sin(n * a) - std::sin(n * (a - d))) / nd;
+}
+
 // texture de luminance répétable 256×256 précalculée (somme d'octaves de bruit périodique) avec ses
 // niveaux de mip-map : la lecture coûte deux lectures bilinéaires au lieu de plusieurs bruits par pixel
 struct MipTex {
@@ -197,9 +207,12 @@ uint32_t Renderer3D::shade(const TexPlane &tp, uint32_t color, const Vec3 &p, do
     case TEX_TIRE: {   // bande de roulement : sculptures transversales
       Vec3 d{p.x - t.o.x, p.y - t.o.y, p.z - t.o.z};
       double a = std::atan2(d.x * t.v.x + d.y * t.v.y + d.z * t.v.z, d.x * t.u.x + d.y * t.u.y + d.z * t.u.z);
-      double g = std::sin(a * 18);
-      double kb = std::clamp(1.5 - foot / (t.r * 0.35) * 2.0, 0.0, 1.0);
-      return mulRGB(0xff262626u, 1 + (g > 0.3 ? 0.55 : 0.0) * kb);
+      // sculptures (14 sur le tour), moyennées sur l'angle parcouru pendant l'image (flou de mouvement) :
+      // nettes à l'arrêt, défilantes à vitesse modérée, uniformes à grande vitesse
+      const double NG = 14;
+      double g = blurSin(a, NG, t.blur);
+      double kb = std::clamp(1.5 - foot / (t.r * 0.35) * 2.0, 0.0, 1.0) * t.contrast;
+      return mulRGB(0xff262626u, 1 + 0.55 * std::clamp(0.5 + 1.2 * g, 0.0, 1.0) * kb);
     }
     case TEX_RIM: {    // flanc du pneu, jante à trois branches, moyeu
       Vec3 d{p.x - t.o.x, p.y - t.o.y, p.z - t.o.z};
@@ -209,7 +222,11 @@ uint32_t Renderer3D::shade(const TexPlane &tp, uint32_t color, const Vec3 &p, do
       if (r > 0.66) return mulRGB(0xff2a2a2au, 1 + 0.25 * (r - 0.66) / 0.31);   // flanc
       if (r > 0.6) return 0xff505050u;
       double a = std::atan2(w, s);
-      if (r > 0.22 && r < 0.55 && std::fabs(std::sin(a * 3)) > 0.55) return mulRGB(0xff9a9a9au, 0.55);   // ajours
+      if (r > 0.22 && r < 0.55) {   // trois ajours entre les branches, flous de mouvement eux aussi
+        double hole = std::clamp((0.5 - 0.5 * blurCos(a, 6, t.blur) - 0.55) * 4 + 0.5, 0.0, 1.0);
+        hole = 0.45 + (hole - 0.45) * t.contrast;
+        return mulRGB(0xffb8b8b8u, 1 - 0.55 * hole);
+      }
       uint32_t metal = r < 0.22 ? 0xffd8d8d8u : 0xffb8b8b8u;
       return mulRGB(metal, 0.85 + 0.3 * (0.5 - w / (t.r * 2)));
     }

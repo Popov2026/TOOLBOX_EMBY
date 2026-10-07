@@ -28,7 +28,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v15"
+#define SCR_VERSION "v16"
 
 #include "hdview.hpp"
 #include "machine.hpp"
