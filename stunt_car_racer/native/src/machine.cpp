@@ -18,6 +18,7 @@ constexpr uint32_t BASE = 0x10100;
 constexpr uint32_t A_BOOT = 0x103dc, A_CHECKSUM_DONE = 0x1041e, A_PREMENU = 0x4a5c6;
 constexpr uint32_t A_OVERVIEW = 0x4a80a, A_OVERVIEW_WAIT = 0x4af5c, A_RACE = 0x4a924, A_LOOPTOP = 0x4aa74;
 constexpr uint32_t SCREEN_LO = 0x40000;
+constexpr uint32_t A_SPRITE = 0x56762, A_SPRITE_XY = 0x5687e, SPRITE_PTRS = 0x73298, SPRITE_DESC = 0x5692c + 4;
 constexpr uint32_t A_DRAW_OPPONENT = 0x546da, A_RENDER = 0x51bcc, A_PHYSICS = 0x4eeb0, A_WAITVBL = 0x4b0a6, A_VBLCOUNTER = 0x4ec20, A_TRACKSEL = 0x1112d;
 
 // routines d'écriture à l'écran du jeu : remplissages de polygones du décor ($53166, $533EC-$53456,
@@ -52,7 +53,61 @@ void Machine::enableLayers(bool on) {
   if (!on && layers_) { delete[] layers_; layers_ = nullptr; }
 }
 
-void Machine::overlayARGB(uint32_t *out) const {
+bool Machine::spritePixels(int id, std::vector<int> &px, int &wOut, int &h) const {
+  uint32_t ptr = l(SPRITE_PTRS + id * 4) & 0xffffff, d = SPRITE_DESC + id * 16;
+  int gw = this->w(d) + 1;
+  h = this->w(d + 2) + 1;
+  if (ptr < 0x10000 || ptr + gw * h * 10 >= RAMSIZE || gw > 20 || h > 200) return false;
+  wOut = gw * 16;
+  px.assign(size_t(wOut) * h, -1);
+  uint32_t a = ptr;
+  for (int r = 0; r < h; r++)
+    for (int g = 0; g < gw; g++, a += 10) {
+      uint16_t mask = this->w(a), p0 = this->w(a + 2), p1 = this->w(a + 4), p2 = this->w(a + 6), p3 = this->w(a + 8);
+      for (int b = 15; b >= 0; b--)
+        if (!((mask >> b) & 1))
+          px[size_t(r) * wOut + g * 16 + 15 - b] =
+              ((p0 >> b) & 1) | (((p1 >> b) & 1) << 1) | (((p2 >> b) & 1) << 2) | (((p3 >> b) & 1) << 3);
+    }
+  return true;
+}
+
+// entrée d'une routine de sprite : on note la position et on mémorise ce qui va être recouvert
+void Machine::recordSprite(uint32_t pc) {
+  int id = m68k_get_reg(nullptr, M68K_REG_D0) & 0xff;
+  if (!spriteWatch_[id]) return;
+  uint32_t d = SPRITE_DESC + id * 16;
+  SpriteDraw sd;
+  sd.id = id;
+  sd.w = (w(d) + 1) * 16;
+  sd.h = w(d + 2) + 1;
+  if (pc == A_SPRITE) { sd.x = w(d + 4) * 16; sd.y = w(d + 6); }
+  else { sd.x = int16_t(m68k_get_reg(nullptr, M68K_REG_D4)); sd.y = int16_t(m68k_get_reg(nullptr, M68K_REG_D5)); }
+  sd.buffer = l(0x56c74) & 0xfffffe;
+  if (sd.buffer + 32000 > RAMSIZE) return;
+  sd.under.assign(size_t(sd.w) * sd.h, 255);
+  for (int r = 0; r < sd.h; r++) {
+    int y = sd.y + r;
+    if (y < 0 || y >= 200) continue;
+    for (int c = 0; c < sd.w; c++) {
+      int x = sd.x + c;
+      if (x < 0 || x >= 320) continue;
+      uint32_t a = sd.buffer + y * 160 + (x >> 4) * 8;
+      int bit = 15 - (x & 15), o = (x & 15) < 8 ? 0 : 1;
+      if (layers_ && layers_[a + o] == W_SCENE) continue;   // la scène 3D : transparent
+      uint16_t p0 = w(a), p1 = w(a + 2), p2 = w(a + 4), p3 = w(a + 6);
+      sd.under[size_t(r) * sd.w + c] =
+          uint8_t(((p0 >> bit) & 1) | (((p1 >> bit) & 1) << 1) | (((p2 >> bit) & 1) << 2) | (((p3 >> bit) & 1) << 3));
+    }
+  }
+  // remplace un dessin précédent au même endroit dans le même écran
+  for (auto &e : spriteDraws_)
+    if (e.buffer == sd.buffer && e.x == sd.x && e.y == sd.y && e.w == sd.w && e.h == sd.h) { e = std::move(sd); return; }
+  spriteDraws_.push_back(std::move(sd));
+  if (spriteDraws_.size() > 64) spriteDraws_.erase(spriteDraws_.begin());
+}
+
+void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const {
   static uint8_t idx[320 * 200], sidx[320 * 200], cls[320 * 200];
   screenIndex(idx);
   uint32_t base = vbase();
@@ -97,6 +152,33 @@ void Machine::overlayARGB(uint32_t *out) const {
     bool oppBg = cls[i] == W_OPPONENT && (idx[i] == 7 || idx[i] == 13 || idx[i] == 5 || idx[i] == 1 || idx[i] == 2 || idx[i] == 3);
     bool transparent = clear[i] || cls[i] == W_SCENE || oppBg || (cls[i] == W_SPRITE && idx[i] == sidx[i]);
     out[i] = transparent ? 0 : paletteARGB(idx[i]);
+  }
+  // sprites remplacés en HD : encore visibles ? (au moins la moitié de leurs pixels à l'écran)
+  if (visible) visible->clear();
+  uint32_t vb = vbase();
+  std::vector<int> spx;
+  for (size_t k = 0; k < spriteDraws_.size();) {
+    SpriteDraw &e = spriteDraws_[k];
+    int sw, sh;
+    if (e.buffer != vb || !spritePixels(e.id, spx, sw, sh)) { k++; continue; }
+    int tot = 0, ok = 0;
+    for (int r = 0; r < sh; r++)
+      for (int c = 0; c < sw; c++) {
+        int x = e.x + c, y = e.y + r, v = spx[size_t(r) * sw + c];
+        if (v < 0 || x < 0 || x >= 320 || y < 0 || y >= 200) continue;
+        tot++; ok += idx[y * 320 + x] == v;
+      }
+    if (!tot || ok * 2 < tot) { spriteDraws_.erase(spriteDraws_.begin() + long(k)); continue; }
+    // on efface le sprite d'origine du cockpit : on remet ce qu'il recouvrait
+    for (int r = 0; r < sh; r++)
+      for (int c = 0; c < sw; c++) {
+        int x = e.x + c, y = e.y + r, v = spx[size_t(r) * sw + c];
+        if (v < 0 || x < 0 || x >= 320 || y < 0 || y >= 200 || idx[y * 320 + x] != v) continue;
+        uint8_t u = e.under[size_t(r) * e.w + c];
+        out[y * 320 + x] = u == 255 ? 0 : paletteARGB(u);
+      }
+    if (visible) visible->push_back(e);
+    k++;
   }
 }
 
@@ -259,6 +341,7 @@ void Machine::hook(uint32_t pc) {
       inOpponent_ = true;
     } else if (inOpponent_ && pc == oppReturn_) inOpponent_ = false;
   }
+  if ((pc == A_SPRITE || pc == A_SPRITE_XY) && spriteWatch_.any()) recordSprite(pc);
   if (pc == A_PHYSICS) ticks_++;
   if (pc == A_RENDER) { std::memcpy(renderSnap_, ram + 0x10ac2, 18); inOpponent_ = false; }
   if (skipWaits_ && pc == A_WAITVBL) ram[A_VBLCOUNTER] = 0;

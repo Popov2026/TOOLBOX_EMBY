@@ -36,7 +36,7 @@ quelques % d'un cœur).
 
 **Windows** : l'onglet *Actions* du dépôt (workflow « Stunt Car Racer natif ») produit
 l'archive `stunt-car-racer-windows-x64` (`scr.exe`, `SDL2.dll`, `scr.ini`). Placez votre
-image `.st` à côté de `scr.exe` et double-cliquez.
+image `.st` dans le dossier `DISK` à côté de `scr.exe` et double-cliquez.
 
 **Compilation** (Linux, macOS, Windows ; CMake ≥ 3.16, SDL2) :
 
@@ -67,6 +67,14 @@ Commandes : **flèches** = joystick (haut accélère, bas freine), **Espace/Ctrl
 
 Options : `hd = 1` (démarrer en HD), `hdres = 2560x1440` (autre définition 16/9). Le titre de
 la fenêtre affiche le nombre d'images par seconde.
+
+**Images de remplacement** : les PNG du dossier `hd/` (à côté de `scr.exe`) remplacent les
+sprites du cockpit en mode HD, au même endroit et au même moment (`sprite_06.png`, ou
+`sprite_06_1.png`, `_2`… pour une animation). Sans transparence, l'image est ajoutée en
+lumière (flammes sur fond noir). Réglages par sprite dans `hd/hd.ini` (taille, ancrage,
+décalage, cadence), **F2** recharge le dossier en jeu. Mode d'emploi : `native/LISEZMOI_HD.txt` ;
+flammes d'exemple : `tools/hd_flammes.py`. Le jeu enregistre chaque appel de ses routines
+de sprites (`$56762`, `$5687E`) et ce qu'il recouvre, pour effacer proprement l'original.
 
 Réglages dans `scr.ini` (modèle : `native/scr.ini.example`) ou en ligne de commande :
 `--gravity --thrust --brake --timestep --damping --boostuse --shock` (facteurs, 1 = jeu

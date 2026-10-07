@@ -3,7 +3,9 @@
 // replica/js/engine.js (même comportement, temporisation en cycles réels du 68000).
 #pragma once
 #include <cstdint>
+#include <bitset>
 #include <string>
+#include <vector>
 
 #include "scrdata.hpp"
 
@@ -13,6 +15,13 @@ namespace scr {
 struct Tuning {
   double gravity = 1, thrust = 1, brake = 1, timeStep = 1, damping = 1, boostUse = 1;
   int shockTolerance = 0;
+};
+
+// sprite du cockpit dessiné par le jeu (blits $56762 / $5687E)
+struct SpriteDraw {
+  int id = 0, x = 0, y = 0, w = 0, h = 0;   // position et taille en pixels de l'écran d'origine
+  uint32_t buffer = 0;                      // écran dans lequel il a été dessiné
+  std::vector<uint8_t> under;               // ce qu'il recouvre : index de couleur, 255 = scène 3D
 };
 
 struct Joystick { bool up = false, down = false, left = false, right = false, fire = false; };
@@ -64,7 +73,12 @@ class Machine {
   void enableLayers(bool on);
   bool layersEnabled() const { return layers_ != nullptr; }
   // cockpit de l'écran affiché : ARGB 320×200, alpha 0 là où l'on voit la scène 3D
-  void overlayARGB(uint32_t *out) const;
+  // visible : sprites suivis (watchSprite) encore visibles dans l'image ; leurs pixels sont
+  // alors retirés du cockpit (remplacés par ce qu'ils recouvraient)
+  void overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible = nullptr) const;
+  void watchSprite(int id, bool on = true) { spriteWatch_[id & 255] = on; }
+  // pixels d'un sprite : index de couleur, -1 = transparent
+  bool spritePixels(int id, std::vector<int> &px, int &w, int &h) const;
   enum : uint8_t { W_OTHER = 0, W_SCENE = 1, W_SPRITE = 2, W_OPPONENT = 3 };
   bool inOpponent_ = false;       // dans la routine de dessin de la voiture adverse ($546DA)
   uint32_t oppReturn_ = 0;
@@ -84,6 +98,9 @@ class Machine {
   void hleReturn(uint32_t sr, uint32_t pc, uint32_t d0);
 
   Bytes image_;
+  std::bitset<256> spriteWatch_;
+  mutable std::vector<SpriteDraw> spriteDraws_;
+  void recordSprite(uint32_t pc);
   uint8_t renderSnap_[18] = {}, dispSnap_[18] = {};
   uint32_t ticks_ = 0;
   Bytes disk_;                  // image .st (pour Floprd), vide si GAME.PUT

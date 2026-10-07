@@ -2,14 +2,17 @@ Stunt Car Racer (Atari ST, Geoff Crammond / Micro Style 1989) - version native P
 
 Aucune donnée du jeu n'est fournie : il faut votre propre image disque .st.
 
-Lancement : placez l'image .st à côté de scr.exe et double-cliquez sur scr.exe
+Lancement : placez votre image .st dans le dossier DISK et double-cliquez sur scr.exe
 (ou glissez l'image sur scr.exe, ou : scr.exe Stunt_Car_Racer.st --track 1).
 
 Commandes : flèches = joystick (haut accélère, bas freine, gauche/droite),
 Espace ou Ctrl = bouton (boost), clavier ST complet pour les menus.
 Manette XInput reconnue. F1 mode HD (1920x1080, 16/9, image fluide à la
-fréquence de l'écran), F11 plein écran, F5 recommencer,
+fréquence de l'écran), F2 recharger les images HD, F11 plein écran, F5 recommencer,
 Page préc./suiv. circuit précédent/suivant (mode entraînement), F12 quitter.
 
 Réglages : scr.ini (gravité, poussée, freinage, pas de temps, amortissement,
 consommation du boost, taille de fenêtre...). Voir scr --help.
+
+Images HD : le dossier hd contient des images qui remplacent les sprites du cockpit en
+mode HD (flammes du boost fournies en exemple). Voir hd/LISEZMOI_HD.txt.

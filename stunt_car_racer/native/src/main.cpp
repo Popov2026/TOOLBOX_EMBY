@@ -41,6 +41,7 @@ struct Options {
   int scale = 3;
   bool fullscreen = false, smooth = false, hd = false;
   int hdW = 1920, hdH = 1080;
+  std::string hdDir;
   double speed = 1;
   Tuning tuning;
 };
@@ -52,6 +53,7 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "fullscreen") o.fullscreen = val != "0";
   else if (key == "smooth") o.smooth = val != "0";
   else if (key == "hd") o.hd = val != "0";
+  else if (key == "hddir") o.hdDir = val;
   else if (key == "hdres") { int w = 0, h = 0; if (std::sscanf(val.c_str(), "%dx%d", &w, &h) == 2 && w >= 320 && h >= 200) { o.hdW = w; o.hdH = h; } }
   else if (key == "speed") o.speed = d();
   else if (key == "gravity") o.tuning.gravity = d();
@@ -116,19 +118,44 @@ void fail(const std::string &msg) {
 }
 
 // sans argument (double-clic) : première image .st / GAME.PUT trouvée à côté de l'exécutable ou dans le dossier courant
+// dossiers de l'exécutable et courant
+std::vector<std::filesystem::path> baseDirs() {
+  namespace fs = std::filesystem;
+  std::vector<fs::path> dirs;
+  if (char *b = SDL_GetBasePath()) { dirs.push_back(fs::u8path(b)); SDL_free(b); }
+  std::error_code ec;
+  fs::path cwd = fs::current_path(ec);
+  if (!ec && (dirs.empty() || !fs::equivalent(dirs[0], cwd, ec))) dirs.push_back(cwd);
+  return dirs;
+}
+
+// sans argument (double-clic) : première image .st / GAME.PUT trouvée dans DISK/, puis à côté de l'exécutable
 std::string findDisk() {
   namespace fs = std::filesystem;
-  std::vector<fs::path> dirs{fs::current_path()};
-  if (char *b = SDL_GetBasePath()) { dirs.push_back(fs::u8path(b)); SDL_free(b); }
+  std::vector<fs::path> dirs;
+  for (auto &d : baseDirs()) { dirs.push_back(d / "DISK"); dirs.push_back(d / "disk"); }
+  for (auto &d : baseDirs()) dirs.push_back(d);
   for (auto &d : dirs) {
     std::error_code ec;
+    std::vector<fs::path> found;
     for (auto &e : fs::directory_iterator(d, ec)) {
       std::string ext = e.path().extension().u8string(), name = e.path().filename().u8string();
       for (auto &c : ext) c = (char)tolower((unsigned char)c);
       for (auto &c : name) c = (char)toupper((unsigned char)c);
-      if (ext == ".st" || name == "GAME.PUT") return e.path().u8string();
+      if (ext == ".st" || name == "GAME.PUT") found.push_back(e.path());
     }
+    if (!found.empty()) { std::sort(found.begin(), found.end()); return found[0].u8string(); }
   }
+  return {};
+}
+
+// dossier des images HD : option hddir, sinon hd/ à côté de l'exécutable ou dans le dossier courant
+std::string findHdDir(const std::string &opt) {
+  namespace fs = std::filesystem;
+  if (!opt.empty()) return opt;
+  std::error_code ec;
+  for (auto &d : baseDirs())
+    if (fs::is_directory(d / "hd", ec)) return (d / "hd").u8string();
   return {};
 }
 
@@ -163,7 +190,7 @@ int main(int argc, char **argv) {
   }
   if (o.disk.empty()) o.disk = findDisk();
   if (o.disk.empty()) {
-    fail("Image disque introuvable.\nPlacez votre image Stunt Car Racer (.st) à côté de scr.exe,\n"
+    fail("Image disque introuvable.\nPlacez votre image Stunt Car Racer (.st) dans le dossier DISK à côté de scr.exe,\n"
          "glissez-la sur scr.exe, ou lancez : scr Stunt_Car_Racer.st\n(aucune donnée du jeu n'est incluse)");
     return 1;
   }
@@ -181,9 +208,15 @@ int main(int argc, char **argv) {
 
   std::unique_ptr<HdView> view;
   bool hd = o.hd;
+  std::string hdDir = findHdDir(o.hdDir);
+  int hdImages = 0;
   auto newView = [&] {
     view = std::make_unique<HdView>(*m);
     m->enableLayers(true);   // couches toujours suivies : F1 bascule sans délai
+    if (!hdDir.empty()) {
+      hdImages = view->loadAssets(*m, hdDir);
+      if (!view->assets.report.empty()) std::fprintf(stderr, "images HD (%s) :\n%s", hdDir.c_str(), view->assets.report.c_str());
+    }
   };
   try { newView(); } catch (std::exception &e) { fail(std::string("Erreur : ") + e.what()); return 1; }
 
@@ -251,6 +284,10 @@ int main(int argc, char **argv) {
         keys[sc] = down;
         if (down && !ev.key.repeat) {
           if (sc == SDL_SCANCODE_F12) running = false;
+          else if (sc == SDL_SCANCODE_F2) {   // recharge le dossier hd/ (images modifiées pendant le jeu)
+            if (hdDir.empty()) hdDir = findHdDir(o.hdDir);
+            if (!hdDir.empty()) hdImages = view->loadAssets(*m, hdDir);
+          }
           else if (sc == SDL_SCANCODE_F1) {
             hd = !hd;
             applyMode(true);
@@ -308,8 +345,9 @@ int main(int argc, char **argv) {
       fpsN++;
       double el = double(SDL_GetPerformanceCounter() - fpsT0) / double(freq);
       if (el >= 1) {
-        char title[96];
-        std::snprintf(title, sizeof title, "Stunt Car Racer - HD %dx%d - %.0f i/s", o.hdW, o.hdH, fpsN / el);
+        char title[160];
+        std::snprintf(title, sizeof title, "Stunt Car Racer - HD %dx%d - %.0f i/s - %d sprite(s) HD (F2 : recharger)", o.hdW,
+                      o.hdH, fpsN / el, hdImages);
         SDL_SetWindowTitle(win, title);
         if (fpsLog) std::fprintf(stderr, "%s\n", title);
         fpsN = 0; fpsT0 = SDL_GetPerformanceCounter();

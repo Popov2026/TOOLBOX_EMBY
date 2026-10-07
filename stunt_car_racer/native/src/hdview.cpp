@@ -99,6 +99,12 @@ double HdView::playTime(double t) {
   return playT_;
 }
 
+int HdView::loadAssets(Machine &m, const std::string &dir) {
+  int n = assets.load(dir);
+  for (auto &[id, spr] : assets.sprites()) m.watchSprite(id);
+  return n;
+}
+
 bool HdView::racing() const { return !snaps_.empty() && frame_ - lastTickFrame_ < 40; }
 
 Pose HdView::poseAt(double t) const {
@@ -241,7 +247,7 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
   renderScene(p, track, out, W, H, params.focal * s, ox + params.cx * s, params.cy * s, m);
   if (!params.cockpit) return;
   overlay_.resize(320 * 200);
-  m.overlayARGB(overlay_.data());
+  m.overlayARGB(overlay_.data(), assets.sprites().empty() ? nullptr : &visible_);
   if (mapW_ != W || mapH_ != H) {
     mapW_ = W; mapH_ = H;
     mapX_.assign(W, -1); mapY_.assign(H, -1);
@@ -264,6 +270,20 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
       int u = mapX_[x];
       if (u >= 0 && src[u]) o[x] = src[u];
     }
+  }
+  // sprites remplacés par les images du dossier hd/, dans l'ordre où le jeu les a dessinés
+  if (assets.sprites().empty()) return;
+  const double xa = 32, xb = 288, la = ox + xa * s, lb = ox + xb * s;
+  auto fx = [&](double u) { return u < xa ? u / xa * la : u >= xb ? lb + (u - xb) / (320 - xb) * (W - lb) : la + (u - xa) * s; };
+  for (const SpriteDraw &e : visible_) {
+    const HdSprite *spr = assets.sprite(e.id);
+    if (!spr) continue;
+    double x0 = fx(e.x), x1 = fx(e.x + e.w), y0 = e.y * s, y1 = (e.y + e.h) * s;
+    // échelle autour du point d'ancrage, puis décalage (en pixels d'origine)
+    double cx = (x0 + x1) / 2, w2 = (x1 - x0) / 2 * spr->scale, h = (y1 - y0) * spr->scale;
+    double ay = spr->anchor == 0 ? y0 : spr->anchor == 1 ? y1 : (y0 + y1) / 2;
+    double ny0 = spr->anchor == 0 ? ay : spr->anchor == 1 ? ay - h : ay - h / 2;
+    HdAssets::draw(*spr, T / 50.0, cx - w2 + spr->dx * s, ny0 + spr->dy * s, cx + w2 + spr->dx * s, ny0 + h + spr->dy * s, out, W, H);
   }
 }
 

@@ -1,0 +1,3 @@
+Placez ici votre image disque de Stunt Car Racer (fichier .st).
+Aucune donnée du jeu n'est fournie avec ce programme.
+Si plusieurs images sont présentes, la première par ordre alphabétique est utilisée.

@@ -6,6 +6,7 @@
 #include <deque>
 #include <vector>
 
+#include "hdassets.hpp"
 #include "machine.hpp"
 #include "render3d.hpp"
 #include "track.hpp"
@@ -31,7 +32,10 @@ class HdView {
  public:
   explicit HdView(const Machine &m);
   HdParams params;
-  int clampCount = 0;   // nombre d'images où l'œil a été remonté au-dessus de la route
+  int clampCount = 0;
+  HdAssets assets;
+  // charge les images de remplacement (dossier hd/) et demande à la machine de suivre ces sprites
+  int loadAssets(Machine &m, const std::string &dir);   // nombre d'images où l'œil a été remonté au-dessus de la route
 
   // à appeler après chaque trame émulée
   void afterFrame(const Machine &m);
@@ -63,6 +67,7 @@ class HdView {
   double playT_ = -1e9, lastT_ = 0;
   Renderer3D r3d_;
   std::vector<uint32_t> overlay_;
+  std::vector<SpriteDraw> visible_;
   std::vector<int> mapX_, mapY_;
   int mapW_ = 0, mapH_ = 0;
 };

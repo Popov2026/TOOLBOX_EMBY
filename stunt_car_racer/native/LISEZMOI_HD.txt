@@ -1,0 +1,37 @@
+Images HD de remplacement (mode HD, touche F1)
+==============================================
+
+Déposez ici des images PNG (ou JPG) : en mode HD, elles remplacent les sprites du cockpit
+d'origine, au même endroit et au même moment. F2 en jeu recharge le dossier (pratique
+pendant que vous retouchez vos images).
+
+Noms des fichiers
+  sprite_06.png                une image fixe pour le sprite n° 6
+  sprite_06_1.png, _2, _3 ...  plusieurs images = animation (cadence : fps, 15 par défaut)
+
+Numéros utiles (planche complète : voir le paquet des graphismes)
+  flammes du boost : 6, 7, 49 (échappements gauches) et 8, 9, 50 (droits) — 64x28 d'origine
+                     le jeu alterne 6+8, 7+9, 49+50 ; vous pouvez mettre les mêmes images aux trois
+  chaînes de la grue : 19 à 22
+
+Transparence
+  - PNG avec transparence  -> collé tel quel (mélange « alpha »)
+  - image sans transparence -> mélange « add » : le noir disparaît, le reste s'ajoute en
+    lumière. Idéal pour du feu, des étincelles, des reflets : prenez des flammes SUR FOND NOIR.
+
+Taille
+  N'importe quelle définition : l'image est ajustée à l'emplacement du sprite d'origine
+  (gardez ses proportions, par exemple 64x28 -> 512x224). Pour déborder (flammes plus
+  longues), utilisez scale dans hd.ini.
+
+hd.ini (facultatif)
+  [sprite_06]
+  blend = add       ; add ou alpha
+  scale = 1.3       ; taille par rapport à l'emplacement d'origine
+  anchor = bottom   ; point fixe pour scale : bottom, center ou top
+  dx = 0            ; décalage, en pixels de l'écran d'origine (320x200)
+  dy = -2
+  fps = 20          ; cadence de l'animation
+
+Les flammes livrées ici sont un exemple calculé (feu procédural, tools/hd_flammes.py) :
+remplacez-les par les vôtres.

@@ -1,7 +1,7 @@
 // headless.cpp — exécute le jeu sans fenêtre (tests, captures, calage du mode HD).
 // usage : scr_headless DISQUE.st [--track N] [--frames N] [--up] [--shot f.ppm]
 //         [--hd f.ppm] [--cmp f.ppm] [--focal F] [--cx X] [--cy Y] [--eyeup H] [--eyefwd D] [--psign ±1] [--rsign ±1]
-//         [--bench-hd N]
+//         [--bench-hd N] [--fire] [--hddir DOSSIER]
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -24,7 +24,8 @@ static void savePPM(const std::string &path, const uint32_t *px, int W, int H) {
 int main(int argc, char **argv) {
   std::string disk, shot, hd, cmp;
   int track = -1, frames = 500, benchHd = 0;
-  bool up = false;
+  bool up = false, fire = false;
+  std::string hdDir;
   scr::HdParams hp;  // valeurs par défaut calées
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
@@ -44,6 +45,8 @@ int main(int argc, char **argv) {
     else if (a == "--rsign" && i + 1 < argc) hp.rollSign = int(num());
     else if (a == "--bench-hd" && i + 1 < argc) benchHd = std::atoi(argv[++i]);
     else if (a == "--up") up = true;
+    else if (a == "--fire") fire = true;
+    else if (a == "--hddir" && i + 1 < argc) hdDir = argv[++i];
     else disk = a;
   }
   try {
@@ -53,11 +56,18 @@ int main(int argc, char **argv) {
     if (track < 0) m.coldStart(); else m.startPractice(track);
     bool wantHd = !hd.empty() || !cmp.empty() || benchHd;
     std::unique_ptr<scr::HdView> view;
-    if (wantHd) { m.enableLayers(true); view = std::make_unique<scr::HdView>(m); view->params = hp; }
+    if (wantHd) {
+      m.enableLayers(true); view = std::make_unique<scr::HdView>(m); view->params = hp;
+      if (!hdDir.empty()) { view->loadAssets(m, hdDir); std::printf("%s", view->assets.report.c_str()); }
+    }
     auto t1 = std::chrono::steady_clock::now();
     scr::Joystick j; j.up = up;
-    m.setJoystick(j);
-    for (int f = 0; f < frames; f++) { m.runFrame(); if (view) view->afterFrame(m); }
+    for (int f = 0; f < frames; f++) {
+      j.fire = fire && f > 600;   // boost après le départ
+      m.setJoystick(j);
+      m.runFrame();
+      if (view) view->afterFrame(m);
+    }
     auto t2 = std::chrono::steady_clock::now();
     double ds = std::chrono::duration<double>(t1 - t0).count(), rs = std::chrono::duration<double>(t2 - t1).count();
     std::printf("démarrage %.2f s ; %d trames (%.1f s de jeu) en %.3f s = %.0f× le temps réel\n", ds, frames, frames / 50.0, rs,

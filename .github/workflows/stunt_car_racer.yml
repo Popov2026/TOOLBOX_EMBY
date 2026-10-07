@@ -37,6 +37,11 @@ jobs:
           Copy-Item "$env:RUNNER_TEMP\SDL2-$env:SDL2_VERSION\lib\x64\SDL2.dll" dist/
           Copy-Item stunt_car_racer/native/scr.ini.example dist/scr.ini
           Copy-Item stunt_car_racer/native/LISEZMOI.txt dist/
+          New-Item -ItemType Directory dist/DISK, dist/hd | Out-Null
+          Copy-Item stunt_car_racer/native/LISEZMOI_DISK.txt dist/DISK/LISEZMOI.txt
+          Copy-Item stunt_car_racer/native/LISEZMOI_HD.txt dist/hd/LISEZMOI_HD.txt
+          python -m pip install --quiet numpy pillow
+          python stunt_car_racer/tools/hd_flammes.py dist/hd
       - uses: actions/upload-artifact@v4
         with:
           name: stunt-car-racer-windows-x64
