@@ -47,8 +47,8 @@ native/build/scr Stunt_Car_Racer.st --track 3    # entraînement direct sur le c
 native/build/scr_headless Stunt_Car_Racer.st --track 1 --frames 1500 --up --shot c.ppm   # test sans fenêtre
 ```
 
-Commandes : **flèches** = joystick (haut accélère, bas freine), **Espace/Ctrl** = bouton
-(boost), clavier ST complet pour les menus, manette reconnue. **F1** mode HD, **F3** son coupé/rétabli, **F11** plein écran,
+Commandes : **flèches** = joystick (haut accélère, bas freine), **Espace/Ctrl/Maj/Alt** = bouton
+(boost ; Maj/Alt évitent le blocage de certains claviers sur Espace + deux flèches), clavier ST complet pour les menus, manette reconnue. **F1** mode HD, **F3** son coupé/rétabli, **F4/F11/Alt+Entrée** plein écran,
 **F5** recommencer, **Page préc./suiv.** changer de circuit, **F12** quitter.
 
 **Son** : la puce YM2149 de l'Atari ST est émulée (3 voix carrées, bruit, enveloppe, volumes

@@ -10,8 +10,8 @@
 //                    réglages de la physique d'origine (multiplicateurs, 1 = original)
 //   --ini FICHIER    lit les mêmes options dans un fichier « clé = valeur » (défaut : scr.ini)
 //
-// Touches : flèches = joystick (haut accélère), Espace/Ctrl = bouton (boost),
-//           clavier ST pour les menus, F11 plein écran, F12 quitter, PageUp/PageDown
+// Touches : flèches = joystick (haut accélère), Espace/Ctrl/Maj/Alt = bouton (boost),
+//           clavier ST pour les menus, F4/F11/Alt+Entrée plein écran, F12 quitter, PageUp/PageDown
 //           circuit précédent/suivant (entraînement), F5 recommencer.
 #include <SDL.h>
 
@@ -105,7 +105,7 @@ int stScancode(SDL_Scancode s) {
         {SDL_SCANCODE_X, 0x2d}, {SDL_SCANCODE_C, 0x2e}, {SDL_SCANCODE_V, 0x2f}, {SDL_SCANCODE_B, 0x30}, {SDL_SCANCODE_N, 0x31},
         {SDL_SCANCODE_M, 0x32}, {SDL_SCANCODE_COMMA, 0x33}, {SDL_SCANCODE_PERIOD, 0x34}, {SDL_SCANCODE_SLASH, 0x35},
         {SDL_SCANCODE_RSHIFT, 0x36}, {SDL_SCANCODE_LALT, 0x38}, {SDL_SCANCODE_SPACE, 0x39}, {SDL_SCANCODE_CAPSLOCK, 0x3a},
-        {SDL_SCANCODE_F1, 0x3b}, {SDL_SCANCODE_F2, 0x3c}, {SDL_SCANCODE_F3, 0x3d}, {SDL_SCANCODE_F4, 0x3e},
+        {SDL_SCANCODE_F1, 0x3b}, {SDL_SCANCODE_F2, 0x3c}, {SDL_SCANCODE_F3, 0x3d},
         {SDL_SCANCODE_F6, 0x40}, {SDL_SCANCODE_F7, 0x41}, {SDL_SCANCODE_F8, 0x42}, {SDL_SCANCODE_F9, 0x43},
         {SDL_SCANCODE_F10, 0x44}, {SDL_SCANCODE_HOME, 0x47}, {SDL_SCANCODE_UP, 0x48}, {SDL_SCANCODE_LEFT, 0x4b},
         {SDL_SCANCODE_RIGHT, 0x4d}, {SDL_SCANCODE_DOWN, 0x50}, {SDL_SCANCODE_INSERT, 0x52}, {SDL_SCANCODE_DELETE, 0x53}};
@@ -324,7 +324,8 @@ int main(int argc, char **argv) {
             applyMode(true);
             if (!hd) SDL_SetWindowTitle(win, "Stunt Car Racer");
           }
-          else if (sc == SDL_SCANCODE_F11) {
+          else if (sc == SDL_SCANCODE_F11 || sc == SDL_SCANCODE_F4 ||
+                   ((sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER) && (ev.key.keysym.mod & KMOD_ALT))) {   // plein écran
             bool fs = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP;
             SDL_SetWindowFullscreen(win, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
           } else if (sc == SDL_SCANCODE_F5 || ((sc == SDL_SCANCODE_PAGEUP || sc == SDL_SCANCODE_PAGEDOWN) && track >= 0)) {
@@ -343,7 +344,10 @@ int main(int argc, char **argv) {
     Joystick j;
     j.up = keys[SDL_SCANCODE_UP]; j.down = keys[SDL_SCANCODE_DOWN];
     j.left = keys[SDL_SCANCODE_LEFT]; j.right = keys[SDL_SCANCODE_RIGHT];
-    j.fire = keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL];
+    // boost : plusieurs touches, car beaucoup de claviers ne lisent pas Espace + deux flèches à la fois
+    // (la direction semblait alors bloquée pendant le boost) ; Maj et Alt n'ont pas ce problème
+    j.fire = keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL] || keys[SDL_SCANCODE_LSHIFT] ||
+             keys[SDL_SCANCODE_RSHIFT] || keys[SDL_SCANCODE_LALT] || keys[SDL_SCANCODE_RALT];
     if (pad) {
       int ax = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX), ay = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY);
       j.left |= ax < -12000 || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_LEFT);

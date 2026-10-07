@@ -6,10 +6,12 @@ Lancement : placez votre image .st dans le dossier DISK et double-cliquez sur sc
 (ou glissez l'image sur scr.exe, ou : scr.exe Stunt_Car_Racer.st --track 1).
 
 Commandes : flèches = joystick (haut accélère, bas freine, gauche/droite),
-Espace ou Ctrl = bouton (boost), clavier ST complet pour les menus.
+Espace, Ctrl, Maj ou Alt = bouton (boost), clavier ST complet pour les menus.
+Si la direction semble bloquée pendant le boost avec Espace, c'est le clavier qui ne lit
+pas trois touches à la fois : prenez Maj ou Alt pour le boost.
 Manette XInput reconnue. F1 mode HD (1920x1080, 16/9, image fluide à la
 fréquence de l'écran), F2 recharger les images HD, F3 couper le son,
-F11 plein écran, F5 recommencer,
+F4, F11 ou Alt+Entrée plein écran, F5 recommencer,
 Page préc./suiv. circuit précédent/suivant (mode entraînement), F12 quitter.
 
 Son : puce sonore YM2149 de l'Atari ST émulée (moteur, chocs...).
@@ -18,4 +20,4 @@ Réglages : scr.ini (gravité, poussée, freinage, pas de temps, amortissement,
 consommation du boost, taille de fenêtre...). Voir scr --help.
 
 Images HD : le dossier hd contient des images qui remplacent les sprites du cockpit en
-mode HD ; sans image, les flammes du boost sont calculées en HD. Voir hd/LISEZMOI_HD.txt.
+mode HD ; sans image, les flammes du boost sont les sprites d'origine agrandis en HD. Voir hd/LISEZMOI_HD.txt.
