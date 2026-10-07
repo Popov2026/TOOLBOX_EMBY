@@ -29,7 +29,13 @@ struct HdSprite {
   bool additive = false;
   double scale = 1, dx = 0, dy = 0, fps = 15;
   int anchor = 1;            // 0 haut, 1 bas, 2 centre
+  // marge de l'image autour de l'emplacement d'origine (fraction de sa largeur / hauteur)
+  double padL = 0, padT = 0, padR = 0, padB = 0;
 };
+
+// flammes HD calculées à partir de la silhouette d'un sprite de flamme d'origine
+// (px : index de couleur 64x28, -1 = transparent) : feu animé, mélange additif
+HdSprite makeFlame(const std::vector<int> &px, int w, int h, int seed);
 
 class HdAssets {
  public:

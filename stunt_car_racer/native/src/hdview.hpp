@@ -4,6 +4,7 @@
 #pragma once
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <vector>
 
 #include "hdassets.hpp"
@@ -33,6 +34,7 @@ struct HdParams {
   bool cockpit = true;                     // incruster le cockpit d'origine
   double interpDelay = 1.0;                // retard d'affichage en ticks (interpolation)
   double minClearance = 18;                // l'œil reste au moins à cette hauteur au-dessus de la route
+  bool builtinFlames = true;               // flammes du boost calculées si hd/ n'en fournit pas
   bool opponent3D = true;                  // voiture adverse redessinée en 3D (sinon : pixels d'origine)
 };
 
@@ -82,6 +84,8 @@ class HdView {
   Renderer3D r3d_;
   std::vector<uint32_t> overlay_;
   std::vector<SpriteDraw> visible_;
+  std::map<int, HdSprite> builtin_;
+  const HdSprite *spriteFor(int id, const Machine &m);
   std::vector<int> mapX_, mapY_;
   int mapW_ = 0, mapH_ = 0;
 };

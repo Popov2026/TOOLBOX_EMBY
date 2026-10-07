@@ -100,10 +100,26 @@ double HdView::playTime(double t) {
   return playT_;
 }
 
+static const int FLAME_IDS[] = {6, 7, 49, 8, 9, 50};   // flammes du boost (gauche / droite)
+
 int HdView::loadAssets(Machine &m, const std::string &dir) {
-  int n = assets.load(dir);
+  int n = dir.empty() ? 0 : assets.load(dir);
   for (auto &[id, spr] : assets.sprites()) m.watchSprite(id);
+  if (params.builtinFlames)
+    for (int id : FLAME_IDS) m.watchSprite(id);
   return n;
+}
+
+// image HD d'un sprite : celle du dossier hd/, sinon les flammes calculées (créées à la première utilisation)
+const HdSprite *HdView::spriteFor(int id, const Machine &m) {
+  if (const HdSprite *s = assets.sprite(id)) return s;
+  if (!params.builtinFlames || std::find(std::begin(FLAME_IDS), std::end(FLAME_IDS), id) == std::end(FLAME_IDS)) return nullptr;
+  auto it = builtin_.find(id);
+  if (it != builtin_.end()) return &it->second;
+  std::vector<int> px;
+  int w, h;
+  if (!m.spritePixels(id, px, w, h)) return nullptr;
+  return &(builtin_[id] = makeFlame(px, w, h, id * 7 + 1));
 }
 
 bool HdView::racing() const { return !snaps_.empty() && frame_ - lastTickFrame_ < 40; }
@@ -329,11 +345,17 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
     auto lerp = [](const Vec3 &a, const Vec3 &b, double t) { return Vec3{a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t}; };
     Vec3 aL1 = lerp(aL, aR, lw), aR1 = lerp(aR, aL, lw), bL1 = lerp(bL, bR, lw), bR1 = lerp(bR, bL, lw);
     Vec3 mid[4] = {aL1, aR1, bR1, bL1};
-    r3d_.poly(mid, 4, rc);
+    // en triangles : sur un virage relevé, les 4 coins d'une section ne sont pas coplanaires
+    auto quad = [&](const Vec3 *q, uint32_t col) {
+      Vec3 t1[3] = {q[0], q[1], q[2]}, t2[3] = {q[0], q[2], q[3]};
+      r3d_.poly(t1, 3, col);
+      r3d_.poly(t2, 3, col);
+    };
+    quad(mid, rc);
     Vec3 ql[4] = {aL, aL1, bL1, bL};
-    r3d_.poly(ql, 4, line);
+    quad(ql, line);
     Vec3 qr[4] = {aR1, aR, bR, bR1};
-    r3d_.poly(qr, 4, line);
+    quad(qr, line);
   }
   if (opp && opp->valid) addCar(*opp, HSCALE, m);
   r3d_.finish(out);
@@ -361,7 +383,7 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
   renderScene(p, track, out, W, H, params.focal * s, ox + params.cx * s, params.cy * s, m, &opp);
   if (!params.cockpit) return;
   overlay_.resize(320 * 200);
-  m.overlayARGB(overlay_.data(), assets.sprites().empty() ? nullptr : &visible_);
+  m.overlayARGB(overlay_.data(), assets.sprites().empty() && !params.builtinFlames ? nullptr : &visible_);
   if (mapW_ != W || mapH_ != H) {
     mapW_ = W; mapH_ = H;
     mapX_.assign(W, -1); mapY_.assign(H, -1);
@@ -386,13 +408,14 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
     }
   }
   // sprites remplacés par les images du dossier hd/, dans l'ordre où le jeu les a dessinés
-  if (assets.sprites().empty()) return;
+  if (assets.sprites().empty() && !params.builtinFlames) return;
   const double xa = 32, xb = 288, la = ox + xa * s, lb = ox + xb * s;
   auto fx = [&](double u) { return u < xa ? u / xa * la : u >= xb ? lb + (u - xb) / (320 - xb) * (W - lb) : la + (u - xa) * s; };
   for (const SpriteDraw &e : visible_) {
-    const HdSprite *spr = assets.sprite(e.id);
+    const HdSprite *spr = spriteFor(e.id, m);
     if (!spr) continue;
-    double x0 = fx(e.x), x1 = fx(e.x + e.w), y0 = e.y * s, y1 = (e.y + e.h) * s;
+    double x0 = fx(e.x - spr->padL * e.w), x1 = fx(e.x + e.w * (1 + spr->padR)), y0 = (e.y - spr->padT * e.h) * s,
+           y1 = (e.y + e.h * (1 + spr->padB)) * s;
     // échelle autour du point d'ancrage, puis décalage (en pixels d'origine)
     double cx = (x0 + x1) / 2, w2 = (x1 - x0) / 2 * spr->scale, h = (y1 - y0) * spr->scale;
     double ay = spr->anchor == 0 ? y0 : spr->anchor == 1 ? y1 : (y0 + y1) / 2;

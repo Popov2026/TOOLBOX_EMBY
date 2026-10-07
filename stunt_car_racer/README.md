@@ -60,7 +60,8 @@ appliquée à l'échantillon correspondant (44,1 kHz). Options `son = 0`, `volum
 **F1** bascule en **1920×1080, 16/9, image fluide** (60 i/s ou la fréquence de l'écran) :
 
 * la logique et la physique restent celles du jeu d'origine, exécutées à l'identique ;
-* la scène 3D est redessinée en haute définition par un moteur logiciel multi-cœur
+* la scène 3D est redessinée en haute définition (route découpée en triangles : les virages
+  relevés ne sont pas plans) par un moteur logiciel multi-cœur
   (tampon de profondeur), à partir de la géométrie exacte des circuits lue sur la disquette
   et de l'état de la voiture lu en mémoire ; elle est **interpolée** entre deux ticks du jeu
   (8,33 par seconde) au lieu de sauter d'une image à la suivante ;
@@ -80,8 +81,10 @@ la fenêtre affiche le nombre d'images par seconde.
 sprites du cockpit en mode HD, au même endroit et au même moment (`sprite_06.png`, ou
 `sprite_06_1.png`, `_2`… pour une animation). Sans transparence, l'image est ajoutée en
 lumière (flammes sur fond noir). Réglages par sprite dans `hd/hd.ini` (taille, ancrage,
-décalage, cadence), **F2** recharge le dossier en jeu. Mode d'emploi : `native/LISEZMOI_HD.txt` ;
-flammes d'exemple : `tools/hd_flammes.py`. Le jeu enregistre chaque appel de ses routines
+décalage, cadence), **F2** recharge le dossier en jeu. Mode d'emploi : `native/LISEZMOI_HD.txt`.
+Sans image, les **flammes du boost** sont calculées en HD à partir de la silhouette des flammes
+d'origine (carte de chaleur agrandie et adoucie, bruit turbulent qui monte, rampe de couleur
+du feu, mélange additif). Le jeu enregistre chaque appel de ses routines
 de sprites (`$56762`, `$5687E`) et ce qu'il recouvre, pour effacer proprement l'original.
 
 Réglages dans `scr.ini` (modèle : `native/scr.ini.example`) ou en ligne de commande :

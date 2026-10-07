@@ -216,10 +216,8 @@ int main(int argc, char **argv) {
   auto newView = [&] {
     view = std::make_unique<HdView>(*m);
     m->enableLayers(true);   // couches toujours suivies : F1 bascule sans délai
-    if (!hdDir.empty()) {
-      hdImages = view->loadAssets(*m, hdDir);
-      if (!view->assets.report.empty()) std::fprintf(stderr, "images HD (%s) :\n%s", hdDir.c_str(), view->assets.report.c_str());
-    }
+    hdImages = view->loadAssets(*m, hdDir);
+    if (!view->assets.report.empty()) std::fprintf(stderr, "images HD (%s) :\n%s", hdDir.c_str(), view->assets.report.c_str());
   };
   try { newView(); } catch (std::exception &e) { fail(std::string("Erreur : ") + e.what()); return 1; }
 
@@ -319,7 +317,7 @@ int main(int argc, char **argv) {
           }
           else if (sc == SDL_SCANCODE_F2) {   // recharge le dossier hd/ (images modifiées pendant le jeu)
             if (hdDir.empty()) hdDir = findHdDir(o.hdDir);
-            if (!hdDir.empty()) hdImages = view->loadAssets(*m, hdDir);
+            hdImages = view->loadAssets(*m, hdDir);
           }
           else if (sc == SDL_SCANCODE_F1) {
             hd = !hd;

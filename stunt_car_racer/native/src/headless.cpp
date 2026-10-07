@@ -59,7 +59,8 @@ int main(int argc, char **argv) {
     std::unique_ptr<scr::HdView> view;
     if (wantHd) {
       m.enableLayers(true); view = std::make_unique<scr::HdView>(m); view->params = hp;
-      if (!hdDir.empty()) { view->loadAssets(m, hdDir); std::printf("%s", view->assets.report.c_str()); }
+      view->loadAssets(m, hdDir);
+      std::printf("%s", view->assets.report.c_str());
     }
     auto t1 = std::chrono::steady_clock::now();
     scr::Joystick j; j.up = up;

@@ -33,5 +33,5 @@ hd.ini (facultatif)
   dy = -2
   fps = 20          ; cadence de l'animation
 
-Les flammes livrées ici sont un exemple calculé (feu procédural, tools/hd_flammes.py) :
-remplacez-les par les vôtres.
+Sans image ici, les flammes du boost sont calculées par le jeu à partir de la silhouette des
+flammes d'origine (feu animé en haute définition, mélange additif). Vos images sont prioritaires.

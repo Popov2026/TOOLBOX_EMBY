@@ -18,4 +18,4 @@ Réglages : scr.ini (gravité, poussée, freinage, pas de temps, amortissement,
 consommation du boost, taille de fenêtre...). Voir scr --help.
 
 Images HD : le dossier hd contient des images qui remplacent les sprites du cockpit en
-mode HD (flammes du boost fournies en exemple). Voir hd/LISEZMOI_HD.txt.
+mode HD ; sans image, les flammes du boost sont calculées en HD. Voir hd/LISEZMOI_HD.txt.
