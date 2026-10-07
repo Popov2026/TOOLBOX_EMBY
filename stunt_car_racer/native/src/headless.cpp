@@ -8,6 +8,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "hdview.hpp"
@@ -112,7 +113,10 @@ int main(int argc, char **argv) {
     }
     if (view && !hd.empty()) {
       std::vector<uint32_t> big(1920 * 1080);
-      view->render(m, frames, big.data(), 1920, 1080);
+      for (int k = 0; k < 60; k++) {   // lissages établis, flammes calculées en arrière-plan prêtes
+        view->render(m, frames, big.data(), 1920, 1080);
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+      }
       savePPM(hd, big.data(), 1920, 1080);
     }
     if (view && benchHd) {

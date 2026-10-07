@@ -84,7 +84,9 @@ lumière (flammes sur fond noir). Réglages par sprite dans `hd/hd.ini` (taille,
 décalage, cadence), **F2** recharge le dossier en jeu. Mode d'emploi : `native/LISEZMOI_HD.txt`.
 Sans image, les **flammes du boost** sont calculées en HD à partir de la silhouette des flammes
 d'origine (carte de chaleur agrandie et adoucie, bruit turbulent qui monte, rampe de couleur
-du feu, mélange additif). Le jeu enregistre chaque appel de ses routines
+du feu, mélange additif), avec un **effet de vent** : selon la vitesse de la voiture
+(`$10AD4`/`$10AD8`), chaque langue de feu se couche vers l'arrière à partir de sa propre base
+(4 niveaux de vent précalculés en arrière-plan). Le jeu enregistre chaque appel de ses routines
 de sprites (`$56762`, `$5687E`) et ce qu'il recouvre, pour effacer proprement l'original.
 
 Réglages dans `scr.ini` (modèle : `native/scr.ini.example`) ou en ligne de commande :

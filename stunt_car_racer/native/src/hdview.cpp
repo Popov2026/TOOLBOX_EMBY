@@ -46,8 +46,16 @@ const Hills HILLS;
 
 HdView::HdView(const Machine &m) : tracks_(decodeTracks(m.image())) {}
 
+HdView::~HdView() {
+  if (flameThread_.joinable()) flameThread_.join();
+}
+
 void HdView::afterFrame(const Machine &m) {
   frame_++;
+  {   // vent relatif : vitesse au sol de la voiture ($10AD4 / $10AD8)
+    double vx = int16_t(m.w(0x10ad4)), vz = int16_t(m.w(0x10ad8));
+    windTarget_ = std::clamp(std::sqrt(vx * vx + vz * vz) / 20000.0, 0.0, 1.0);
+  }
   if (m.ticks() != lastTicks_) {
     lastTicks_ = m.ticks();
     if (lastTickFrame_) {
@@ -110,16 +118,39 @@ int HdView::loadAssets(Machine &m, const std::string &dir) {
   return n;
 }
 
-// image HD d'un sprite : celle du dossier hd/, sinon les flammes calculées (créées à la première utilisation)
+// image HD d'un sprite : celle du dossier hd/, sinon les flammes calculées. Elles sont créées en
+// arrière-plan dès que les sprites du jeu sont disponibles (rien n'est affiché en attendant).
 const HdSprite *HdView::spriteFor(int id, const Machine &m) {
   if (const HdSprite *s = assets.sprite(id)) return s;
   if (!params.builtinFlames || std::find(std::begin(FLAME_IDS), std::end(FLAME_IDS), id) == std::end(FLAME_IDS)) return nullptr;
-  auto it = builtin_.find(id);
-  if (it != builtin_.end()) return &it->second;
-  std::vector<int> px;
-  int w, h;
-  if (!m.spritePixels(id, px, w, h)) return nullptr;
-  return &(builtin_[id] = makeFlame(px, w, h, id * 7 + 1));
+  if (flamesReady_) {
+    auto it = builtin_.find(id);
+    return it == builtin_.end() ? nullptr : &it->second;
+  }
+  if (!flamesStarted_) {
+    struct Src { int id, w, h; std::vector<int> px; };
+    std::vector<Src> src;
+    for (int fid : FLAME_IDS) {
+      Src e{fid, 0, 0, {}};
+      if (!m.spritePixels(fid, e.px, e.w, e.h)) return nullptr;
+      src.push_back(std::move(e));
+    }
+    flamesStarted_ = true;
+    flameThread_ = std::thread([this, src = std::move(src)] {
+      std::vector<HdSprite> out(src.size());
+      std::vector<std::thread> th;   // une flamme par cœur
+      for (size_t k = 0; k < src.size(); k++)
+        th.emplace_back([&, k] {
+          const auto &e = src[k];
+          int side = (e.id == 6 || e.id == 7 || e.id == 49) ? -1 : 1;
+          out[k] = makeFlame(e.px, e.w, e.h, e.id * 7 + 1, side);
+        });
+      for (auto &t : th) t.join();
+      for (size_t k = 0; k < src.size(); k++) builtin_[src[k].id] = std::move(out[k]);
+      flamesReady_ = true;
+    });
+  }
+  return nullptr;
 }
 
 bool HdView::racing() const { return !snaps_.empty() && frame_ - lastTickFrame_ < 40; }
@@ -376,6 +407,7 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
     return;
   }
   double T = playTime(t);
+  wind_ += (windTarget_ - wind_) * 0.08;   // lissé (affichage à 60 i/s)
   Pose p = poseAt(T);
   int track = snaps_.back().track;
   OppPose opp = opponentAt(T);
@@ -420,7 +452,16 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
     double cx = (x0 + x1) / 2, w2 = (x1 - x0) / 2 * spr->scale, h = (y1 - y0) * spr->scale;
     double ay = spr->anchor == 0 ? y0 : spr->anchor == 1 ? y1 : (y0 + y1) / 2;
     double ny0 = spr->anchor == 0 ? ay : spr->anchor == 1 ? ay - h : ay - h / 2;
-    HdAssets::draw(*spr, T / 50.0, cx - w2 + spr->dx * s, ny0 + spr->dy * s, cx + w2 + spr->dx * s, ny0 + h + spr->dy * s, out, W, H);
+    // vent : les flammes se couchent vers l'extérieur (l'arrière de la voiture). Flammes calculées :
+    // images préparées par niveau de vent ; images du dossier hd/ : cisaillement et aplatissement
+    bool flame = std::find(std::begin(FLAME_IDS), std::end(FLAME_IDS), e.id) != std::end(FLAME_IDS);
+    double wk = (spr->wind >= 0 ? spr->wind : flame ? 1.0 : 0.0) * wind_;
+    double side = e.x + e.w / 2 < 160 ? -1 : 1;
+    bool baked = spr->windLevels > 1;
+    double squash = baked ? 1 : 1 - 0.3 * std::min(1.0, wk);
+    double top = ny0 + h * (1 - squash);
+    HdAssets::draw(*spr, T / 50.0 * (1 + 0.8 * wk), cx - w2 + spr->dx * s, top + spr->dy * s, cx + w2 + spr->dx * s,
+                   ny0 + h + spr->dy * s, out, W, H, baked ? 0 : side * 0.55 * wk, wk);
   }
 }
 

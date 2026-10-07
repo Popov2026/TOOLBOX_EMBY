@@ -10,6 +10,7 @@
 //       dx = 0           ; décalage en pixels de l'écran d'origine (320x200)
 //       dy = -4
 //       fps = 15
+//       wind = 1         ; couché par le vent selon la vitesse (flammes : 1 par défaut)
 //   Sans réglage : alpha si l'image a de la transparence, sinon add (image sur fond noir).
 #pragma once
 #include <cstdint>
@@ -31,11 +32,14 @@ struct HdSprite {
   int anchor = 1;            // 0 haut, 1 bas, 2 centre
   // marge de l'image autour de l'emplacement d'origine (fraction de sa largeur / hauteur)
   double padL = 0, padT = 0, padR = 0, padB = 0;
+  double wind = -1;          // sensibilité au vent de la course (-1 : 1 pour les flammes, 0 sinon)
+  int windLevels = 1;        // > 1 : frames rangées par niveau de vent (flammes calculées), sans cisaillement
 };
 
 // flammes HD calculées à partir de la silhouette d'un sprite de flamme d'origine
 // (px : index de couleur 64x28, -1 = transparent) : feu animé, mélange additif
-HdSprite makeFlame(const std::vector<int> &px, int w, int h, int seed);
+// side : -1 flamme de gauche, +1 de droite (le vent la couche vers l'extérieur)
+HdSprite makeFlame(const std::vector<int> &px, int w, int h, int seed, int side);
 
 class HdAssets {
  public:
@@ -49,7 +53,10 @@ class HdAssets {
   std::string report;        // résumé du chargement (fichiers, erreurs)
 
   // dessine l'image (instant t en secondes) dans le rectangle [x0,x1)x[y0,y1) de out (W×H)
-  static void draw(const HdSprite &s, double t, double x0, double y0, double x1, double y1, uint32_t *out, int W, int H);
+  // shear : décalage horizontal du haut de l'image, en fraction de la largeur (0 = droit)
+  // wind : niveau de vent 0..1 (choix des images si windLevels > 1)
+  static void draw(const HdSprite &s, double t, double x0, double y0, double x1, double y1, uint32_t *out, int W, int H,
+                   double shear = 0, double wind = 0);
 
  private:
   std::map<int, HdSprite> sprites_;

@@ -32,6 +32,8 @@ hd.ini (facultatif)
   dx = 0            ; décalage, en pixels de l'écran d'origine (320x200)
   dy = -2
   fps = 20          ; cadence de l'animation
+  wind = 1          ; effet du vent de la course : l'image se couche vers l'extérieur et s'aplatit
+                    ; avec la vitesse (1 par défaut pour les flammes, 0 = sans)
 
 Sans image ici, les flammes du boost sont calculées par le jeu à partir de la silhouette des
 flammes d'origine (feu animé en haute définition, mélange additif). Vos images sont prioritaires.

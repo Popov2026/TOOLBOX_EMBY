@@ -4,7 +4,10 @@
 #pragma once
 #include <cstdint>
 #include <deque>
+#include <atomic>
 #include <map>
+#include <memory>
+#include <thread>
 #include <vector>
 
 #include "hdassets.hpp"
@@ -41,6 +44,7 @@ struct HdParams {
 class HdView {
  public:
   explicit HdView(const Machine &m);
+  ~HdView();
   HdParams params;
   int clampCount = 0;
   HdAssets assets;
@@ -84,7 +88,11 @@ class HdView {
   Renderer3D r3d_;
   std::vector<uint32_t> overlay_;
   std::vector<SpriteDraw> visible_;
-  std::map<int, HdSprite> builtin_;
+  std::map<int, HdSprite> builtin_;          // flammes calculées (publiées quand flamesReady_)
+  std::thread flameThread_;
+  std::atomic<bool> flamesReady_{false};
+  bool flamesStarted_ = false;
+  double windTarget_ = 0, wind_ = 0;   // vent relatif (0 à l'arrêt, 1 à pleine vitesse)
   const HdSprite *spriteFor(int id, const Machine &m);
   std::vector<int> mapX_, mapY_;
   int mapW_ = 0, mapH_ = 0;

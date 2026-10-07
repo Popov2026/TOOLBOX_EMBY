@@ -96,6 +96,7 @@ int HdAssets::load(const std::string &dir) {
     else if (k == "dx") s.dx = d;
     else if (k == "dy") s.dy = d;
     else if (k == "fps" && d > 0) s.fps = d;
+    else if (k == "wind") s.wind = d;
     else if (k == "anchor") s.anchor = v == "top" ? 0 : v == "center" ? 2 : 1;
   }
   for (auto &[id, s] : sprites_)
@@ -104,11 +105,15 @@ int HdAssets::load(const std::string &dir) {
   return int(sprites_.size());
 }
 
-void HdAssets::draw(const HdSprite &s, double t, double x0, double y0, double x1, double y1, uint32_t *out, int W, int H) {
+void HdAssets::draw(const HdSprite &s, double t, double x0, double y0, double x1, double y1, uint32_t *out, int W, int H,
+                    double shear, double wind) {
   if (s.frames.empty() || x1 <= x0 || y1 <= y0) return;
-  const HdImage &img = s.frames[size_t(std::fmod(std::max(0.0, t) * s.fps, double(s.frames.size())))];
+  const size_t per = s.frames.size() / size_t(std::max(1, s.windLevels));
+  const size_t lvl = s.windLevels > 1 ? size_t(std::lround(std::clamp(wind, 0.0, 1.0) * (s.windLevels - 1))) : 0;
+  const HdImage &img = s.frames[lvl * per + size_t(std::fmod(std::max(0.0, t) * s.fps, double(per)))];
   const double rw = x1 - x0, rh = y1 - y0;
-  int xa = std::max(0, int(std::floor(x0))), xb = std::min(W, int(std::ceil(x1)));
+  const double sh = shear * rw;   // décalage du haut de l'image (le bas reste en place)
+  int xa = std::max(0, int(std::floor(std::min(x0, x0 + sh)))), xb = std::min(W, int(std::ceil(std::max(x1, x1 + sh))));
   int ya = std::max(0, int(std::floor(y0))), yb = std::min(H, int(std::ceil(y1)));
   for (int y = ya; y < yb; y++) {
     double v = (y + 0.5 - y0) / rh * img.h - 0.5;
@@ -116,8 +121,9 @@ void HdAssets::draw(const HdSprite &s, double t, double x0, double y0, double x1
     int v0 = std::clamp(int(std::floor(v)), 0, img.h - 1), v1 = std::min(v0 + 1, img.h - 1);
     double fv = std::clamp(v - v0, 0.0, 1.0);
     uint32_t *o = out + size_t(y) * W;
+    const double rowShift = sh * (1 - (y + 0.5 - y0) / rh);   // le haut se couche, le bas reste fixe
     for (int x = xa; x < xb; x++) {
-      double u = (x + 0.5 - x0) / rw * img.w - 0.5;
+      double u = (x + 0.5 - x0 - rowShift) / rw * img.w - 0.5;
       if (u < -0.5 || u > img.w - 0.5) continue;
       int u0 = std::clamp(int(std::floor(u)), 0, img.w - 1), u1 = std::min(u0 + 1, img.w - 1);
       double fu = std::clamp(u - u0, 0.0, 1.0);
@@ -193,9 +199,10 @@ void blur(std::vector<float> &a, int w, int h, int r) {   // flou boîte x3 ≈ 
 }
 }  // namespace
 
-HdSprite makeFlame(const std::vector<int> &px, int sw, int sh, int seed) {
-  const int F = 6;                       // agrandissement
-  const int ml = sw / 4, mr = sw / 4, mt = sh * 3 / 4, mb = sh / 6;   // marges (pixels d'origine) : la flamme déborde
+HdSprite makeFlame(const std::vector<int> &px, int sw, int sh, int seed, int side) {
+  const int F = 4;                       // agrandissement
+  // marges (pixels d'origine) : la flamme déborde vers le haut, et vers l'extérieur quand le vent la couche
+  const int ml = side < 0 ? sw / 2 : sw / 6, mr = side < 0 ? sw / 6 : sw / 2, mt = sh * 3 / 4, mb = sh / 6;
   const int W = (sw + ml + mr) * F, H = (sh + mt + mb) * F;
   // chaleur de base : blanc = cœur, jaune = flamme, sur la grille agrandie
   std::vector<float> heat(size_t(W) * H, 0.f);
@@ -215,8 +222,11 @@ HdSprite makeFlame(const std::vector<int> &px, int sw, int sh, int seed) {
   s.additive = true;
   s.fps = 24;
   s.padL = double(ml) / sw; s.padR = double(mr) / sw; s.padT = double(mt) / sh; s.padB = double(mb) / sh;
-  const int frames = 10;
+  const int frames = 8, levels = 4;
+  s.windLevels = levels;
+  for (int lv = 0; lv < levels; lv++)
   for (int k = 0; k < frames; k++) {
+    const float wl = float(lv) / (levels - 1);
     HdImage img;
     img.w = W; img.h = H;
     img.px.assign(size_t(W) * H, 0xff000000u);
@@ -229,8 +239,10 @@ HdSprite makeFlame(const std::vector<int> &px, int sw, int sh, int seed) {
         float n1 = nz.fbm(fx * 2.0f, fy * 2.0f + t * 16.0f);
         float n2 = nz.fbm(fx * 3.1f + 7.3f, fy * 3.0f + t * 32.0f);
         float n3 = nz.fbm(fx * 6.0f + 3.1f, fy * 1.5f + t * 48.0f);
-        int sx = std::clamp(int(x + (n2 - 0.5f) * F * 4), 0, W - 1);
-        int sy = std::clamp(int(y + F * 1.0f + n1 * n1 * F * 9), 0, H - 1);
+        // d : distance au-dessus de la source ; le vent couche la flamme vers l'extérieur à partir de sa base
+        float d = F * 1.0f + n1 * n1 * F * 9 * (1 + 1.2f * wl);
+        int sx = std::clamp(int(x - side * wl * 1.3f * d + (n2 - 0.5f) * F * 4), 0, W - 1);
+        int sy = std::clamp(int(y + d * (1 - 0.35f * wl)), 0, H - 1);
         float c = core[size_t(sy) * W + sx], g = glow[size_t(y) * W + x];
         float tongues = std::clamp(0.35f + 1.3f * n3, 0.f, 1.3f);
         float h = c * tongues * (0.6f + 0.8f * n1) * 1.15f + g * 0.22f;
