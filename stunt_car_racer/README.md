@@ -82,11 +82,10 @@ sprites du cockpit en mode HD, au même endroit et au même moment (`sprite_06.p
 `sprite_06_1.png`, `_2`… pour une animation). Sans transparence, l'image est ajoutée en
 lumière (flammes sur fond noir). Réglages par sprite dans `hd/hd.ini` (taille, ancrage,
 décalage, cadence), **F2** recharge le dossier en jeu. Mode d'emploi : `native/LISEZMOI_HD.txt`.
-Sans image, les **flammes du boost** sont calculées en HD à partir de la silhouette des flammes
-d'origine (carte de chaleur agrandie et adoucie, bruit turbulent qui monte, rampe de couleur
-du feu, mélange additif), avec un **effet de vent** : selon la vitesse de la voiture
-(`$10AD4`/`$10AD8`), chaque langue de feu se couche vers l'arrière à partir de sa propre base
-(4 niveaux de vent précalculés en arrière-plan). Le jeu enregistre chaque appel de ses routines
+Sans image, les **flammes du boost** sont calculées en HD à chaque image : des jets qui sortent
+des bouches d'échappement (repérées sur les sprites de flamme d'origine), cœur incandescent,
+cône qui s'évase, mèches turbulentes ; à l'arrêt le feu monte, en roulant le **vent**
+(vitesse `$10AD4`/`$10AD8`) le rabat vers le spectateur et l'allonge. Le jeu enregistre chaque appel de ses routines
 de sprites (`$56762`, `$5687E`) et ce qu'il recouvre, pour effacer proprement l'original.
 
 Réglages dans `scr.ini` (modèle : `native/scr.ini.example`) ou en ligne de commande :

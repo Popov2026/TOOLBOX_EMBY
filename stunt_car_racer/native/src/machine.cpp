@@ -33,7 +33,7 @@ static inline void markWrite(Machine *m, uint32_t a, uint32_t v, uint32_t pc) {
                 : scene                             ? Machine::W_SCENE
                                                     : Machine::W_OTHER;
   m->layers_[a] = cls;
-  if (cls == Machine::W_SCENE) m->layers_[Machine::RAMSIZE + a] = uint8_t(v);
+  if (cls == Machine::W_SCENE) { m->layers_[Machine::RAMSIZE + a] = uint8_t(v); m->layers_[2 * Machine::RAMSIZE + a] = 1; }
 }
 
 constexpr uint32_t A_JOYSTICK = 0x106a6, A_KEYS = 0x6f02c;
@@ -50,7 +50,7 @@ constexpr uint32_t CAR_TABLE = 0x1455a, CAR_BLOCK = 0x108e2;
 Machine *Machine::current = nullptr;
 
 void Machine::enableLayers(bool on) {
-  if (on && !layers_) layers_ = new uint8_t[2 * RAMSIZE]();
+  if (on && !layers_) layers_ = new uint8_t[3 * RAMSIZE]();   // classe, valeur écrite par la scène, octet écrit par la scène
   if (!on && layers_) { delete[] layers_; layers_ = nullptr; }
 }
 
@@ -76,7 +76,6 @@ bool Machine::spritePixels(int id, std::vector<int> &px, int &wOut, int &h) cons
 // entrée d'une routine de sprite : on note la position et on mémorise ce qui va être recouvert
 void Machine::recordSprite(uint32_t pc) {
   int id = m68k_get_reg(nullptr, M68K_REG_D0) & 0xff;
-  if (!spriteWatch_[id]) return;
   uint32_t d = SPRITE_DESC + id * 16;
   SpriteDraw sd;
   sd.id = id;
@@ -86,8 +85,8 @@ void Machine::recordSprite(uint32_t pc) {
   else { sd.x = int16_t(m68k_get_reg(nullptr, M68K_REG_D4)); sd.y = int16_t(m68k_get_reg(nullptr, M68K_REG_D5)); }
   sd.buffer = l(0x56c74) & 0xfffffe;
   if (sd.buffer + 32000 > RAMSIZE) return;
-  sd.under.assign(size_t(sd.w) * sd.h, 255);
-  for (int r = 0; r < sd.h; r++) {
+  if (spriteWatch_[id]) sd.under.assign(size_t(sd.w) * sd.h, 255);   // ce qu'il recouvre : seulement s'il sera remplacé
+  for (int r = 0; r < sd.h && !sd.under.empty(); r++) {
     int y = sd.y + r;
     if (y < 0 || y >= 200) continue;
     for (int c = 0; c < sd.w; c++) {
@@ -105,11 +104,11 @@ void Machine::recordSprite(uint32_t pc) {
   for (auto &e : spriteDraws_)
     if (e.buffer == sd.buffer && e.x == sd.x && e.y == sd.y && e.w == sd.w && e.h == sd.h) { e = std::move(sd); return; }
   spriteDraws_.push_back(std::move(sd));
-  if (spriteDraws_.size() > 64) spriteDraws_.erase(spriteDraws_.begin());
+  if (spriteDraws_.size() > 160) spriteDraws_.erase(spriteDraws_.begin());
 }
 
 void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const {
-  static uint8_t idx[320 * 200], sidx[320 * 200], cls[320 * 200];
+  static uint8_t idx[320 * 200], sidx[320 * 200], cls[320 * 200], sval[320 * 200];
   screenIndex(idx);
   uint32_t base = vbase();
   for (int y = 0; y < 200; y++)
@@ -119,6 +118,7 @@ void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const
         int bit = 15 - px, o = px < 8 ? 0 : 1;
         int i = y * 320 + g * 16 + px;
         cls[i] = layers_ ? layers_[a + o] : W_OTHER;
+        sval[i] = layers_ ? layers_[2 * RAMSIZE + a + o] : 0;   // la scène a-t-elle déjà dessiné ici ?
         if (layers_) {
           const uint8_t *sh = layers_ + RAMSIZE + a;
           uint16_t p0 = (sh[0] << 8) | sh[1], p1 = (sh[2] << 8) | sh[3], p2 = (sh[4] << 8) | sh[5], p3 = (sh[6] << 8) | sh[7];
@@ -148,20 +148,21 @@ void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const
     if (y > 0) seed(i - 320);
     if (y < 199) seed(i + 320);
   }
-  for (int i = 0; i < 64000; i++) {
-    // voiture adverse : seules les couleurs de la carrosserie sont gardées (pas le ciel, le sol, les collines, la route)
-    bool oppBg = cls[i] == W_OPPONENT && (hideOpp_ || idx[i] == 7 || idx[i] == 13 || idx[i] == 5 || idx[i] == 1 || idx[i] == 2 || idx[i] == 3);
-    bool transparent = clear[i] || cls[i] == W_SCENE || oppBg || (cls[i] == W_SPRITE && idx[i] == sidx[i]);
-    out[i] = transparent ? 0 : paletteARGB(idx[i]);
-  }
-  // sprites remplacés en HD : encore visibles ? (au moins la moitié de leurs pixels à l'écran)
-  if (visible) visible->clear();
+  // couleurs utilisées par le décor 3D (ciel, sol, collines, route, lignes, flancs) : un pixel de sprite
+  // d'une autre couleur (noir, gris, bleus, verts du moteur...) n'est jamais de la scène
+  static const bool SCENE_COLOR[16] = {0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1};
+  // sprites du cockpit encore visibles dans l'image affichée (au moins la moitié de leurs pixels) :
+  // leurs pixels opaques restent opaques, même si leur couleur coïncide avec celle de la scène
+  static uint8_t sprMask[320 * 200];
+  std::memset(sprMask, 0, sizeof sprMask);
   uint32_t vb = vbase();
   std::vector<int> spx;
+  std::vector<std::pair<size_t, std::vector<int>>> live;   // (indice, pixels) des sprites visibles
   for (size_t k = 0; k < spriteDraws_.size();) {
     SpriteDraw &e = spriteDraws_[k];
     int sw, sh;
-    if (e.buffer != vb || !spritePixels(e.id, spx, sw, sh)) { k++; continue; }
+    if (e.buffer != vb) { k++; continue; }
+    if (!spritePixels(e.id, spx, sw, sh)) { spriteDraws_.erase(spriteDraws_.begin() + long(k)); continue; }
     int tot = 0, ok = 0;
     for (int r = 0; r < sh; r++)
       for (int c = 0; c < sw; c++) {
@@ -170,16 +171,34 @@ void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const
         tot++; ok += idx[y * 320 + x] == v;
       }
     if (!tot || ok * 2 < tot) { spriteDraws_.erase(spriteDraws_.begin() + long(k)); continue; }
-    // on efface le sprite d'origine du cockpit : on remet ce qu'il recouvrait
     for (int r = 0; r < sh; r++)
       for (int c = 0; c < sw; c++) {
         int x = e.x + c, y = e.y + r, v = spx[size_t(r) * sw + c];
+        if (v >= 0 && x >= 0 && x < 320 && y >= 0 && y < 200 && idx[y * 320 + x] == v) sprMask[y * 320 + x] = 1;
+      }
+    live.push_back({k, spx});
+    k++;
+  }
+  for (int i = 0; i < 64000; i++) {
+    // voiture adverse : seules les couleurs de la carrosserie sont gardées (pas le ciel, le sol, les collines, la route)
+    bool oppBg = cls[i] == W_OPPONENT && (hideOpp_ || idx[i] == 7 || idx[i] == 13 || idx[i] == 5 || idx[i] == 1 || idx[i] == 2 || idx[i] == 3);
+    bool transparent = clear[i] || cls[i] == W_SCENE || oppBg || (cls[i] == W_SPRITE && !sprMask[i] && sval[i] && SCENE_COLOR[idx[i]] && idx[i] == sidx[i]);
+    out[i] = transparent ? 0 : paletteARGB(idx[i]);
+  }
+  // sprites remplacés en HD : on efface l'original du cockpit (on remet ce qu'il recouvrait)
+  if (visible) visible->clear();
+  for (auto &[k, px] : live) {
+    const SpriteDraw &e = spriteDraws_[k];
+    if (e.under.empty()) continue;
+    int sw = e.w, sh = e.h;
+    for (int r = 0; r < sh; r++)
+      for (int c = 0; c < sw; c++) {
+        int x = e.x + c, y = e.y + r, v = px[size_t(r) * sw + c];
         if (v < 0 || x < 0 || x >= 320 || y < 0 || y >= 200 || idx[y * 320 + x] != v) continue;
         uint8_t u = e.under[size_t(r) * e.w + c];
         out[y * 320 + x] = u == 255 ? 0 : paletteARGB(u);
       }
     if (visible) visible->push_back(e);
-    k++;
   }
 }
 
@@ -346,7 +365,7 @@ void Machine::hook(uint32_t pc) {
       inOpponent_ = true;
     } else if (inOpponent_ && pc == oppReturn_) inOpponent_ = false;
   }
-  if ((pc == A_SPRITE || pc == A_SPRITE_XY) && spriteWatch_.any()) recordSprite(pc);
+  if ((pc == A_SPRITE || pc == A_SPRITE_XY) && (layers_ || spriteWatch_.any())) recordSprite(pc);
   if (pc == A_DRAW_OPPONENT) oppDrawnInRace_ = true;
   if (pc == A_RACE) oppDrawnInRace_ = false;
   if (pc == A_PHYSICS) ticks_++;

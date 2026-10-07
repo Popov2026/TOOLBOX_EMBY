@@ -35,5 +35,5 @@ hd.ini (facultatif)
   wind = 1          ; effet du vent de la course : l'image se couche vers l'extérieur et s'aplatit
                     ; avec la vitesse (1 par défaut pour les flammes, 0 = sans)
 
-Sans image ici, les flammes du boost sont calculées par le jeu à partir de la silhouette des
-flammes d'origine (feu animé en haute définition, mélange additif). Vos images sont prioritaires.
+Sans image ici, les flammes du boost sont calculées par le jeu en haute définition (jets de feu
+qui sortent des échappements, rabattus par le vent selon la vitesse). Vos images sont prioritaires.

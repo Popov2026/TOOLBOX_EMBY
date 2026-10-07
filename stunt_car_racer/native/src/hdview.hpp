@@ -4,10 +4,9 @@
 #pragma once
 #include <cstdint>
 #include <deque>
-#include <atomic>
 #include <map>
 #include <memory>
-#include <thread>
+#include <functional>
 #include <vector>
 
 #include "hdassets.hpp"
@@ -44,7 +43,6 @@ struct HdParams {
 class HdView {
  public:
   explicit HdView(const Machine &m);
-  ~HdView();
   HdParams params;
   int clampCount = 0;
   HdAssets assets;
@@ -73,6 +71,7 @@ class HdView {
   // hauteur brute de la route sous (x, z), la plus proche de yRef ; faux hors de la route
   bool surfaceRaw(const Track &t, double x, double z, double yRef, double &y);
   int hint_ = -1;
+  double eyeLift_ = 0;   // remontée de l'œil au-dessus de la route (lissée)
   struct Snap { double t; Pose p; int track; OppPose opp; };
   OppPose opponentFromGame(const Machine &m, int track);
   double oppY_ = 0, oppVy_ = 0;
@@ -88,10 +87,14 @@ class HdView {
   Renderer3D r3d_;
   std::vector<uint32_t> overlay_;
   std::vector<SpriteDraw> visible_;
-  std::map<int, HdSprite> builtin_;          // flammes calculées (publiées quand flamesReady_)
-  std::thread flameThread_;
-  std::atomic<bool> flamesReady_{false};
-  bool flamesStarted_ = false;
+  // flammes du boost calculées : jets sortant des bouches d'échappement, repérées sur les sprites d'origine
+  struct Jet { double x, y, r; };            // centre et rayon de la bouche (pixels d'origine, relatifs au sprite)
+  std::map<int, std::vector<Jet>> jets_;
+  std::vector<float> noise_;                 // bruit périodique 128×128
+  float noiseAt(float x, float y) const;
+  const std::vector<Jet> &jetsFor(int id, const Machine &m);
+  void drawJets(const std::vector<Jet> &jets, double ox0, double oy0, double strength, double t, uint32_t *out, int W, int H,
+                double s, double vpx, double vpy, const std::function<double(double)> &fx);
   double windTarget_ = 0, wind_ = 0;   // vent relatif (0 à l'arrêt, 1 à pleine vitesse)
   const HdSprite *spriteFor(int id, const Machine &m);
   std::vector<int> mapX_, mapY_;

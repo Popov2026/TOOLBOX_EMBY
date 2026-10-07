@@ -36,10 +36,6 @@ struct HdSprite {
   int windLevels = 1;        // > 1 : frames rangées par niveau de vent (flammes calculées), sans cisaillement
 };
 
-// flammes HD calculées à partir de la silhouette d'un sprite de flamme d'origine
-// (px : index de couleur 64x28, -1 = transparent) : feu animé, mélange additif
-// side : -1 flamme de gauche, +1 de droite (le vent la couche vers l'extérieur)
-HdSprite makeFlame(const std::vector<int> &px, int w, int h, int seed, int side);
 
 class HdAssets {
  public:
