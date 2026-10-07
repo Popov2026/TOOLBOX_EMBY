@@ -1,0 +1,56 @@
+# Stunt Car Racer, version native (C++17 / SDL2) : build Windows (scr.exe) et Linux.
+# Aucune donnée du jeu n'est incluse : l'exécutable lit votre image disque .st.
+name: Stunt Car Racer natif
+
+on:
+  push:
+    paths: ["stunt_car_racer/native/**", ".github/workflows/stunt_car_racer.yml"]
+  pull_request:
+    paths: ["stunt_car_racer/native/**", ".github/workflows/stunt_car_racer.yml"]
+  workflow_dispatch:
+
+env:
+  SDL2_VERSION: "2.30.8"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: SDL2 (VC)
+        shell: pwsh
+        run: |
+          $u = "https://github.com/libsdl-org/SDL/releases/download/release-$env:SDL2_VERSION/SDL2-devel-$env:SDL2_VERSION-VC.zip"
+          Invoke-WebRequest $u -OutFile sdl2.zip
+          Expand-Archive sdl2.zip -DestinationPath "$env:RUNNER_TEMP"
+          "SDL2_DIR=$env:RUNNER_TEMP\SDL2-$env:SDL2_VERSION\cmake" | Out-File -Append $env:GITHUB_ENV
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake -S stunt_car_racer/native -B build -A x64
+          cmake --build build --config Release --parallel
+      - name: Paquet
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item build/Release/scr.exe, build/Release/scr_headless.exe dist/
+          Copy-Item "$env:RUNNER_TEMP\SDL2-$env:SDL2_VERSION\lib\x64\SDL2.dll" dist/
+          Copy-Item stunt_car_racer/native/scr.ini.example dist/scr.ini
+          Copy-Item stunt_car_racer/native/LISEZMOI.txt dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stunt-car-racer-windows-x64
+          path: dist
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - run: cmake -S stunt_car_racer/native -B build && cmake --build build --parallel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stunt-car-racer-linux-x64
+          path: |
+            build/scr
+            build/scr_headless

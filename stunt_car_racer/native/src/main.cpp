@@ -1,0 +1,258 @@
+// main.cpp — Stunt Car Racer natif (SDL2).
+//
+// usage : scr [options] DISQUE.st|GAME.PUT
+//   --track N        entraînement direct sur le circuit N (1..8) ; sans option : jeu complet
+//   --scale N        taille de la fenêtre (× 320×200, défaut 3)
+//   --fullscreen     plein écran
+//   --speed X        vitesse du jeu (1 = Atari ST)
+//   --smooth         lissage de l'image agrandie
+//   --gravity X --thrust X --brake X --timestep X --damping X --boostuse X --shock N
+//                    réglages de la physique d'origine (multiplicateurs, 1 = original)
+//   --ini FICHIER    lit les mêmes options dans un fichier « clé = valeur » (défaut : scr.ini)
+//
+// Touches : flèches = joystick (haut accélère), Espace/Ctrl = bouton (boost),
+//           clavier ST pour les menus, F11 plein écran, F12 quitter, PageUp/PageDown
+//           circuit précédent/suivant (entraînement), F5 recommencer.
+#include <SDL.h>
+
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#include "machine.hpp"
+
+using namespace scr;
+
+namespace {
+
+struct Options {
+  std::string disk;
+  int track = -1;  // -1 : jeu complet
+  int scale = 3;
+  bool fullscreen = false, smooth = false;
+  double speed = 1;
+  Tuning tuning;
+};
+
+void setOption(Options &o, const std::string &key, const std::string &val) {
+  auto d = [&] { return std::atof(val.c_str()); };
+  if (key == "track") o.track = std::atoi(val.c_str()) - 1;
+  else if (key == "scale") o.scale = std::atoi(val.c_str());
+  else if (key == "fullscreen") o.fullscreen = val != "0";
+  else if (key == "smooth") o.smooth = val != "0";
+  else if (key == "speed") o.speed = d();
+  else if (key == "gravity") o.tuning.gravity = d();
+  else if (key == "thrust") o.tuning.thrust = d();
+  else if (key == "brake") o.tuning.brake = d();
+  else if (key == "timestep") o.tuning.timeStep = d();
+  else if (key == "damping") o.tuning.damping = d();
+  else if (key == "boostuse") o.tuning.boostUse = d();
+  else if (key == "shock") o.tuning.shockTolerance = std::atoi(val.c_str());
+  else if (key == "disk") o.disk = val;
+  else std::fprintf(stderr, "option inconnue : %s\n", key.c_str());
+}
+
+void readIni(Options &o, const std::string &path) {
+  std::ifstream f(path);
+  std::string line;
+  while (std::getline(f, line)) {
+    auto h = line.find('#');
+    if (h != std::string::npos) line = line.substr(0, h);
+    auto eq = line.find('=');
+    if (eq == std::string::npos) continue;
+    auto trim = [](std::string s) {
+      while (!s.empty() && isspace((unsigned char)s.back())) s.pop_back();
+      while (!s.empty() && isspace((unsigned char)s.front())) s.erase(s.begin());
+      return s;
+    };
+    setOption(o, trim(line.substr(0, eq)), trim(line.substr(eq + 1)));
+  }
+}
+
+// SDL_Scancode -> scancode ST
+int stScancode(SDL_Scancode s) {
+  static std::map<int, int> m;
+  if (m.empty()) {
+    const char *row1 = "1234567890";
+    for (int i = 0; i < 10; i++) m[SDL_GetScancodeFromKey(row1[i])] = 0x02 + i;
+    const struct { SDL_Scancode s; int st; } t[] = {
+        {SDL_SCANCODE_ESCAPE, 0x01}, {SDL_SCANCODE_MINUS, 0x0c}, {SDL_SCANCODE_EQUALS, 0x0d}, {SDL_SCANCODE_BACKSPACE, 0x0e},
+        {SDL_SCANCODE_TAB, 0x0f}, {SDL_SCANCODE_Q, 0x10}, {SDL_SCANCODE_W, 0x11}, {SDL_SCANCODE_E, 0x12}, {SDL_SCANCODE_R, 0x13},
+        {SDL_SCANCODE_T, 0x14}, {SDL_SCANCODE_Y, 0x15}, {SDL_SCANCODE_U, 0x16}, {SDL_SCANCODE_I, 0x17}, {SDL_SCANCODE_O, 0x18},
+        {SDL_SCANCODE_P, 0x19}, {SDL_SCANCODE_LEFTBRACKET, 0x1a}, {SDL_SCANCODE_RIGHTBRACKET, 0x1b}, {SDL_SCANCODE_RETURN, 0x1c},
+        {SDL_SCANCODE_KP_ENTER, 0x72}, {SDL_SCANCODE_LCTRL, 0x1d}, {SDL_SCANCODE_A, 0x1e}, {SDL_SCANCODE_S, 0x1f},
+        {SDL_SCANCODE_D, 0x20}, {SDL_SCANCODE_F, 0x21}, {SDL_SCANCODE_G, 0x22}, {SDL_SCANCODE_H, 0x23}, {SDL_SCANCODE_J, 0x24},
+        {SDL_SCANCODE_K, 0x25}, {SDL_SCANCODE_L, 0x26}, {SDL_SCANCODE_SEMICOLON, 0x27}, {SDL_SCANCODE_APOSTROPHE, 0x28},
+        {SDL_SCANCODE_GRAVE, 0x29}, {SDL_SCANCODE_LSHIFT, 0x2a}, {SDL_SCANCODE_BACKSLASH, 0x2b}, {SDL_SCANCODE_Z, 0x2c},
+        {SDL_SCANCODE_X, 0x2d}, {SDL_SCANCODE_C, 0x2e}, {SDL_SCANCODE_V, 0x2f}, {SDL_SCANCODE_B, 0x30}, {SDL_SCANCODE_N, 0x31},
+        {SDL_SCANCODE_M, 0x32}, {SDL_SCANCODE_COMMA, 0x33}, {SDL_SCANCODE_PERIOD, 0x34}, {SDL_SCANCODE_SLASH, 0x35},
+        {SDL_SCANCODE_RSHIFT, 0x36}, {SDL_SCANCODE_LALT, 0x38}, {SDL_SCANCODE_SPACE, 0x39}, {SDL_SCANCODE_CAPSLOCK, 0x3a},
+        {SDL_SCANCODE_F1, 0x3b}, {SDL_SCANCODE_F2, 0x3c}, {SDL_SCANCODE_F3, 0x3d}, {SDL_SCANCODE_F4, 0x3e},
+        {SDL_SCANCODE_F6, 0x40}, {SDL_SCANCODE_F7, 0x41}, {SDL_SCANCODE_F8, 0x42}, {SDL_SCANCODE_F9, 0x43},
+        {SDL_SCANCODE_F10, 0x44}, {SDL_SCANCODE_HOME, 0x47}, {SDL_SCANCODE_UP, 0x48}, {SDL_SCANCODE_LEFT, 0x4b},
+        {SDL_SCANCODE_RIGHT, 0x4d}, {SDL_SCANCODE_DOWN, 0x50}, {SDL_SCANCODE_INSERT, 0x52}, {SDL_SCANCODE_DELETE, 0x53}};
+    for (auto &e : t) m[e.s] = e.st;
+  }
+  auto it = m.find(s);
+  return it == m.end() ? 0 : it->second;
+}
+
+void fail(const std::string &msg) {
+  std::fprintf(stderr, "%s\n", msg.c_str());
+  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Stunt Car Racer", msg.c_str(), nullptr);
+}
+
+// sans argument (double-clic) : première image .st / GAME.PUT trouvée à côté de l'exécutable ou dans le dossier courant
+std::string findDisk() {
+  namespace fs = std::filesystem;
+  std::vector<fs::path> dirs{fs::current_path()};
+  if (char *b = SDL_GetBasePath()) { dirs.push_back(fs::u8path(b)); SDL_free(b); }
+  for (auto &d : dirs) {
+    std::error_code ec;
+    for (auto &e : fs::directory_iterator(d, ec)) {
+      std::string ext = e.path().extension().u8string(), name = e.path().filename().u8string();
+      for (auto &c : ext) c = (char)tolower((unsigned char)c);
+      for (auto &c : name) c = (char)toupper((unsigned char)c);
+      if (ext == ".st" || name == "GAME.PUT") return e.path().u8string();
+    }
+  }
+  return {};
+}
+
+std::unique_ptr<Machine> start(const Bytes &disk, const Options &o, int track) {
+  auto m = std::make_unique<Machine>(disk);
+  m->setTuning(o.tuning);
+  if (track < 0) m->coldStart();
+  else m->startPractice(track);
+  return m;
+}
+
+}  // namespace
+
+int main(int argc, char **argv) {
+  Options o;
+  std::string ini = "scr.ini";
+  for (int i = 1; i < argc; i++)
+    if (!std::strcmp(argv[i], "--ini") && i + 1 < argc) ini = argv[i + 1];
+  readIni(o, ini);
+  for (int i = 1; i < argc; i++) {
+    std::string a = argv[i];
+    if (a == "--ini") { i++; continue; }
+    if (a == "--fullscreen" || a == "--smooth") { setOption(o, a.substr(2), "1"); continue; }
+    if (a == "--help" || a == "-h") {
+      std::puts("usage : scr [--track N] [--scale N] [--fullscreen] [--speed X] [--smooth]\n"
+                "            [--gravity X] [--thrust X] [--brake X] [--timestep X] [--damping X]\n"
+                "            [--boostuse X] [--shock N] [--ini FICHIER] DISQUE.st|GAME.PUT");
+      return 0;
+    }
+    if (a.rfind("--", 0) == 0 && i + 1 < argc) { setOption(o, a.substr(2), argv[++i]); continue; }
+    o.disk = a;
+  }
+  if (o.disk.empty()) o.disk = findDisk();
+  if (o.disk.empty()) {
+    fail("Image disque introuvable.\nPlacez votre image Stunt Car Racer (.st) à côté de scr.exe,\n"
+         "glissez-la sur scr.exe, ou lancez : scr Stunt_Car_Racer.st\n(aucune donnée du jeu n'est incluse)");
+    return 1;
+  }
+
+  Bytes disk;
+  std::unique_ptr<Machine> m;
+  int track = o.track;
+  try {
+    disk = readFile(o.disk);
+    m = start(disk, o, track);
+  } catch (std::exception &e) {
+    fail(std::string("Erreur : ") + e.what());
+    return 1;
+  }
+
+  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
+    fail(std::string("SDL : ") + SDL_GetError());
+    return 1;
+  }
+  SDL_Window *win = SDL_CreateWindow("Stunt Car Racer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 320 * o.scale,
+                                     200 * o.scale, SDL_WINDOW_RESIZABLE | (o.fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0));
+  SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, o.smooth ? "1" : "0");
+  SDL_Renderer *ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+  if (!ren) ren = SDL_CreateRenderer(win, -1, 0);
+  SDL_RenderSetLogicalSize(ren, 320, 200);
+  SDL_Texture *tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 320, 200);
+  SDL_GameController *pad = nullptr;
+  for (int i = 0; i < SDL_NumJoysticks() && !pad; i++)
+    if (SDL_IsGameController(i)) pad = SDL_GameControllerOpen(i);
+
+  static uint32_t pixels[320 * 200];
+  bool keys[SDL_NUM_SCANCODES] = {};
+  const double framePeriod = 1.0 / (50.0 * (o.speed > 0 ? o.speed : 1));
+  uint64_t freq = SDL_GetPerformanceFrequency(), last = SDL_GetPerformanceCounter();
+  double acc = 0;
+  bool running = true;
+  while (running) {
+    SDL_Event ev;
+    while (SDL_PollEvent(&ev)) {
+      if (ev.type == SDL_QUIT) running = false;
+      else if (ev.type == SDL_CONTROLLERDEVICEADDED && !pad) pad = SDL_GameControllerOpen(ev.cdevice.which);
+      else if (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP) {
+        bool down = ev.type == SDL_KEYDOWN;
+        SDL_Scancode sc = ev.key.keysym.scancode;
+        keys[sc] = down;
+        if (down && !ev.key.repeat) {
+          if (sc == SDL_SCANCODE_F12) running = false;
+          else if (sc == SDL_SCANCODE_F11) {
+            bool fs = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP;
+            SDL_SetWindowFullscreen(win, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+          } else if (sc == SDL_SCANCODE_F5 || ((sc == SDL_SCANCODE_PAGEUP || sc == SDL_SCANCODE_PAGEDOWN) && track >= 0)) {
+            if (sc == SDL_SCANCODE_PAGEUP) track = (track + 7) % 8;
+            if (sc == SDL_SCANCODE_PAGEDOWN) track = (track + 1) % 8;
+            m.reset();
+            m = start(disk, o, track);
+          }
+        }
+        if (int st = stScancode(sc)) m->setKey(st, down);
+      }
+    }
+    Joystick j;
+    j.up = keys[SDL_SCANCODE_UP]; j.down = keys[SDL_SCANCODE_DOWN];
+    j.left = keys[SDL_SCANCODE_LEFT]; j.right = keys[SDL_SCANCODE_RIGHT];
+    j.fire = keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL];
+    if (pad) {
+      int ax = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX), ay = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY);
+      j.left |= ax < -12000 || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_LEFT);
+      j.right |= ax > 12000 || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
+      j.up |= ay < -12000 || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_UP) ||
+              SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 8000;
+      j.down |= ay > 12000 || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_DOWN) ||
+                SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 8000;
+      j.fire |= SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A) || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_X);
+    }
+    m->setJoystick(j);
+
+    uint64_t now = SDL_GetPerformanceCounter();
+    acc += double(now - last) / double(freq);
+    last = now;
+    if (acc > 0.25) acc = 0.25;
+    int n = 0;
+    while (acc >= framePeriod && n < 10) { m->runFrame(); acc -= framePeriod; n++; }
+
+    m->screenARGB(pixels);
+    SDL_UpdateTexture(tex, nullptr, pixels, 320 * 4);
+    SDL_RenderClear(ren);
+    SDL_RenderCopy(ren, tex, nullptr, nullptr);
+    SDL_RenderPresent(ren);
+    if (!n) SDL_Delay(1);
+  }
+  if (pad) SDL_GameControllerClose(pad);
+  SDL_DestroyTexture(tex);
+  SDL_DestroyRenderer(ren);
+  SDL_DestroyWindow(win);
+  SDL_Quit();
+  return 0;
+}

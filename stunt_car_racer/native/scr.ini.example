@@ -1,0 +1,16 @@
+# Stunt Car Racer natif : réglages (clé = valeur). Les options en ligne de commande priment.
+# disk = Stunt_Car_Racer.st   # image disque (sinon : premier .st trouvé à côté de scr.exe)
+# track = 1                   # 1..8 : entraînement direct sur ce circuit ; absent : jeu complet
+scale = 3                     # taille de la fenêtre (× 320×200)
+fullscreen = 0
+smooth = 0                    # 1 : lissage à l'agrandissement
+speed = 1                     # vitesse de la machine (1 = 50 Hz d'origine)
+
+# --- physique d'origine (1 = valeur du jeu)
+gravity = 1
+thrust = 1
+brake = 1
+timestep = 1
+damping = 1
+boostuse = 1
+# shock = 0                   # tolérance aux chocs

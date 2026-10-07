@@ -13,3 +13,4 @@ tools/dasm
 *.bin
 tracks.json
 out/
+native/build*/

@@ -11,6 +11,7 @@ version **Atari ST**, et réplique jouable sur PC dont tous les réglages sont m
 
 | Dossier | Contenu |
 |---|---|
+| `native/` | **version native PC** (C++17 / SDL2) : le jeu d'origine exécuté à pleine vitesse, réglable |
 | `replica/` | la réplique (HTML5 / JavaScript, sans dépendance) |
 | `tools/` | outils de rétro-ingénierie : extraction, décompression, décodage des circuits, émulateur ST de test, désassembleur |
 | `docs/RETRO_INGENIERIE.md` | formats, adresses, routines décompilées, méthode de vérification |
@@ -26,7 +27,35 @@ version **Atari ST**, et réplique jouable sur PC dont tous les réglages sont m
 * **Remake (paramétrable)** : moteur réécrit (rendu 3D à polygones, physique réglable),
   utilisant la géométrie exacte des circuits décodés. Tous les paramètres sont exposés.
 
-## Lancer la réplique
+## Version native (C++ / SDL2) — recommandée
+
+Le programme du jeu, lu sur votre disquette, est exécuté par le CPU 68000 Musashi (C, MIT)
+avec un TOS minimal simulé ; rendu, clavier, joystick et manette via SDL2.
+Environ **110 à 120× le temps réel** sur un PC actuel (une partie ne consomme que
+quelques % d'un cœur).
+
+**Windows** : l'onglet *Actions* du dépôt (workflow « Stunt Car Racer natif ») produit
+l'archive `stunt-car-racer-windows-x64` (`scr.exe`, `SDL2.dll`, `scr.ini`). Placez votre
+image `.st` à côté de `scr.exe` et double-cliquez.
+
+**Compilation** (Linux, macOS, Windows ; CMake ≥ 3.16, SDL2) :
+
+```sh
+cmake -S native -B native/build && cmake --build native/build --config Release
+native/build/scr Stunt_Car_Racer.st              # jeu complet (écran titre, menus)
+native/build/scr Stunt_Car_Racer.st --track 3    # entraînement direct sur le circuit 3
+native/build/scr_headless Stunt_Car_Racer.st --track 1 --frames 1500 --up --shot c.ppm   # test sans fenêtre
+```
+
+Commandes : **flèches** = joystick (haut accélère, bas freine), **Espace/Ctrl** = bouton
+(boost), clavier ST complet pour les menus, manette reconnue. **F11** plein écran,
+**F5** recommencer, **Page préc./suiv.** changer de circuit, **F12** quitter.
+
+Réglages dans `scr.ini` (modèle : `native/scr.ini.example`) ou en ligne de commande :
+`--gravity --thrust --brake --timestep --damping --boostuse --shock` (facteurs, 1 = jeu
+d'origine), `--scale`, `--fullscreen`, `--smooth`, `--speed`.
+
+## Lancer la réplique (navigateur)
 
 1. Ouvrir `replica/index.html` dans un navigateur récent (double-clic suffit).
 2. Cliquer sur **Charger la disquette** (ou glisser-déposer) : image `.st`, `GAME.PUT`
