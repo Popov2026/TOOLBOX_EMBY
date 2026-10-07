@@ -383,8 +383,9 @@ void HdView::addCar(const OppPose &o, double hs, const Machine &m) {
     Vec3 fb0 = W(x0, yb, zf), fb1 = W(x1, yb, zf), ft0 = W(-xt, yf, zf), ft1 = W(xt, yf, zf);
     Vec3 rear[4] = {rb0, rb1, rt1, rt0}, front[4] = {fb0, ft0, ft1, fb1}, top[4] = {rt0, rt1, ft1, ft0};
     Vec3 left[4] = {rb0, rt0, ft0, fb0}, right[4] = {rb1, fb1, ft1, rt1}, bottom[4] = {rb0, fb0, fb1, rb1};
-    r3d_.poly(rear, 4, red); r3d_.poly(front, 4, red); r3d_.poly(top, 4, redLight);
-    r3d_.poly(left, 4, pink); r3d_.poly(right, 4, pink); r3d_.poly(bottom, 4, black);
+    r3d_.poly(rear, 4, red); r3d_.poly(front, 4, red); r3d_.poly(top, 4, pink);
+    // comme l'original : seul le flanc droit (rose) est dessiné, jamais le gauche
+    r3d_.poly(right, 4, pink); r3d_.poly(bottom, 4, black); (void)left;
   }
   (void)dark; (void)grey;
 }
