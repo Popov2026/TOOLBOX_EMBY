@@ -50,6 +50,10 @@ class Machine {
 
   const Bytes &image() const { return image_; }   // TEXT+DATA du jeu relogés à $10100 (non modifiés)
   uint32_t ticks() const { return ticks_; }       // nombre d'appels de la physique ($4EEB0)
+  // adversaire : dessiné par le jeu depuis le début de la course en cours (absent en entraînement)
+  bool opponentInRace() const { return oppDrawnInRace_; }
+  // en HD, la voiture adverse est redessinée en 3D : on retire ses pixels d'origine du cockpit
+  void hideOpponentPixels(bool on) { hideOpp_ = on; }
   uint32_t frames() const { return vblCount_; }
   // état de la voiture (18 octets à $10AC2) au début du rendu de l'image actuellement affichée
   const uint8_t *displayedCarState() const { return dispSnap_; }
@@ -103,6 +107,7 @@ class Machine {
   void hleReturn(uint32_t sr, uint32_t pc, uint32_t d0);
 
   Bytes image_;
+  bool oppDrawnInRace_ = false, hideOpp_ = false;
   YM2149 ym2149_;
   struct YmWrite { uint32_t cycle; uint8_t reg, val; };
   std::vector<YmWrite> ymWrites_;

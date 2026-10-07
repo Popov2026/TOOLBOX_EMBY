@@ -76,6 +76,7 @@ void HdView::afterFrame(const Machine &m) {
     s.p.yaw = m.w(A_YAW) * ANG;
     s.p.roll = int16_t(m.w(A_ROLL)) * ANG;
     s.track = m.b(A_TRACK) & 7;
+    s.opp = opponentFromGame(m, s.track);
     snaps_.push_back(s);
     while (snaps_.size() > 32) snaps_.pop_front();
   }
@@ -155,8 +156,118 @@ bool HdView::surfaceRaw(const Track &t, double x, double z, double yRef, double 
   return found;
 }
 
+// position de l'adversaire : pièce $10907, section $108F6 + fraction $108F7/256, position en travers
+// de la route $109D6 (0 = bord gauche, 255 = bord droit). Hauteur : surface de la route, avec une
+// trajectoire balistique au-dessus des sauts (la route s'y dérobe plus vite que la gravité).
+OppPose HdView::opponentFromGame(const Machine &m, int track) {
+  OppPose o;
+  if (!m.opponentInRace() || !params.opponent3D) { oppHave_ = false; return o; }
+  const Track &t = tracks_[track & 7];
+  const int n = int(t.secs.size());
+  int piece = m.b(0x10907), sec = m.b(0x108f6), first = -1;
+  double fr = m.b(0x108f7) / 256.0, u = std::clamp(m.w(0x109d6) / 256.0, 0.0, 1.0);
+  for (int i = 0; i < n; i++)
+    if (t.secs[i].piece == piece) { first = i; break; }
+  if (first < 0) { oppHave_ = false; return o; }
+  int g0 = ((first - 1 + sec) % n + n) % n, g1 = (g0 + 1) % n;
+  const Section &A = t.secs[g0], &B = t.secs[g1];
+  auto L = [&](double a, double b) { return a + (b - a) * fr; };
+  double lx = L(A.lx, B.lx), lz = L(A.lz, B.lz), rx = L(A.rx, B.rx), rz = L(A.rz, B.rz), hl = L(A.ly, B.ly), hr = L(A.ry, B.ry);
+  o.x = lx + (rx - lx) * u; o.z = lz + (rz - lz) * u;
+  double surf = hl + (hr - hl) * u;
+  // repère : avant = sens de la section, droite = bord gauche -> bord droit (hauteurs en unités monde)
+  const double hs = params.hScale;
+  double fx = (B.lx + B.rx - A.lx - A.rx) / 2, fz = (B.lz + B.rz - A.lz - A.rz) / 2;
+  double fy = ((B.ly + B.ry - A.ly - A.ry) / 2) * hs;
+  double fl = std::sqrt(fx * fx + fy * fy + fz * fz);
+  if (fl < 1e-6) { fx = 0; fy = 0; fz = 1; fl = 1; }   // section verticale (saut) : garder un repère plat
+  if (std::hypot(fx, fz) < 1) { fy = 0; fl = std::hypot(fx, fz) > 1e-6 ? std::hypot(fx, fz) : 1; }
+  o.fwd = {fx / fl, fy / fl, fz / fl};
+  double ry = (hr - hl) * hs, rl = std::sqrt((rx - lx) * (rx - lx) + ry * ry + (rz - lz) * (rz - lz));
+  o.right = {(rx - lx) / rl, ry / rl, (rz - lz) / rl};
+  // hauteur : au sol, ou en vol si la route descend plus vite que la chute libre
+  const double G = 16;   // gravité, en hauteur brute par tick² (mesurée sur la voiture du joueur)
+  if (!oppHave_ || std::fabs(surf - oppY_) > 3000) { oppY_ = surf; oppVy_ = 0; oppHave_ = true; }
+  else {
+    double pred = oppY_ + oppVy_ - G / 2;
+    if (surf >= pred - 2) { oppVy_ = std::clamp(surf - oppY_, -400.0, 400.0); oppY_ = surf; }
+    else { oppY_ = pred; oppVy_ -= G; }
+  }
+  o.yRaw = oppY_;
+  o.valid = true;
+  return o;
+}
+
+OppPose HdView::opponentAt(double t) const {
+  if (snaps_.empty()) return {};
+  if (t <= snaps_.front().t) return snaps_.front().opp;
+  for (size_t i = 0; i + 1 < snaps_.size(); i++) {
+    const OppPose &a = snaps_[i].opp, &b = snaps_[i + 1].opp;
+    if (t >= snaps_[i + 1].t) continue;
+    if (!a.valid || !b.valid) return b.valid ? b : a;
+    double k = (t - snaps_[i].t) / (snaps_[i + 1].t - snaps_[i].t);
+    if (std::fabs(b.x - a.x) + std::fabs(b.z - a.z) > 3000) return k < 0.5 ? a : b;
+    auto lv = [&](const Vec3 &p, const Vec3 &q) {
+      Vec3 v{p.x + (q.x - p.x) * k, p.y + (q.y - p.y) * k, p.z + (q.z - p.z) * k};
+      double l = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+      return l > 1e-9 ? Vec3{v.x / l, v.y / l, v.z / l} : q;
+    };
+    OppPose o;
+    o.valid = true;
+    o.x = a.x + (b.x - a.x) * k; o.z = a.z + (b.z - a.z) * k; o.yRaw = a.yRaw + (b.yRaw - a.yRaw) * k;
+    o.right = lv(a.right, b.right); o.fwd = lv(a.fwd, b.fwd);
+    return o;
+  }
+  return snaps_.back().opp;
+}
+
+// voiture adverse en polygones : châssis, nez, arceau, moteur et 4 roues (couleurs de la palette du jeu)
+void HdView::addCar(const OppPose &o, double hs, const Machine &m) {
+  const Vec3 r = o.right, f = o.fwd;
+  Vec3 u{f.y * r.z - f.z * r.y, f.z * r.x - f.x * r.z, f.x * r.y - f.y * r.x};   // haut = avant × droite
+  if (u.y < 0) u = {-u.x, -u.y, -u.z};
+  const double base = o.yRaw * hs;
+  const double K = 0.55;   // échelle calée sur la voiture d'origine (≈ 22 pixels de large à 1450 unités)
+  auto W = [&](double x, double y, double z) {   // repère voiture -> monde
+    x *= K; y *= K; z *= K;
+    return Vec3{o.x + r.x * x + u.x * y + f.x * z, base + r.y * x + u.y * y + f.y * z, o.z + r.z * x + u.z * y + f.z * z};
+  };
+  auto pal = [&](int i) { return m.paletteARGB(i); };
+  const uint32_t red = pal(10), redLight = pal(11), pink = pal(12), black = pal(0), grey = pal(14), dark = pal(9);
+  // boîte : 6 faces, couleurs dessus / côtés / avant-arrière
+  auto box = [&](double x0, double x1, double y0, double y1, double z0, double z1, uint32_t top, uint32_t side, uint32_t end) {
+    Vec3 c[8] = {W(x0, y0, z0), W(x1, y0, z0), W(x1, y0, z1), W(x0, y0, z1), W(x0, y1, z0), W(x1, y1, z0), W(x1, y1, z1), W(x0, y1, z1)};
+    Vec3 q[6][4] = {{c[4], c[5], c[6], c[7]}, {c[0], c[3], c[7], c[4]}, {c[1], c[5], c[6], c[2]},
+                    {c[0], c[4], c[5], c[1]}, {c[3], c[2], c[6], c[7]}, {c[0], c[1], c[2], c[3]}};
+    uint32_t col[6] = {top, side, side, end, end, black};
+    for (int k = 0; k < 6; k++) r3d_.poly(q[k], 4, col[k]);
+  };
+  // roue : prisme octogonal d'axe latéral
+  auto wheel = [&](double xc, double zc, double rad, double wid) {
+    Vec3 a[8], b[8];
+    for (int k = 0; k < 8; k++) {
+      double ang = (k + 0.5) * 3.14159265 / 4, yy = rad + std::sin(ang) * rad, zz = zc + std::cos(ang) * rad;
+      a[k] = W(xc - wid / 2, yy, zz); b[k] = W(xc + wid / 2, yy, zz);
+    }
+    for (int k = 0; k < 8; k++) {
+      Vec3 q[4] = {a[k], a[(k + 1) % 8], b[(k + 1) % 8], b[k]};
+      r3d_.poly(q, 4, black);
+    }
+    r3d_.poly(a, 8, grey);
+    r3d_.poly(b, 8, grey);
+  };
+  const double wx = 78, rearZ = -90, frontZ = 95;
+  wheel(-wx, rearZ, 30, 34); wheel(wx, rearZ, 30, 34);
+  wheel(-wx + 4, frontZ, 24, 26); wheel(wx - 4, frontZ, 24, 26);
+  box(-52, 52, 14, 34, -130, 120, redLight, red, dark);      // châssis
+  box(-34, 34, 14, 30, 120, 150, redLight, red, dark);        // nez
+  box(-46, 46, 34, 58, -120, -10, red, dark, red);            // moteur / habitacle
+  box(-40, 40, 58, 64, -70, -20, pink, red, pink);            // arceau
+  box(-60, 60, 50, 56, -138, -118, redLight, dark, dark);     // aileron
+}
+
 void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, double focal, double cx, double cy,
-                         const Machine &m) {
+                         const Machine &m, const OppPose *opp) {
   const HdParams &P = params;
   // couleurs : palette courante du jeu
   auto pal = [&](int i) { return m.paletteARGB(i); };
@@ -224,6 +335,7 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
     Vec3 qr[4] = {aR1, aR, bR, bR1};
     r3d_.poly(qr, 4, line);
   }
+  if (opp && opp->valid) addCar(*opp, HSCALE, m);
   r3d_.finish(out);
 }
 
@@ -244,7 +356,9 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
   double T = playTime(t);
   Pose p = poseAt(T);
   int track = snaps_.back().track;
-  renderScene(p, track, out, W, H, params.focal * s, ox + params.cx * s, params.cy * s, m);
+  OppPose opp = opponentAt(T);
+  const_cast<Machine &>(m).hideOpponentPixels(opp.valid);
+  renderScene(p, track, out, W, H, params.focal * s, ox + params.cx * s, params.cy * s, m, &opp);
   if (!params.cockpit) return;
   overlay_.resize(320 * 200);
   m.overlayARGB(overlay_.data(), assets.sprites().empty() ? nullptr : &visible_);

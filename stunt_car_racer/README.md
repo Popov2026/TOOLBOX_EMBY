@@ -65,7 +65,11 @@ appliquée à l'échantillon correspondant (44,1 kHz). Options `son = 0`, `volum
   et de l'état de la voiture lu en mémoire ; elle est **interpolée** entre deux ticks du jeu
   (8,33 par seconde) au lieu de sauter d'une image à la suivante ;
 * le champ de vision est élargi au 16/9 : on voit la piste à travers les vitres latérales ;
-* le cockpit, les roues, le tableau de bord et la voiture adverse sont ceux que dessine le
+* la **voiture adverse** est redessinée en 3D : sa position est lue dans le jeu (pièce `$10907`,
+  section `$108F6` + fraction `$108F7`, position en travers de la route `$109D6`), orientée
+  selon la route (pente, dévers), avec une trajectoire balistique au-dessus des sauts, et
+  interpolée comme la caméra ;
+* le cockpit, les roues et le tableau de bord sont ceux que dessine le
   jeu d'origine, isolés pixel par pixel (chaque écriture à l'écran est attribuée à la routine
   qui l'a faite) et incrustés par-dessus.
 

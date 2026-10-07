@@ -219,7 +219,9 @@ code et bloquerait le jeu).
   exacte (écart < 1 unité, vérifié sur la voiture du joueur). Décalage latéral du joueur :
   mot signé `$10A46` (unités de géométrie, route de 384). La voiture adverse est dessinée par
   `$546DA`, appelée depuis le tri en profondeur (`$55D7A`, emplacement `$109FC` fixé par
-  `$53C84` lorsque le rendu atteint la section de l'adversaire, `$10966`).
+  `$53C84` lorsque le rendu atteint la section de l'adversaire, `$10966`). Position en travers de
+  la route : mot `$109D6`, de 0 (bord gauche) à 255 (bord droit) — vérifié en mesurant sur
+  l'image d'origine la position des roues entre les bords de la route à la même hauteur.
 * **Projection** (calée par optimisation sur ~80 % de pixels identiques) : focale ≈ 259 px,
   centre ≈ (153, 82), focale verticale ≈ 0,9 × horizontale, hauteurs ≈ 0,26 × brutes, œil
   ≈ 40 unités au-dessus de la position de la voiture. Ciel 7, sol 13, collines 5, route 1/2

@@ -15,6 +15,13 @@ namespace scr {
 
 struct Pose { double x, y, z, yaw, pitch, roll; };
 
+// voiture adverse : position (unités de géométrie, hauteur brute) et repère (droite, haut, avant)
+struct OppPose {
+  bool valid = false;
+  double x = 0, yRaw = 0, z = 0;
+  Vec3 right{1, 0, 0}, fwd{0, 0, 1};
+};
+
 // réglages de la caméra, exprimés en pixels de l'écran d'origine (320×200)
 struct HdParams {
   double focal = 259, cx = 153.2, cy = 82.3;   // projection d'origine (calée sur le jeu)
@@ -26,6 +33,7 @@ struct HdParams {
   bool cockpit = true;                     // incruster le cockpit d'origine
   double interpDelay = 1.0;                // retard d'affichage en ticks (interpolation)
   double minClearance = 18;                // l'œil reste au moins à cette hauteur au-dessus de la route
+  bool opponent3D = true;                  // voiture adverse redessinée en 3D (sinon : pixels d'origine)
 };
 
 class HdView {
@@ -51,13 +59,19 @@ class HdView {
   Pose poseAt(double t) const;
   static Pose poseFromState(const uint8_t *st);   // 18 octets à partir de $10AC2
   // rendu de la seule scène, avec une projection donnée en pixels de sortie
-  void renderScene(const Pose &p, int track, uint32_t *out, int W, int H, double focal, double cx, double cy, const Machine &m);
+  void renderScene(const Pose &p, int track, uint32_t *out, int W, int H, double focal, double cx, double cy, const Machine &m,
+                   const OppPose *opp = nullptr);
+  OppPose opponentAt(double t) const;
 
  private:
   // hauteur brute de la route sous (x, z), la plus proche de yRef ; faux hors de la route
   bool surfaceRaw(const Track &t, double x, double z, double yRef, double &y);
   int hint_ = -1;
-  struct Snap { double t; Pose p; int track; };
+  struct Snap { double t; Pose p; int track; OppPose opp; };
+  OppPose opponentFromGame(const Machine &m, int track);
+  double oppY_ = 0, oppVy_ = 0;
+  bool oppHave_ = false;
+  void addCar(const OppPose &o, double hs, const Machine &m);
   std::vector<Track> tracks_;
   std::deque<Snap> snaps_;
   uint32_t lastTicks_ = 0, lastTickFrame_ = 0, frame_ = 0;

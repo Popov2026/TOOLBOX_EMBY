@@ -150,7 +150,7 @@ void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const
   }
   for (int i = 0; i < 64000; i++) {
     // voiture adverse : seules les couleurs de la carrosserie sont gardées (pas le ciel, le sol, les collines, la route)
-    bool oppBg = cls[i] == W_OPPONENT && (idx[i] == 7 || idx[i] == 13 || idx[i] == 5 || idx[i] == 1 || idx[i] == 2 || idx[i] == 3);
+    bool oppBg = cls[i] == W_OPPONENT && (hideOpp_ || idx[i] == 7 || idx[i] == 13 || idx[i] == 5 || idx[i] == 1 || idx[i] == 2 || idx[i] == 3);
     bool transparent = clear[i] || cls[i] == W_SCENE || oppBg || (cls[i] == W_SPRITE && idx[i] == sidx[i]);
     out[i] = transparent ? 0 : paletteARGB(idx[i]);
   }
@@ -347,6 +347,8 @@ void Machine::hook(uint32_t pc) {
     } else if (inOpponent_ && pc == oppReturn_) inOpponent_ = false;
   }
   if ((pc == A_SPRITE || pc == A_SPRITE_XY) && spriteWatch_.any()) recordSprite(pc);
+  if (pc == A_DRAW_OPPONENT) oppDrawnInRace_ = true;
+  if (pc == A_RACE) oppDrawnInRace_ = false;
   if (pc == A_PHYSICS) ticks_++;
   if (pc == A_RENDER) { std::memcpy(renderSnap_, ram + 0x10ac2, 18); inOpponent_ = false; }
   if (skipWaits_ && pc == A_WAITVBL) ram[A_VBLCOUNTER] = 0;
