@@ -57,11 +57,19 @@ if(NOT MSVC)
 endif()
 
 # --- cœur du jeu (sans dépendance graphique)
-add_library(scrcore STATIC src/scrdata.cpp src/machine.cpp src/track.cpp src/render3d.cpp src/hdview.cpp src/hdassets.cpp src/ym2149.cpp)
+add_library(scrcore STATIC src/scrdata.cpp src/machine.cpp src/track.cpp src/render3d.cpp src/hdview.cpp src/hdassets.cpp src/ym2149.cpp src/net.cpp src/banner.cpp)
 find_package(Threads REQUIRED)
 target_link_libraries(scrcore PUBLIC Threads::Threads)
 target_include_directories(scrcore PUBLIC src)
 target_link_libraries(scrcore PUBLIC musashi)
+if(WIN32)
+  target_link_libraries(scrcore PUBLIC ws2_32)
+endif()
+
+# --- serveur relais (multijoueur en ligne), pour un serveur Linux
+if(NOT WIN32)
+  add_executable(scr_relay server/scr_relay.cpp)
+endif()
 
 # --- test / outil sans fenêtre
 add_executable(scr_headless src/headless.cpp)

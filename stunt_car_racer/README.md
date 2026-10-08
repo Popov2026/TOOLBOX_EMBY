@@ -88,6 +88,13 @@ silhouette, place, couleurs et animation identiques, contours lissés (flou puis
 halo. Les lignes de bord alternent jaune et rouge sombre d'une section à l'autre, comme l'original. Le jeu enregistre chaque appel de ses routines
 de sprites (`$56762`, `$5687E`) et ce qu'il recouvre, pour effacer proprement l'original.
 
+**Multijoueur en réseau** : le mode « Computer Link » d'origine (deux Atari reliés par câble série)
+passe par le réseau. Le port série est émulé (BIOS `Bconstat`/`Bconin`/`Bconout`), et ses octets
+partent vers l'autre joueur. **F7** héberge en réseau local, **F8** rejoint (détection automatique
+par diffusion UDP), **F9** joue par Internet via un serveur relais (`native/server/scr_relay`) avec
+un code de salle, **F10** coupe. Voir `native/LISEZMOI_MULTIJOUEUR.txt` et
+`native/server/LISEZMOI_SERVEUR.txt`.
+
 Réglages dans `scr.ini` (modèle : `native/scr.ini.example`) ou en ligne de commande :
 `--gravity --thrust --brake --timestep --damping --boostuse --shock` (facteurs, 1 = jeu
 d'origine), `--scale`, `--fullscreen`, `--smooth`, `--speed`.

@@ -15,6 +15,11 @@ F4, F11 ou Alt+Entrée plein écran, F5 détails élevés (sols, route et voitur
 adverse texturés, roues rondes ; active le mode HD), F6 recommencer,
 Page préc./suiv. circuit précédent/suivant (mode entraînement), F12 quitter.
 
+Multijoueur (à deux, en réseau) : F7 héberger une partie en réseau local, F8 la rejoindre
+(détection automatique), F9 jouer par Internet avec un code de salle (serveur relais),
+F10 déconnecter. Puis les deux joueurs choisissent « 3. Computer Link ».
+Voir LISEZMOI_MULTIJOUEUR.txt.
+
 Son : puce sonore YM2149 de l'Atari ST émulée (moteur, chocs...).
 
 Réglages : scr.ini (gravité, poussée, freinage, pas de temps, amortissement,

@@ -14,6 +14,10 @@ hdres = 1920x1080             # définition du mode HD (16/9)
 # hdflammes = 0               # 1 = flammes dessinées avec les images sprite_06/07/08/09/49/50 du dossier hd
 #                              (par défaut : sprites d'origine agrandis, les images de flammes sont ignorées)
 
+# --- multijoueur (mode « Computer Link » par le réseau ; voir LISEZMOI_MULTIJOUEUR.txt)
+# nom = Pierre                # nom montré à l'autre joueur (défaut : nom de la session Windows)
+# relais = mon-serveur.fr:27420   # serveur relais pour jouer par Internet (F9 + code de salle)
+
 # --- physique d'origine (1 = valeur du jeu)
 gravity = 1
 thrust = 1

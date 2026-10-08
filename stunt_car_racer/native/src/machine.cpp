@@ -481,7 +481,12 @@ void Machine::runFrame() {
   ymWrites_.clear();
   uint64_t done = 0;
   frameCycleBase_ = 0;
-  while (done < CYCLES_PER_FRAME) { done += m68k_execute(int(CYCLES_PER_FRAME - done)); frameCycleBase_ = done; }
+  // en quatre tranches : sliceHook (réseau du câble « Computer Link ») est appelé toutes les 5 ms
+  for (int q = 1; q <= 4; q++) {
+    uint64_t target = CYCLES_PER_FRAME * uint64_t(q) / 4;
+    while (done < target) { done += m68k_execute(int(target - done)); frameCycleBase_ = done; }
+    if (sliceHook) sliceHook();
+  }
   frameCycleBase_ = 0;
   renderAudio();
   vblTick();

@@ -44,6 +44,7 @@ class Machine {
   // le BIOS (Bconstat / Bconin / Bconout sur le périphérique 1). serialOut reçoit chaque octet émis ;
   // serialPush fournit les octets reçus de l'autre machine.
   std::function<void(uint8_t)> serialOut;
+  std::function<void()> sliceHook;   // appelé quatre fois par trame (lecture du réseau)
   void serialPush(uint8_t v) { serialIn_.push_back(v); }
   size_t serialPending() const { return serialIn_.size(); }
   uint64_t serialSent() const { return serialSent_; }

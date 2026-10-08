@@ -28,10 +28,14 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v17"
+#define SCR_VERSION "v18"
 
+#include "banner.hpp"
 #include "hdview.hpp"
 #include "machine.hpp"
+#include "net.hpp"
+#include <chrono>
+#include <random>
 
 using namespace scr;
 
@@ -47,6 +51,10 @@ struct Options {
   std::string hdDir;
   bool hdFlames = false;   // images de flammes du dossier hd/ (sinon : sprites d'origine agrandis)
   bool highDetail = false; // détails élevés au démarrage (touche F5)
+  // multijoueur (câble « Computer Link » par le réseau)
+  std::string relay;       // serveur relais : adresse[:port]
+  std::string playerName;  // nom montré à l'autre joueur
+  std::string netMode, netArg;   // au démarrage : host | joinlan | join ADRESSE | online CODE
   double speed = 1;
   Tuning tuning;
 };
@@ -61,6 +69,12 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "hddir") o.hdDir = val;
   else if (key == "hdflammes" || key == "hdflames") o.hdFlames = val != "0";
   else if (key == "details" || key == "détails") o.highDetail = val != "0";
+  else if (key == "relais" || key == "relay") o.relay = val;
+  else if (key == "nom" || key == "name") o.playerName = val;
+  else if (key == "host" || key == "heberger") { if (val != "0") o.netMode = "host"; }
+  else if (key == "joinlan") { if (val != "0") o.netMode = "joinlan"; }
+  else if (key == "join" || key == "rejoindre") { o.netMode = "join"; o.netArg = val; }
+  else if (key == "online" || key == "enligne") { o.netMode = "online"; o.netArg = val; }
   else if (key == "sound" || key == "son") o.sound = val != "0";
   else if (key == "volume") o.volume = std::clamp(d(), 0.0, 2.0);
   else if (key == "hdres") { int w = 0, h = 0; if (std::sscanf(val.c_str(), "%dx%d", &w, &h) == 2 && w >= 320 && h >= 200) { o.hdW = w; o.hdH = h; } }
@@ -112,8 +126,7 @@ int stScancode(SDL_Scancode s) {
         {SDL_SCANCODE_M, 0x32}, {SDL_SCANCODE_COMMA, 0x33}, {SDL_SCANCODE_PERIOD, 0x34}, {SDL_SCANCODE_SLASH, 0x35},
         {SDL_SCANCODE_RSHIFT, 0x36}, {SDL_SCANCODE_LALT, 0x38}, {SDL_SCANCODE_SPACE, 0x39}, {SDL_SCANCODE_CAPSLOCK, 0x3a},
         {SDL_SCANCODE_F1, 0x3b}, {SDL_SCANCODE_F2, 0x3c}, {SDL_SCANCODE_F3, 0x3d},
-        {SDL_SCANCODE_F7, 0x41}, {SDL_SCANCODE_F8, 0x42}, {SDL_SCANCODE_F9, 0x43},
-        {SDL_SCANCODE_F10, 0x44}, {SDL_SCANCODE_HOME, 0x47}, {SDL_SCANCODE_UP, 0x48}, {SDL_SCANCODE_LEFT, 0x4b},
+        {SDL_SCANCODE_HOME, 0x47}, {SDL_SCANCODE_UP, 0x48}, {SDL_SCANCODE_LEFT, 0x4b},
         {SDL_SCANCODE_RIGHT, 0x4d}, {SDL_SCANCODE_DOWN, 0x50}, {SDL_SCANCODE_INSERT, 0x52}, {SDL_SCANCODE_DELETE, 0x53}};
     for (auto &e : t) m[e.s] = e.st;
   }
@@ -187,11 +200,13 @@ int main(int argc, char **argv) {
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     if (a == "--ini") { i++; continue; }
-    if (a == "--fullscreen" || a == "--smooth" || a == "--hd") { setOption(o, a.substr(2), "1"); continue; }
+    if (a == "--fullscreen" || a == "--smooth" || a == "--hd" || a == "--host" || a == "--joinlan") { setOption(o, a.substr(2), "1"); continue; }
     if (a == "--help" || a == "-h") {
       std::puts("usage : scr [--track N] [--scale N] [--fullscreen] [--speed X] [--smooth] [--hd] [--hdres 1920x1080]\n"
                 "            [--gravity X] [--thrust X] [--brake X] [--timestep X] [--damping X]\n"
-                "            [--boostuse X] [--shock N] [--ini FICHIER] DISQUE.st|GAME.PUT");
+                "            [--boostuse X] [--shock N] [--ini FICHIER]\n"
+                "            [--host | --joinlan | --join ADRESSE[:PORT] | --online CODE] [--relais SERVEUR[:PORT]] [--nom NOM]\n"
+                "            DISQUE.st|GAME.PUT");
       return 0;
     }
     if (a.rfind("--", 0) == 0 && i + 1 < argc) { setOption(o, a.substr(2), argv[++i]); continue; }
@@ -214,6 +229,28 @@ int main(int argc, char **argv) {
     fail(std::string("Erreur : ") + e.what());
     return 1;
   }
+
+  // --- multijoueur : le câble série du jeu passe par le réseau
+  NetLink net;
+  {
+    uint32_t h = fnv1a(m->image().data(), m->image().size());
+    h = fnv1a(&o.tuning, sizeof o.tuning, h);   // mêmes réglages de physique des deux côtés
+    std::string nm = o.playerName;
+    if (nm.empty()) { const char *u = std::getenv("USERNAME"); if (!u) u = std::getenv("USER"); nm = u ? u : "Joueur"; }
+    net.setIdentity(SCR_VERSION, h, nm);
+  }
+  auto wireNet = [&] {
+    m->serialOut = [&](uint8_t v) { net.send(v); };
+    m->sliceHook = [&] { net.poll(); uint8_t b; while (net.recv(b)) m->serialPush(b); };
+  };
+  wireNet();
+  if (o.netMode == "host") net.hostLan();
+  else if (o.netMode == "joinlan") net.joinLan();
+  else if (o.netMode == "join") net.joinDirect(o.netArg);
+  else if (o.netMode == "online") net.joinRelay(o.relay, o.netArg);
+  bool typingCode = false;       // saisie du code de salle (F9)
+  std::string code;
+  double fireUntil = 0;          // en multijoueur, un appui sur « feu » dure au moins 0,35 s
 
   std::unique_ptr<HdView> view;
   bool hd = o.hd, highDetail = o.highDetail;
@@ -313,10 +350,33 @@ int main(int argc, char **argv) {
     while (SDL_PollEvent(&ev)) {
       if (ev.type == SDL_QUIT) running = false;
       else if (ev.type == SDL_CONTROLLERDEVICEADDED && !pad) pad = SDL_GameControllerOpen(ev.cdevice.which);
+      else if (ev.type == SDL_TEXTINPUT && typingCode) {   // code de salle : lettres et chiffres
+        for (const char *c = ev.text.text; *c; c++)
+          if (std::isalnum(static_cast<unsigned char>(*c)) && code.size() < 12) code += char(std::toupper(static_cast<unsigned char>(*c)));
+      }
+      else if (ev.type == SDL_KEYDOWN && typingCode) {
+        SDL_Scancode sc = ev.key.keysym.scancode;
+        if (sc == SDL_SCANCODE_ESCAPE || sc == SDL_SCANCODE_F9) { typingCode = false; SDL_StopTextInput(); }
+        else if (sc == SDL_SCANCODE_BACKSPACE && !code.empty()) code.pop_back();
+        else if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER) {
+          if (code.empty()) {   // pas de code : on en invente un à donner à l'autre joueur
+            std::mt19937 rng(unsigned(std::chrono::steady_clock::now().time_since_epoch().count()));
+            code = std::to_string(1000 + rng() % 9000);
+          }
+          typingCode = false; SDL_StopTextInput();
+          net.joinRelay(o.relay, code);
+        }
+      }
       else if (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP) {
         bool down = ev.type == SDL_KEYDOWN;
         SDL_Scancode sc = ev.key.keysym.scancode;
         keys[sc] = down;
+        if (down && !ev.key.repeat) {   // multijoueur
+          if (sc == SDL_SCANCODE_F7) net.hostLan();
+          else if (sc == SDL_SCANCODE_F8) net.joinLan();
+          else if (sc == SDL_SCANCODE_F9) { typingCode = true; code.clear(); SDL_StartTextInput(); }
+          else if (sc == SDL_SCANCODE_F10) net.close("déconnexion");
+        }
         if (down && !ev.key.repeat) {
           if (sc == SDL_SCANCODE_F12) running = false;
           else if (sc == SDL_SCANCODE_F3) {   // couper / rétablir le son
@@ -348,6 +408,7 @@ int main(int argc, char **argv) {
             m = start(disk, o, track);
             newView();
             setupAudio();
+            wireNet();
           }
         }
         if (int st = stScancode(sc)) m->setKey(st, down);
@@ -360,6 +421,8 @@ int main(int argc, char **argv) {
     // (la direction semblait alors bloquée pendant le boost) ; Maj et Alt n'ont pas ce problème
     j.fire = keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL] || keys[SDL_SCANCODE_LSHIFT] ||
              keys[SDL_SCANCODE_RSHIFT] || keys[SDL_SCANCODE_LALT] || keys[SDL_SCANCODE_RALT];
+    // en multijoueur, les menus lisent le joystick à travers le lien : un appui bref pourrait être manqué
+    double tNow = double(SDL_GetPerformanceCounter()) / double(SDL_GetPerformanceFrequency());
     if (pad) {
       int ax = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX), ay = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY);
       j.left |= ax < -12000 || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_LEFT);
@@ -370,7 +433,13 @@ int main(int argc, char **argv) {
                 SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 8000;
       j.fire |= SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A) || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_X);
     }
+    if (typingCode) j = Joystick();
+    if (net.active()) {
+      if (j.fire) fireUntil = tNow + 0.35;
+      j.fire = j.fire || tNow < fireUntil;
+    }
     m->setJoystick(j);
+    net.poll();   // aussi entre les trames (connexion, annonces), pas seulement pendant l'émulation
 
     uint64_t now = SDL_GetPerformanceCounter();
     acc += double(now - last) / double(freq);
@@ -384,6 +453,44 @@ int main(int argc, char **argv) {
       acc -= framePeriod; n++;
     }
 
+    // bandeau du multijoueur (visible aussi en plein écran) : saisie du code, état de la connexion
+    std::string bannerMsg;
+    {
+      static std::string lastStatus;
+      static double statusSince = 0;
+      std::string st = net.status();
+      if (st != lastStatus) { lastStatus = st; statusSince = tNow; }
+      if (typingCode)
+        bannerMsg = "Code de salle : " + code + "_   (Entrée : valider ; vide = nouveau code ; Échap : annuler)";
+      else if (!st.empty() && (net.state() != NetLink::State::Connected || tNow - statusSince < 6))
+        bannerMsg = st + (net.state() == NetLink::State::Failed ? "   (F10 : effacer)" : "");
+      else if (o.relay.empty() && false) bannerMsg.clear();
+    }
+    auto drawBanner = [&](int logicalW) {
+      static std::string cachedMsg; static int cachedScale = 0, bw = 0, bh = 0;
+      static SDL_Texture *btex = nullptr;
+      if (bannerMsg.empty()) return;
+      int scale = std::max(1, logicalW / 480);
+      if (bannerMsg != cachedMsg || scale != cachedScale || !btex) {
+        if (btex) SDL_DestroyTexture(btex);
+        auto img = renderBanner(bannerMsg, scale, bw, bh);
+        btex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, bw, bh);
+        SDL_SetTextureBlendMode(btex, SDL_BLENDMODE_BLEND);
+        SDL_UpdateTexture(btex, nullptr, img.data(), bw * 4);
+        cachedMsg = bannerMsg; cachedScale = scale;
+      }
+      SDL_Rect r{std::max(0, (logicalW - bw) / 2), 0, std::min(bw, logicalW), bh};
+      SDL_RenderCopy(ren, btex, nullptr, &r);
+    };
+    {   // titre de la fenêtre : état du réseau (mode d'origine ; en HD, avec le compteur d'images)
+      static double lastTitle = 0;
+      if (!hd && tNow - lastTitle > 0.5) {
+        lastTitle = tNow;
+        std::string t = std::string("Stunt Car Racer " SCR_VERSION) + (net.active() ? " - " + net.status() : "");
+        SDL_SetWindowTitle(win, t.c_str());
+      }
+    }
+
     if (hd) {
       // une image par rafraîchissement de l'écran (la synchro verticale cadence la boucle ; sinon limiteur)
       uint64_t t = SDL_GetPerformanceCounter();
@@ -393,15 +500,16 @@ int main(int argc, char **argv) {
       SDL_UpdateTexture(texHd, nullptr, hdPixels.data(), o.hdW * 4);
       SDL_RenderClear(ren);
       SDL_RenderCopy(ren, texHd, nullptr, nullptr);
+      drawBanner(o.hdW);
       SDL_RenderPresent(ren);
       // compteur d'images par seconde dans le titre
       fpsN++;
       double el = double(SDL_GetPerformanceCounter() - fpsT0) / double(freq);
       if (el >= 1) {
-        char title[200];
-        std::snprintf(title, sizeof title, "Stunt Car Racer " SCR_VERSION " - HD %dx%d%s - %.0f i/s - flammes : %s", o.hdW,
+        char title[400];
+        std::snprintf(title, sizeof title, "Stunt Car Racer " SCR_VERSION " - HD %dx%d%s - %.0f i/s%s%s", o.hdW,
                       o.hdH, highDetail ? " - détails élevés (F5)" : "", fpsN / el,
-                      o.hdFlames ? "images du dossier hd" : "sprites d'origine");
+                      net.active() ? " - " : "", net.active() ? net.status().c_str() : "");
         SDL_SetWindowTitle(win, title);
         if (fpsLog) std::fprintf(stderr, "%s\n", title);
         fpsN = 0; fpsT0 = SDL_GetPerformanceCounter();
@@ -411,6 +519,7 @@ int main(int argc, char **argv) {
       SDL_UpdateTexture(tex, nullptr, pixels, 320 * 4);
       SDL_RenderClear(ren);
       SDL_RenderCopy(ren, tex, nullptr, nullptr);
+      drawBanner(320);
       SDL_RenderPresent(ren);
       if (!n) SDL_Delay(1);
     }

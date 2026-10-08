@@ -1,0 +1,66 @@
+Serveur relais Stunt Car Racer (multijoueur par Internet)
+=========================================================
+
+Rôle : deux joueurs se connectent avec le même code de salle ; le serveur les apparie puis
+transmet leurs données de l'un à l'autre. Les joueurs n'ont aucun port à ouvrir : seul le serveur
+écoute (port TCP 27420 par défaut). Trafic : environ 300 octets/s par joueur pendant une course.
+
+
+1. Choisir un serveur
+---------------------
+
+  N'importe quel petit serveur Linux joignable depuis Internet suffit : un serveur virtuel
+  (VPS) d'entrée de gamme à quelques euros par mois (OVH, Scaleway, Hetzner, Ionos...), ou une offre
+  gratuite. Pour des joueurs en France, un serveur en France donne le meilleur ping.
+
+
+2. Installer
+------------
+
+  Le dossier contient :
+    scr_relay            le programme, déjà compilé pour Linux x86-64 (sans dépendance)
+    scr_relay.cpp        son code source
+    scr-relay.service    lancement automatique au démarrage (systemd)
+
+  Sur le serveur (en tant que root) :
+
+    # copier les fichiers (depuis votre PC) :
+    #   scp scr_relay scr-relay.service root@ADRESSE_DU_SERVEUR:/root/
+
+    install -m 755 scr_relay /usr/local/bin/scr_relay
+    useradd --system --no-create-home scrrelay
+    install -m 644 scr-relay.service /etc/systemd/system/scr-relay.service
+    systemctl daemon-reload
+    systemctl enable --now scr-relay
+
+    # pare-feu du serveur, s'il y en a un (exemple avec ufw) :
+    ufw allow 27420/tcp
+
+  Vérifier :  systemctl status scr-relay      journal :  journalctl -u scr-relay -f
+
+  Autre processeur (ARM...) ou recompilation :
+    g++ -O2 -std=c++17 scr_relay.cpp -o scr_relay
+
+  Port différent :  scr_relay --port 30000   (à reporter dans scr.ini des joueurs)
+
+
+3. Côté joueurs
+---------------
+
+  Dans scr.ini, à côté de scr.exe :
+
+    relais = ADRESSE_DU_SERVEUR:27420
+
+  (adresse IP ou nom de domaine). Puis en jeu : F9, même code de salle pour les deux joueurs,
+  Entrée.
+
+
+4. Fonctionnement et limites
+----------------------------
+
+  - Une salle accueille deux joueurs ; le premier attend (jusqu'à une heure), le second est
+    apparié avec lui. Un troisième joueur avec le même code attend un quatrième.
+  - Les deux joueurs doivent avoir la même version de scr.exe (le serveur refuse sinon).
+  - Une connexion silencieuse plus de 90 s est fermée ; 16 connexions au plus par adresse IP,
+    512 en tout.
+  - Le serveur ne voit que des octets du jeu : aucun compte, aucune donnée personnelle.

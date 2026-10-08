@@ -1,0 +1,17 @@
+[Unit]
+Description=Serveur relais Stunt Car Racer (multijoueur en ligne)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/scr_relay --port 27420
+User=scrrelay
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
