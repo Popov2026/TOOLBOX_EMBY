@@ -48,6 +48,9 @@ class Machine {
   // choix de « 3. Computer Link » : la poignée de main ne démarre que lorsque linkGate renvoie vrai
   std::function<bool()> linkGate;
   bool linkHeld() const { return linkHeld_; }   // jeu en attente à l'entrée du lien
+  // Échap dans les menus du jeu : revenir au menu précédent ; faux si le menu affiché n'a pas de retour
+  bool menuBack();
+  bool inMenu() const { return menuId_ >= 0; }
   void serialPush(uint8_t v) { serialIn_.push_back(v); }
   size_t serialPending() const { return serialIn_.size(); }
   uint64_t serialSent() const { return serialSent_; }
@@ -117,6 +120,9 @@ class Machine {
  private:
   std::deque<uint8_t> serialIn_;
   bool linkHeld_ = false;
+  int menuId_ = -1, autoCancel_ = -1;
+  bool menuBack_ = false, inName_ = false, nameBack_ = false;
+  int menuCancelIndex() const;
   uint64_t serialSent_ = 0, serialRecv_ = 0;
   std::vector<uint8_t> cpuCtx_;
   void hleBios(uint32_t sr, uint32_t pc, uint32_t args);

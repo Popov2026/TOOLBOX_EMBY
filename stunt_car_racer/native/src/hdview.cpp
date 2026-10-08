@@ -14,6 +14,7 @@ constexpr uint32_t A_POS = 0x10ac2, A_PITCH = 0x10ace, A_YAW = 0x10ad0, A_ROLL =
 constexpr double PI = 3.14159265358979323846;
 constexpr double ANG = 2 * PI / 65536;
 constexpr double GROUND_RAW = 512;    // niveau du sol (hauteur brute)
+constexpr double START_LINE_W = 40;   // épaisseur de la ligne de départ (unités du monde)
 
 double wrapPi(double a) {
   while (a > PI) a -= 2 * PI;
@@ -461,7 +462,11 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
   // circuit
   const Track &tr = tracks_[track & 7];
   const size_t n = tr.secs.size();
-  const double lw = 0.035;    // largeur des lignes de bord (fraction de la largeur de route)
+  const double lw = 0.0175;   // largeur des lignes de bord (fraction de la largeur de route)
+  // ligne de départ : l'original la trace à la dernière frontière de section de la pièce de départ
+  // (drapeau $6EA7C posé en $52568, recopié dans la liste de polygones en $53DCE)
+  size_t startSec = 0;
+  while (startSec + 1 < n && tr.secs[startSec + 1].piece == tr.startPiece) startSec++;
   for (size_t i = 0; i < n; i++) {
     const Section &A = tr.secs[i], &B = tr.secs[(i + 1) % n];
     uint32_t lc = (i & 1) ? line : line2;   // lignes de bord : jaune et rouge sombre, une section sur deux (comme l'original)
@@ -503,6 +508,14 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
     quad(ql, lc);
     Vec3 qr[4] = {aR1, aR, bR, bR1};
     quad(qr, lc);
+    if (i == startSec) {   // ligne de départ : trait blanc en travers de la route
+      double fx = (bL.x + bR.x - aL.x - aR.x) / 2, fz = (bL.z + bR.z - aL.z - aR.z) / 2, fl = std::hypot(fx, fz);
+      double k = std::min(1.0, START_LINE_W / std::max(1.0, fl));
+      Vec3 s0 = aL, s1 = aR, s2 = lerp(aR, bR, k), s3 = lerp(aL, bL, k);
+      for (Vec3 *v : {&s0, &s1, &s2, &s3}) v->y += 2.5;   // juste au-dessus du revêtement (sans scintillement)
+      Vec3 sq[4] = {s0, s1, s2, s3};
+      r3d_.poly(sq, 4, pal(15));
+    }
   }
   if (opp && opp->valid) addCar(*opp, HSCALE, m);
   r3d_.finish(out);

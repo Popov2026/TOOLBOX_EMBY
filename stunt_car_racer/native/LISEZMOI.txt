@@ -7,6 +7,8 @@ Lancement : placez votre image .st dans le dossier DISK et double-cliquez sur sc
 
 Commandes : flèches = joystick (haut accélère, bas freine, gauche/droite),
 Espace, Ctrl, Maj ou Alt = bouton (boost), clavier ST complet pour les menus.
+Échap dans les menus : retour au menu précédent (choix « Cancel », menus d'entraînement,
+saisie du nom, menu des pilotes du multijoueur).
 Si la direction semble bloquée pendant le boost avec Espace, c'est le clavier qui ne lit
 pas trois touches à la fois : prenez Maj ou Alt pour le boost.
 Manette XInput reconnue. F1 mode HD (1920x1080, 16/9, image fluide à la

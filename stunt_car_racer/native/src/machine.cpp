@@ -46,6 +46,19 @@ constexpr uint32_t PARK = HLE + 0x70;               // bra.s * : instruction neu
 constexpr uint32_t PARK_LINK = HLE + 0x74;          // bra.s * : jeu retenu à l'entrée du « Computer Link »
 constexpr uint32_t A_LINK = 0x453ec;                // « Computer Link » : test « octet reçu ? » qui décide maître / esclave
                                                     // (après le vidage du tampon série de $453B6)
+// menus du jeu ($48D88 : D1 = menu, chaque menu a 4 entrées dans la table de textes $49218)
+constexpr uint32_t A_MENU = 0x48d88, A_MENU_END = 0x48ed0;   // entrée, retour (choix dans D0)
+constexpr uint32_t A_MENU_WAIT = 0x48ee6;   // attente d'un appui (bouton relâché)
+constexpr uint32_t A_MENU_SHOW = 0x48dc6;   // réaffiche le menu puis rend $109C0 si $109B4 (bouton) est posé
+constexpr uint32_t MENU_TEXTS = 0x49218, M_SEL = 0x109c0, M_FIRE = 0x109b4;
+constexpr uint8_t TXT_CANCEL = 0x55;        // « Cancel »
+// saisie du nom ($48B90 -> $48C26) : boucle de lecture des touches en $48C94, fin commune en $48C0E
+constexpr uint32_t A_NAME_INPUT = 0x48c26, A_NAME_KEY = 0x48c94, A_NAME_DONE = 0x48c0e;
+constexpr uint32_t A_SELECT = 0x4be28, A_DRIVERS = 0x4be62;   // menu « 1. Single Player League... », « Enter another driver »
+constexpr uint32_t RET_NAME_SINGLE = 0x4be5c, RET_NAME_MULTI = 0x4be88, DRIVER_COUNT = 0x4c0f2;
+constexpr uint32_t RET_DRIVERS_MENU = 0x4be74;   // retour du menu « Enter another driver / Continue » (multijoueur)
+constexpr int MENU_DRIVERS = 0x14;
+constexpr int MENU_TRACKS = 0x18, MENU_PRACTISE = 0x1c;   // « Tracks in DIVISION n » puis « Practise The ... / Cancel »
 constexpr uint32_t SCREEN = 0xf8000;
 constexpr uint32_t CYCLES_PER_FRAME = 160256;     // 8 MHz, 50 Hz PAL
 const uint32_t DT_SITES[] = {0x48a08, 0x4efaa, 0x4efc6, 0x4efe2, 0x4f014, 0x4f02c, 0x4f044, 0x4f136, 0x4f14e, 0x4f166,
@@ -437,6 +450,49 @@ void Machine::hook(uint32_t pc) {
     if (!linkGate || linkGate()) { linkHeld_ = false; m68k_set_reg(M68K_REG_PC, A_LINK); }
     return;
   }
+  // Échap dans un menu : revenir au menu précédent (choix « Cancel » ; le menu des divisions d'entraînement,
+  // qui n'en a pas, est validé puis le menu suivant est annulé)
+  if (pc == A_MENU) {
+    menuId_ = int(m68k_get_reg(nullptr, M68K_REG_D1) & 0xff);
+    menuBack_ = autoCancel_ == menuId_;
+    autoCancel_ = -1;
+  } else if (pc == A_MENU_END) menuId_ = -1;
+  else if (pc == A_MENU_WAIT && menuBack_) {
+    menuBack_ = false;
+    uint32_t sp = m68k_get_reg(nullptr, M68K_REG_A7);
+    uint32_t ret = (uint32_t(ram[sp]) << 24 | ram[sp + 1] << 16 | ram[sp + 2] << 8 | ram[sp + 3]) & 0xffffff;
+    if (menuId_ == MENU_DRIVERS && ret == RET_DRIVERS_MENU) {   // multijoueur : retour au menu de départ
+      ram[0x10958] = 0;                                         // (fin normale du menu : $515EC)
+      m68k_set_reg(M68K_REG_A7, sp + 4);
+      m68k_set_reg(M68K_REG_PC, A_SELECT);
+      menuId_ = -1;
+      return;
+    }
+    int c = menuCancelIndex();
+    if (c >= 0) ram[M_SEL] = uint8_t(c);
+    else autoCancel_ = MENU_PRACTISE;   // menu des divisions : on garde la division en surbrillance
+    ram[M_FIRE] = 0x10;
+    m68k_set_reg(M68K_REG_PC, A_MENU_SHOW);
+    return;
+  }
+  if (pc == A_NAME_INPUT) inName_ = true;
+  else if (pc == A_NAME_DONE) inName_ = false;
+  else if (pc == A_NAME_KEY && nameBack_) {
+    // Échap pendant « NAME? » : retour au menu de départ (ou à « Enter another driver » en multijoueur) ;
+    // on quitte par la fin normale de la saisie en remplaçant l'adresse de retour de $48B90
+    nameBack_ = false;
+    uint32_t sp = m68k_get_reg(nullptr, M68K_REG_A7);   // [retour vers $48BEC][$56C74 sauvé][retour de $48B90]
+    uint32_t ret = (uint32_t(ram[sp + 8]) << 24 | ram[sp + 9] << 16 | ram[sp + 10] << 8 | ram[sp + 11]) & 0xffffff;
+    if (ret == RET_NAME_SINGLE || ret == RET_NAME_MULTI) {
+      uint32_t to = A_SELECT;
+      if (ret == RET_NAME_MULTI && ram[DRIVER_COUNT] > 0) { ram[DRIVER_COUNT]--; to = A_DRIVERS; }
+      for (int k = 0; k < 4; k++) ram[sp + 8 + k] = uint8_t(to >> (24 - 8 * k));
+      m68k_set_reg(M68K_REG_A7, sp + 4);
+      m68k_set_reg(M68K_REG_PC, A_NAME_DONE);
+      inName_ = false;
+      return;
+    }
+  }
   if (layers_) {   // voiture adverse : de l'entrée de $546DA jusqu'au retour à l'appelant
     if (pc == A_DRAW_OPPONENT && !inOpponent_) {
       uint32_t sp = m68k_get_reg(nullptr, M68K_REG_A7);
@@ -464,6 +520,23 @@ void Machine::hook(uint32_t pc) {
   else if (pc == HLE_XBIOS) hleXbios(sr, rpc, args);
   else if (pc == HLE_BIOS) hleBios(sr, rpc, args);
   else { setSR(sr); m68k_set_reg(M68K_REG_PC, rpc + 2); }   // Line-A : ignoré
+}
+
+int Machine::menuCancelIndex() const {
+  if (menuId_ < 0 || menuId_ > 0xfc) return -1;
+  for (int k = 3; k >= 0; k--)
+    if (ram[MENU_TEXTS + menuId_ + k] == TXT_CANCEL) return k;
+  return -1;
+}
+
+bool Machine::menuBack() {
+  // pas pendant le « Computer Link » ($4537A : maître / esclave) : les deux machines suivent les mêmes menus
+  if (ram[0x4537a] != 0) return false;
+  if (inName_) { nameBack_ = true; return true; }
+  if (menuId_ < 0) return false;
+  if (menuCancelIndex() < 0 && menuId_ != MENU_TRACKS && menuId_ != MENU_DRIVERS) return false;
+  menuBack_ = true;
+  return true;
 }
 
 int Machine::intAck(int level) {

@@ -28,7 +28,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v19"
+#define SCR_VERSION "v20"
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -499,7 +499,10 @@ int main(int argc, char **argv) {
             wireNet();
           }
         }
-        if (int st = stScancode(sc)) if (!menuOpen || !down) m->setKey(st, down);
+        // Échap dans un menu du jeu : retour au menu précédent (la touche n'est alors pas transmise au jeu)
+        // (pendant « NAME? », elle l'est : elle réveille la lecture du clavier qui attend une touche)
+        bool back = down && sc == SDL_SCANCODE_ESCAPE && !menuOpen && (ev.key.repeat || m->menuBack()) && m->inMenu();
+        if (int st = stScancode(sc)) if ((!menuOpen || !down) && !back) m->setKey(st, down);
       }
     }
     Joystick j;

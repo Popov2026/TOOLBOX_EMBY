@@ -267,3 +267,22 @@ code et bloquerait le jeu).
   Au-delà d'environ 50 ms d'aller-retour, le jeu ralentit (il attend l'autre machine) mais ne se
   désynchronise pas. Les menus lisent le joystick à travers le lien : un appui trop bref sur
   « feu » peut être manqué quand la latence est forte.
+
+## 11. Menus et ligne de départ
+
+* **Menus** : `$48D88` (D1 = numéro du menu, D2 = nombre d'entrées - 1, D0 = entrée en surbrillance ;
+  rend le choix dans D0). Textes : 4 octets par menu dans la table `$49218` (texte `$55` = « Cancel »).
+  Choix courant `$109C0`, bouton `$109B4` ; la boucle d'attente passe en `$48EE6` et `$48DC6` réaffiche
+  le menu puis le quitte si `$109B4` est posé. Menus : `$00` division (Hall of Fame / Practise / Start /
+  Load-Save-Replay), `$04` Load / Save / Replay / Cancel, `$10` départ (Single Player League /
+  Multiplayer / Computer Link), `$14` Enter another driver / Continue, `$18` Tracks in DIVISION 1-4,
+  `$1C` Practise ... / Cancel.
+* **Saisie du nom** : `$48B90` ; boucle clavier `$48C26` (lecture bloquante en `$48C94`), sortie commune
+  `$48C0E`. Appelée depuis `$4BE56` (ligue) et `$4BE82` (multijoueur, compteur de pilotes `$4C0F2`).
+* **Échap = menu précédent** (version native) : choix de « Cancel » quand le menu en a un ; `$18` est
+  validé puis le menu `$1C` qui suit est annulé ; pendant « NAME? » et dans `$14`, retour à `$4BE28`
+  (ou à `$4BE62` pour le pilote suivant). Désactivé pendant le « Computer Link » (`$4537A` ≠ 0).
+* **Ligne de départ** : en `$52568`, la pièce rendue (`$1096F`) est comparée à la pièce de départ
+  (`$11116`) ; le drapeau est posé dans `$6EA7C` à la dernière frontière de section de la pièce,
+  recopié dans la liste de polygones en `$53DCE`. Vérifié en le désactivant (pièce `$FE`) : le trait
+  blanc disparaît. Le mode HD trace un trait blanc au même endroit.
