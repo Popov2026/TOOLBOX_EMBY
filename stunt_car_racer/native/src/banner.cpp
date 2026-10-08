@@ -1,6 +1,8 @@
 // banner.cpp — voir banner.hpp
 #include "banner.hpp"
 
+#include <algorithm>
+
 namespace scr {
 
 namespace {
@@ -67,12 +69,12 @@ std::string bannerText(const std::string &s) {
   return o;
 }
 
-std::vector<uint32_t> renderBanner(const std::string &utf8, int scale, int &w, int &h, uint32_t fg) {
+std::vector<uint32_t> renderBanner(const std::string &utf8, int scale, int &w, int &h, uint32_t fg, uint32_t bg, int minChars) {
   std::string t = bannerText(utf8);
   const int pad = 3;
-  w = (int(t.size()) * 6 + 2 * pad) * scale;
+  w = (std::max(int(t.size()), minChars) * 6 + 2 * pad) * scale;
   h = (7 + 2 * pad) * scale;
-  std::vector<uint32_t> img(size_t(w) * h, 0xb0000000u);   // fond noir semi-transparent
+  std::vector<uint32_t> img(size_t(w) * h, bg);   // fond (noir semi-transparent par défaut)
   for (size_t k = 0; k < t.size(); k++) {
     int ch = static_cast<unsigned char>(t[k]);
     if (ch < 32 || ch > 126) ch = '?';

@@ -16,7 +16,7 @@ hdres = 1920x1080             # définition du mode HD (16/9)
 
 # --- multijoueur (mode « Computer Link » par le réseau ; voir LISEZMOI_MULTIJOUEUR.txt)
 # nom = Pierre                # nom montré à l'autre joueur (défaut : nom de la session Windows)
-# relais = mon-serveur.fr:27420   # serveur relais pour jouer par Internet (F9 + code de salle)
+# relais = mon-serveur.fr:27420   # serveur relais pour jouer par Internet (menu « Computer Link » : Par Internet)
 
 # --- physique d'origine (1 = valeur du jeu)
 gravity = 1

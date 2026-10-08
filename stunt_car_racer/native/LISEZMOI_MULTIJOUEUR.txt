@@ -9,48 +9,45 @@ Il faut que les deux joueurs aient la même version de scr.exe, la même image d
 réglages de physique dans scr.ini (c'est vérifié à la connexion).
 
 
-1. Se relier
-------------
+1. Se relier et lancer la course
+--------------------------------
 
-  Sur le même réseau (maison, même box) :
-    - le premier joueur appuie sur F7 (héberger une partie) ;
-    - le second appuie sur F8 : la partie est trouvée automatiquement, rien à taper.
-    Au premier lancement, Windows demande d'autoriser scr.exe sur les réseaux privés : acceptez.
+  Les deux joueurs lancent scr.exe et choisissent « 3. Computer Link » dans le premier menu du
+  jeu. Un menu s'ouvre alors par-dessus le jeu :
 
-  Par Internet (avec un serveur relais) :
-    - les deux joueurs appuient sur F9 et tapent le même code de salle (lettres ou chiffres),
-      puis Entrée. Avec un code vide, le jeu en invente un : donnez-le à l'autre joueur ;
-    - aucun port à ouvrir sur les box : les deux PC appellent le serveur relais, qui les met en
-      relation. L'adresse du serveur se règle dans scr.ini : relais = adresse:port
+    COMPUTER LINK - CHOISISSEZ L'ADVERSAIRE
+      Affronter Pierre                 <- joueurs trouvés sur le réseau local (automatique)
+      Par Internet : code de salle     <- serveur relais (relais = ... dans scr.ini)
+      Par adresse IP
+      Annuler
 
-  À la main (adresse IP) :
-    - le premier joueur appuie sur F7 ; le second lance : scr.exe --join 192.168.1.20
+  Flèches + Entrée pour choisir (ou la manette), Échap pour annuler.
 
-  F10 coupe la connexion. Un bandeau en haut de l'image indique l'état : en attente, relié (avec
-  le nom de l'autre joueur et le ping), ou la raison d'un échec.
+  - Même réseau (maison) : chaque jeu qui attend dans ce menu apparaît chez l'autre. L'un des deux
+    joueurs choisit « Affronter ... » : les deux jeux se relient et la mise en relation du jeu
+    d'origine démarre toute seule (« Link complete »). Au premier lancement, Windows demande
+    d'autoriser scr.exe sur les réseaux privés : acceptez.
+  - Par Internet : les deux joueurs choisissent « Par Internet » et tapent le même code de salle
+    (lettres ou chiffres). Code vide : le jeu en invente un, à donner à l'autre joueur. Aucun port
+    à ouvrir sur les box : les deux PC appellent le serveur relais, qui les met en relation.
+  - Par adresse IP : pour un réseau qui bloque la détection automatique.
 
-  On peut aussi lancer directement en ligne de commande :
-    scr.exe --host                        héberger en réseau local
-    scr.exe --joinlan                     rejoindre en réseau local (détection automatique)
-    scr.exe --join ADRESSE[:PORT]         rejoindre une adresse
-    scr.exe --online CODE                 rejoindre une salle du serveur relais (relais = dans scr.ini)
+  Celui qui a choisi l'adversaire (ou le premier arrivé dans la salle) est le « maître » : il saisit
+  les pilotes (au moins deux : les deux joueurs) avec « 1. Enter another driver », puis
+  « 2. Continue », et mène les menus (championnat, entraînement, circuit). L'autre affiche
+  « Please wait » puis suit les mêmes écrans. En course, chacun pilote sa voiture et voit l'autre
+  comme adversaire.
 
+  F10 coupe la connexion. Un bandeau en haut de l'image indique l'état (relié, ping, ou la raison
+  d'un échec).
 
-2. Lancer la course
--------------------
-
-  Une fois relié :
-    - les deux joueurs choisissent « 3. Computer Link » dans le premier menu du jeu ;
-    - le premier à le faire devient le « maître » : il saisit les pilotes (au moins deux : les deux
-      joueurs) avec « 1. Enter another driver », puis « 2. Continue », et c'est lui qui mène les
-      menus (championnat, entraînement, choix du circuit) ;
-    - l'autre affiche « Please wait » puis suit les mêmes écrans ;
-    - en course, chacun pilote sa voiture et voit l'autre comme adversaire.
-
-  Échap pendant la mise en relation abandonne (« Link abandoned »).
+  En ligne de commande (sans passer par le menu) :
+    scr.exe --online CODE                 salle du serveur relais (relais = dans scr.ini)
+    scr.exe --join ADRESSE[:PORT]         adresse d'un autre joueur qui attend (--host)
+    scr.exe --host / --joinlan            héberger / rejoindre en réseau local
 
 
-3. Ping et vitesse du jeu
+2. Ping et vitesse du jeu
 -------------------------
 
   Le jeu d'origine attend l'autre machine à chaque étape de la course. Avec un ping (aller-retour)
@@ -60,7 +57,7 @@ réglages de physique dans scr.ini (c'est vérifié à la connexion).
   Le mode HD (F1) et les détails élevés (F5) fonctionnent aussi en multijoueur.
 
 
-4. Le serveur relais
+3. Le serveur relais
 --------------------
 
   Il n'est utile que pour jouer par Internet. C'est un petit programme pour un serveur Linux

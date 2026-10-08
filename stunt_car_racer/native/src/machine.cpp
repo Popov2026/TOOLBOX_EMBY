@@ -43,6 +43,9 @@ constexpr uint32_t HLE = 0xffe00;                 // « ROM » : RTE en fin de R
 constexpr uint32_t HLE_GEMDOS = HLE + 0x10, HLE_XBIOS = HLE + 0x20, HLE_LINEA = HLE + 0x30, SENTINEL = HLE + 0x40;
 constexpr uint32_t HLE_BIOS = HLE + 0x50;   // trap #13
 constexpr uint32_t PARK = HLE + 0x70;               // bra.s * : instruction neutre pour s'arrêter
+constexpr uint32_t PARK_LINK = HLE + 0x74;          // bra.s * : jeu retenu à l'entrée du « Computer Link »
+constexpr uint32_t A_LINK = 0x453ec;                // « Computer Link » : test « octet reçu ? » qui décide maître / esclave
+                                                    // (après le vidage du tampon série de $453B6)
 constexpr uint32_t SCREEN = 0xf8000;
 constexpr uint32_t CYCLES_PER_FRAME = 160256;     // 8 MHz, 50 Hz PAL
 const uint32_t DT_SITES[] = {0x48a08, 0x4efaa, 0x4efc6, 0x4efe2, 0x4f014, 0x4f02c, 0x4f044, 0x4f136, 0x4f14e, 0x4f166,
@@ -271,6 +274,7 @@ Machine::~Machine() {
 void Machine::setupLowMem() {
   for (int i = 0; i < 0x80; i += 2) { ram[HLE + i] = 0x4e; ram[HLE + i + 1] = 0x73; }  // RTE
   ram[PARK] = 0x60; ram[PARK + 1] = 0xfe;
+  ram[PARK_LINK] = 0x60; ram[PARK_LINK + 1] = 0xfe;
   auto w32 = [&](uint32_t a, uint32_t v) { ram[a] = v >> 24; ram[a + 1] = v >> 16; ram[a + 2] = v >> 8; ram[a + 3] = v; };
   for (int v = 2; v < 256; v++) w32(v * 4, HLE);
   w32(0, 0x7000); w32(4, A_BOOT);
@@ -426,6 +430,13 @@ void Machine::hook(uint32_t pc) {
     reached_ = true; m68k_set_reg(M68K_REG_PC, PARK); m68k_end_timeslice(); return;
   }
   if (debugHook) debugHook(*this, pc);
+  // « Computer Link » : le jeu est retenu à l'entrée de la poignée de main tant que linkGate refuse
+  // (adversaire pas encore choisi, ou esclave qui attend le premier octet du maître)
+  if (pc == A_LINK && linkGate && !linkGate()) { linkHeld_ = true; m68k_set_reg(M68K_REG_PC, PARK_LINK); return; }
+  if (pc == PARK_LINK && linkHeld_) {
+    if (!linkGate || linkGate()) { linkHeld_ = false; m68k_set_reg(M68K_REG_PC, A_LINK); }
+    return;
+  }
   if (layers_) {   // voiture adverse : de l'entrée de $546DA jusqu'au retour à l'appelant
     if (pc == A_DRAW_OPPONENT && !inOpponent_) {
       uint32_t sp = m68k_get_reg(nullptr, M68K_REG_A7);

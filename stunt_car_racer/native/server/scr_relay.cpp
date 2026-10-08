@@ -111,7 +111,7 @@ void onJoin(Client &c, const uint8_t *p, size_t n) {
   }
   waiting.erase(w);
   c.peer = o.fd; o.peer = c.fd;
-  frame(c, NF_INFO, "PAIRED"); frame(o, NF_INFO, "PAIRED");
+  frame(o, NF_INFO, "PAIRED 1"); frame(c, NF_INFO, "PAIRED 2");   // 1 : premier arrivé (maître dans le jeu)
   logf("%-15s salle %-12s apparié avec %s", c.ip.c_str(), c.room.c_str(), o.ip.c_str());
 }
 

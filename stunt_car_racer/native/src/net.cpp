@@ -49,7 +49,8 @@ uint32_t fnv1a(const void *data, size_t n, uint32_t h) {
   return h;
 }
 
-static const char ANNOUNCE[] = "SCRLINK1 ";   // annonce UDP : "SCRLINK1 <port tcp> <nom>"
+static const char ANNOUNCE[] = "SCRLINK1 ";   // annonce UDP (--host) : "SCRLINK1 <port tcp> <nom>"
+static const char ANNOUNCE2[] = "SCRLINK2 ";  // annonce UDP du salon : "SCRLINK2 <id> <port tcp> <nom>"
 
 double NetLink::now() {
   using namespace std::chrono;
@@ -71,8 +72,8 @@ void NetLink::close(const std::string &why) {
   if (tcp_ != BAD && helloOk_) { frame(NF_BYE, why); flush(); }
   closeSock(tcp_); closeSock(listen_); closeSock(udp_);
   mode_ = Mode::Off; state_ = State::Off; connecting_ = false;
-  in_.clear(); out_.clear(); rx_.clear(); pendingData_.clear(); dataOut_.clear();
-  helloSent_ = helloOk_ = relayPaired_ = false;
+  in_.clear(); out_.clear(); rx_.clear(); dataOut_.clear(); peers_.clear();
+  helloSent_ = helloOk_ = relayPaired_ = master_ = waitedFirst_ = false;
   ping_ = -1; peerName_.clear(); info_.clear(); error_.clear();
 }
 
@@ -80,6 +81,90 @@ void NetLink::fail(const std::string &why) {
   closeSock(tcp_); closeSock(listen_); closeSock(udp_);
   connecting_ = false; helloOk_ = false;
   state_ = State::Failed; error_ = why;
+}
+
+bool NetLink::openListener(int port) {
+  int on = 1;
+  for (int k = 0; k < 10; k++) {   // port occupé (autre jeu sur ce PC) : port suivant
+    listen_ = Sock(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
+    if (listen_ == BAD) return false;
+#ifndef _WIN32
+    setsockopt(listen_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char *>(&on), sizeof on);
+#endif
+    sockaddr_in a{}; a.sin_family = AF_INET; a.sin_addr.s_addr = htonl(INADDR_ANY); a.sin_port = htons(uint16_t(port + k));
+    if (bind(listen_, reinterpret_cast<sockaddr *>(&a), sizeof a) == 0 && ::listen(listen_, 2) == 0) {
+      nonBlock(listen_); port_ = port + k; return true;
+    }
+    closeSock(listen_);
+  }
+  return false;
+}
+
+bool NetLink::openDiscovery(bool broadcast) {
+  udp_ = Sock(socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP));
+  if (udp_ == BAD) return false;
+  int on = 1;
+  setsockopt(udp_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char *>(&on), sizeof on);
+#ifdef SO_REUSEPORT
+  setsockopt(udp_, SOL_SOCKET, SO_REUSEPORT, reinterpret_cast<const char *>(&on), sizeof on);
+#endif
+  if (broadcast) setsockopt(udp_, SOL_SOCKET, SO_BROADCAST, reinterpret_cast<const char *>(&on), sizeof on);
+  sockaddr_in a{}; a.sin_family = AF_INET; a.sin_addr.s_addr = htonl(INADDR_ANY); a.sin_port = htons(NET_DISCOVERY_PORT);
+  if (bind(udp_, reinterpret_cast<sockaddr *>(&a), sizeof a) != 0) { closeSock(udp_); return false; }
+  nonBlock(udp_);
+  return true;
+}
+
+bool NetLink::lobby() {
+  close();
+  mode_ = Mode::Lobby; started_ = now();
+  id_ = uint32_t(fnv1a(&started_, sizeof started_, uint32_t(reinterpret_cast<uintptr_t>(this)))) | 1u;
+  if (!openListener(NET_PORT)) { fail("aucun port libre pour recevoir un adversaire"); return false; }
+  if (!openDiscovery(true)) { fail("port de détection " + std::to_string(NET_DISCOVERY_PORT) + " occupé"); return false; }
+  state_ = State::Waiting;
+  return true;
+}
+
+bool NetLink::connectPeer(const Peer &p) {
+  if (mode_ != Mode::Lobby || tcp_ != BAD) return false;
+  peerName_ = p.name;
+  master_ = true;                       // celui qui choisit l'adversaire mène la partie
+  return connectTo(p.ip, p.port);
+}
+
+void NetLink::announce(double t) {
+  if (udp_ == BAD || t - lastAnnounce_ < 1.0) return;
+  lastAnnounce_ = t;
+  std::string msg = mode_ == Mode::Lobby ? ANNOUNCE2 + std::to_string(id_) + " " + std::to_string(port_) + " " + name_
+                                         : ANNOUNCE + std::to_string(port_) + " " + name_;
+  sockaddr_in b{}; b.sin_family = AF_INET; b.sin_port = htons(NET_DISCOVERY_PORT);
+  b.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+  sendto(udp_, msg.data(), int(msg.size()), 0, reinterpret_cast<sockaddr *>(&b), sizeof b);
+  b.sin_addr.s_addr = htonl(INADDR_LOOPBACK);   // deux jeux sur le même PC
+  sendto(udp_, msg.data(), int(msg.size()), 0, reinterpret_cast<sockaddr *>(&b), sizeof b);
+}
+
+void NetLink::readAnnounces(double t) {
+  for (int k = 0; k < 32 && udp_ != BAD; k++) {
+    char buf[256]; sockaddr_in a{}; socklen_t l = sizeof a;
+    int r = int(recvfrom(udp_, buf, sizeof buf - 1, 0, reinterpret_cast<sockaddr *>(&a), &l));
+    if (r <= 0) break;
+    buf[r] = 0;
+    if (std::strncmp(buf, ANNOUNCE2, sizeof ANNOUNCE2 - 1) != 0) continue;
+    char *q = buf + sizeof ANNOUNCE2 - 1, *e = nullptr;
+    uint32_t id = uint32_t(std::strtoul(q, &e, 10));
+    if (!e || id == id_) continue;      // notre propre annonce
+    int port = int(std::strtol(e, &e, 10));
+    std::string name = (e && *e == ' ') ? e + 1 : "";
+    std::string ip = inet_ntoa(a.sin_addr);
+    bool found = false;
+    for (auto &p : peers_)
+      if (p.id == id) { p.name = name; p.port = port; p.seen = t; if (p.ip == "127.0.0.1" || ip != "127.0.0.1") p.ip = ip; found = true; }
+    if (!found && port > 0) peers_.push_back({id, name, ip, port, t});
+  }
+  // une partie qui ne s'annonce plus depuis 3,5 s a disparu
+  for (size_t i = 0; i < peers_.size();)
+    if (t - peers_[i].seen > 3.5) peers_.erase(peers_.begin() + long(i)); else i++;
 }
 
 bool NetLink::hostLan(int port) {
@@ -136,6 +221,7 @@ bool NetLink::joinDirect(const std::string &hostPort) {
   mode_ = Mode::Direct; started_ = now();
   std::string host; int port = NET_PORT;
   if (!splitHostPort(hostPort, host, port)) { fail("adresse invalide : " + hostPort); return false; }
+  master_ = true;
   return connectTo(host, port);
 }
 
@@ -200,7 +286,6 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
       if (ver != version_) { fail("versions différentes (ici " + version_ + ", en face " + ver + ")"); return; }
       if (h != hash_) { fail("jeu ou réglages différents de l'autre joueur (image disque, scr.ini)"); return; }
       helloOk_ = true; state_ = State::Connected;
-      if (!pendingData_.empty()) { frame(NF_DATA, pendingData_.data(), pendingData_.size()); sent_ += pendingData_.size(); pendingData_.clear(); }
       break;
     }
     case NF_DATA:
@@ -217,8 +302,12 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
     case NF_BYE: fail("l'autre joueur a quitté la partie"); break;
     case NF_INFO: {   // messages du serveur relais
       std::string s(reinterpret_cast<const char *>(p), n);
-      if (s == "PAIRED") { relayPaired_ = true; startSession(); }
-      else if (s == "WAIT") info_ = "WAIT";
+      if (s.compare(0, 6, "PAIRED") == 0) {   // « PAIRED 1 » : premier arrivé = maître
+        relayPaired_ = true;
+        master_ = s.size() > 7 ? s[7] == '1' : waitedFirst_;
+        startSession();
+      }
+      else if (s == "WAIT") { info_ = "WAIT"; waitedFirst_ = true; }
       else if (s == "FULL") fail("salle " + room_ + " déjà complète (deux joueurs)");
       else if (s == "GONE") fail("l'autre joueur s'est déconnecté");
       else if (s.compare(0, 4, "ERR ") == 0) fail("relais : " + s.substr(4));
@@ -237,8 +326,8 @@ void NetLink::flush() {
 }
 
 void NetLink::send(uint8_t b) {
+  // câble « débranché » tant que la connexion n'est pas prête : l'octet est perdu, comme sur l'Atari
   if (state_ == State::Connected) { dataOut_.push_back(b); sent_++; }   // regroupés en une trame par poll()
-  else if (pendingData_.size() < 65536) pendingData_.push_back(b);
 }
 
 bool NetLink::recv(uint8_t &b) {
@@ -250,6 +339,16 @@ bool NetLink::recv(uint8_t &b) {
 void NetLink::poll() {
   if (mode_ == Mode::Off || state_ == State::Failed) return;
   const double t = now();
+  // salon du réseau local : s'annoncer, lister les autres, accepter le joueur qui nous choisit
+  if (mode_ == Mode::Lobby && tcp_ == BAD) {
+    announce(t);
+    readAnnounces(t);
+    if (listen_ != BAD) {
+      sockaddr_in a{}; socklen_t l = sizeof a;
+      Sock s = Sock(accept(listen_, reinterpret_cast<sockaddr *>(&a), &l));
+      if (s != BAD) { tcp_ = s; nonBlock(tcp_); info_ = inet_ntoa(a.sin_addr); master_ = false; startSession(); }
+    }
+  }
   // réseau local, hôte : accepter le joueur, annoncer la partie
   if (mode_ == Mode::LanHost && tcp_ == BAD && listen_ != BAD) {
     sockaddr_in a{}; socklen_t l = sizeof a;
@@ -276,6 +375,7 @@ void NetLink::poll() {
       peerName_ = nm ? nm + 1 : "";
       std::string host = inet_ntoa(a.sin_addr);
       closeSock(udp_);
+      master_ = true;
       if (port > 0) connectTo(host, port);
     }
   }
@@ -335,10 +435,11 @@ std::string NetLink::status() const {
     case State::Failed: return "Réseau : " + error_;
     case State::Connected:
       return "Relié à " + (peerName_.empty() ? std::string("l'autre joueur") : peerName_) +
-             (ping_ >= 0 ? " - ping " + std::to_string(ping_) + " ms" : "") + " - choisissez « 3. Computer Link »";
+             (ping_ >= 0 ? " - ping " + std::to_string(ping_) + " ms" : "");
     case State::Handshake: return "Réseau : vérification des versions...";
     case State::Connecting: return "Réseau : connexion à " + info_ + "...";
     case State::Waiting:
+      if (mode_ == Mode::Lobby) return "Réseau local : visible sous le nom " + name_ + (peers_.empty() ? ", aucun autre joueur pour l'instant" : "");
       if (mode_ == Mode::LanHost) return "Réseau local : partie hébergée, en attente d'un joueur (port " + std::to_string(port_) + ")";
       if (mode_ == Mode::LanJoin) return "Réseau local : recherche d'une partie...";
       if (mode_ == Mode::Relay) return "En ligne : salle " + room_ + ", en attente de l'autre joueur";

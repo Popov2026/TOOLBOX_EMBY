@@ -51,8 +51,8 @@ transmet leurs données de l'un à l'autre. Les joueurs n'ont aucun port à ouvr
 
     relais = ADRESSE_DU_SERVEUR:27420
 
-  (adresse IP ou nom de domaine). Puis en jeu : F9, même code de salle pour les deux joueurs,
-  Entrée.
+  (adresse IP ou nom de domaine). Puis en jeu : « 3. Computer Link », « Par Internet : code de
+  salle », même code pour les deux joueurs, Entrée.
 
 
 4. Fonctionnement et limites

@@ -26,7 +26,8 @@ enum NetFrame : uint8_t { NF_HELLO = 1, NF_DATA = 2, NF_PING = 3, NF_PONG = 4, N
 
 class NetLink {
  public:
-  enum class Mode { Off, LanHost, LanJoin, Direct, Relay };
+  enum class Mode { Off, Lobby, LanHost, LanJoin, Direct, Relay };
+  struct Peer { uint32_t id; std::string name, ip; int port; double seen; };   // partie vue en réseau local
   enum class State { Off, Waiting, Connecting, Handshake, Connected, Failed };
 
   NetLink();
@@ -37,6 +38,11 @@ class NetLink {
   // identité de ce jeu : version du programme, empreinte du jeu et des réglages, nom affiché
   void setIdentity(const std::string &version, uint32_t gameHash, const std::string &name);
 
+  // salon du réseau local (menu « Computer Link ») : ce jeu s'annonce et liste les autres jeux qui
+  // attendent ; on en choisit un (connectPeer) ou un autre joueur nous choisit (connexion entrante)
+  bool lobby();
+  const std::vector<Peer> &peers() const { return peers_; }
+  bool connectPeer(const Peer &p);
   bool hostLan(int port = NET_PORT);                       // héberger en réseau local
   bool joinLan();                                          // rejoindre la première partie annoncée
   bool joinDirect(const std::string &hostPort);            // adresse[:port]
@@ -52,6 +58,9 @@ class NetLink {
   State state() const { return state_; }
   bool active() const { return mode_ != Mode::Off; }
   bool connected() const { return state_ == State::Connected; }
+  // rôle dans le jeu : le « maître » lance la poignée de main et mène les menus (celui qui a choisi
+  // l'adversaire, ou le premier arrivé dans la salle du relais)
+  bool master() const { return master_; }
   int pingMs() const { return ping_; }
   const std::string &peerName() const { return peerName_; }
   std::string status() const;        // texte court pour le titre de la fenêtre
@@ -70,9 +79,14 @@ class NetLink {
   int port_ = NET_PORT;
   std::vector<uint8_t> in_, out_;    // tampons TCP (trames)
   std::deque<uint8_t> rx_;           // octets du câble reçus
-  std::vector<uint8_t> pendingData_; // octets du câble émis avant la fin de la poignée de main
   std::vector<uint8_t> dataOut_;     // octets du câble à envoyer au prochain poll()
-  bool helloSent_ = false, helloOk_ = false, relayPaired_ = false;
+  bool helloSent_ = false, helloOk_ = false, relayPaired_ = false, master_ = false, waitedFirst_ = false;
+  uint32_t id_ = 0;                  // identifiant de ce jeu dans les annonces
+  std::vector<Peer> peers_;
+  bool openListener(int port);
+  bool openDiscovery(bool broadcast);
+  void announce(double t);
+  void readAnnounces(double t);
   double lastAnnounce_ = -1e9, lastPing_ = -1e9, lastRx_ = 0, started_ = 0;
   int ping_ = -1;
   uint64_t sent_ = 0, received_ = 0;

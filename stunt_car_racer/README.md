@@ -90,9 +90,11 @@ de sprites (`$56762`, `$5687E`) et ce qu'il recouvre, pour effacer proprement l'
 
 **Multijoueur en réseau** : le mode « Computer Link » d'origine (deux Atari reliés par câble série)
 passe par le réseau. Le port série est émulé (BIOS `Bconstat`/`Bconin`/`Bconout`), et ses octets
-partent vers l'autre joueur. **F7** héberge en réseau local, **F8** rejoint (détection automatique
-par diffusion UDP), **F9** joue par Internet via un serveur relais (`native/server/scr_relay`) avec
-un code de salle, **F10** coupe. Voir `native/LISEZMOI_MULTIJOUEUR.txt` et
+partent vers l'autre joueur. Quand on choisit « 3. Computer Link », le jeu est retenu au test qui
+décide maître/esclave (`$453EC`), et un menu propose les adversaires trouvés en réseau local
+(annonces UDP), une salle sur le serveur relais (`native/server/scr_relay`, code de salle) ou une
+adresse IP. Celui qui choisit devient le maître ; l'esclave n'est relâché qu'après réception du
+premier octet du maître. Voir `native/LISEZMOI_MULTIJOUEUR.txt` et
 `native/server/LISEZMOI_SERVEUR.txt`.
 
 Réglages dans `scr.ini` (modèle : `native/scr.ini.example`) ou en ligne de commande :

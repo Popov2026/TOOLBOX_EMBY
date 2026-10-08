@@ -28,7 +28,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v18"
+#define SCR_VERSION "v19"
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -36,6 +36,7 @@
 #include "net.hpp"
 #include <chrono>
 #include <random>
+#include <tuple>
 
 using namespace scr;
 
@@ -239,18 +240,27 @@ int main(int argc, char **argv) {
     if (nm.empty()) { const char *u = std::getenv("USERNAME"); if (!u) u = std::getenv("USER"); nm = u ? u : "Joueur"; }
     net.setIdentity(SCR_VERSION, h, nm);
   }
+  // menu « Computer Link » : quand le joueur choisit « 3. Computer Link », le jeu est retenu à l'entrée
+  // du lien et ce menu propose les adversaires trouvés sur le réseau local, une salle du serveur
+  // relais (code) ou une adresse IP. Celui qui choisit l'adversaire devient le maître (il mène les menus).
+  enum class Typing { None, Code, Ip };
+  Typing typing = Typing::None;
+  std::string typed;
+  int menuSel = 0;
+  double cancelUntil = -1;       // annulation : Échap transmis au jeu, qui abandonne le lien
+  double fireUntil = 0;          // en multijoueur, un appui sur « feu » dure au moins 0,35 s
+  bool menuOpen = false, prevUp = false, prevDown = false, prevFire = false;
   auto wireNet = [&] {
     m->serialOut = [&](uint8_t v) { net.send(v); };
     m->sliceHook = [&] { net.poll(); uint8_t b; while (net.recv(b)) m->serialPush(b); };
+    // le maître démarre la poignée de main dès la connexion ; l'esclave attend le premier octet du maître
+    m->linkGate = [&] { return cancelUntil > 0 || (net.connected() && (net.master() || m->serialPending() > 0)); };
   };
   wireNet();
   if (o.netMode == "host") net.hostLan();
   else if (o.netMode == "joinlan") net.joinLan();
   else if (o.netMode == "join") net.joinDirect(o.netArg);
   else if (o.netMode == "online") net.joinRelay(o.relay, o.netArg);
-  bool typingCode = false;       // saisie du code de salle (F9)
-  std::string code;
-  double fireUntil = 0;          // en multijoueur, un appui sur « feu » dure au moins 0,35 s
 
   std::unique_ptr<HdView> view;
   bool hd = o.hd, highDetail = o.highDetail;
@@ -345,38 +355,116 @@ int main(int argc, char **argv) {
   uint64_t freq = SDL_GetPerformanceFrequency(), last = SDL_GetPerformanceCounter();
   double acc = 0;
   bool running = true;
+  // éléments du menu « Computer Link »
+  struct MenuItem { std::string label; int kind; NetLink::Peer peer; };   // 0 adversaire, 1 code, 2 adresse, 3 annuler, 4 réessayer
+  auto menuItems = [&] {
+    std::vector<MenuItem> it;
+    bool waiting = net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting;
+    if (waiting)
+      for (auto &p : net.peers()) it.push_back({"Affronter " + p.name.substr(0, 20), 0, p});
+    if (waiting || net.state() == NetLink::State::Failed || !net.active()) {
+      if (!waiting) it.push_back({"Chercher en réseau local", 4, {}});
+      it.push_back({o.relay.empty() ? "Par Internet (relais absent de scr.ini)" : "Par Internet : code de salle", 1, {}});
+      it.push_back({"Par adresse IP", 2, {}});
+    }
+    it.push_back({"Annuler", 3, {}});
+    return it;
+  };
+  auto cancelLink = [&] {   // Échap transmis au jeu : « Link abandoned »
+    net.close();
+    typing = Typing::None; SDL_StopTextInput();
+    double t = double(SDL_GetPerformanceCounter()) / double(SDL_GetPerformanceFrequency());
+    cancelUntil = t + 0.6;
+    m->setKey(0x01, true);
+  };
+  auto chooseItem = [&](const MenuItem &mi) {
+    switch (mi.kind) {
+      case 0: net.connectPeer(mi.peer); break;
+      case 1: if (!o.relay.empty()) { typing = Typing::Code; typed.clear(); SDL_StartTextInput(); } break;
+      case 2: typing = Typing::Ip; typed.clear(); SDL_StartTextInput(); break;
+      case 3: cancelLink(); break;
+      case 4: net.lobby(); break;
+    }
+  };
+  // aide aux tests automatiques (aucun effet sinon) : SCR_AUTOKEYS="trame:Touche,..." simule des appuis
+  // (noms SDL : Space, Return, Down, A...) ; SCR_SHOT="trame:fichier.bmp" enregistre une capture
+  struct AutoKey { uint32_t frame; SDL_Scancode sc; };
+  std::vector<AutoKey> autoKeys;
+  std::vector<std::pair<uint32_t, SDL_Scancode>> autoUps;
+  std::vector<std::pair<uint32_t, std::string>> autoShots;
+  auto parseAuto = [](const char *env, auto fn) {
+    if (!env) return;
+    std::stringstream ss(env); std::string tok;
+    while (std::getline(ss, tok, ',')) { size_t c = tok.find(':'); if (c != std::string::npos) fn(uint32_t(std::atoi(tok.c_str())), tok.substr(c + 1)); }
+  };
+  parseAuto(std::getenv("SCR_AUTOKEYS"), [&](uint32_t f, const std::string &k) { autoKeys.push_back({f, SDL_GetScancodeFromName(k.c_str())}); });
+  parseAuto(std::getenv("SCR_SHOT"), [&](uint32_t f, const std::string &k) { autoShots.push_back({f, k}); });
   while (running) {
+    for (size_t k = 0; k < autoKeys.size();) {
+      if (m->frames() < autoKeys[k].frame) { k++; continue; }
+      SDL_Event e{}; e.type = SDL_KEYDOWN; e.key.keysym.scancode = autoKeys[k].sc; SDL_PushEvent(&e);
+      autoUps.push_back({m->frames() + 5, autoKeys[k].sc});
+      autoKeys.erase(autoKeys.begin() + long(k));
+    }
+    for (size_t k = 0; k < autoUps.size();) {
+      if (m->frames() < autoUps[k].first) { k++; continue; }
+      SDL_Event e{}; e.type = SDL_KEYUP; e.key.keysym.scancode = autoUps[k].second; SDL_PushEvent(&e);
+      autoUps.erase(autoUps.begin() + long(k));
+    }
+    {
+      double t = double(SDL_GetPerformanceCounter()) / double(SDL_GetPerformanceFrequency());
+      if (cancelUntil > 0 && t > cancelUntil) { cancelUntil = -1; m->setKey(0x01, false); }
+      bool open = m->linkHeld() && cancelUntil < 0 && !net.connected();
+      if (open && !menuOpen) { menuSel = 0; if (!net.active()) net.lobby(); }   // le joueur vient de choisir « Computer Link »
+      if (!open && menuOpen && typing != Typing::None) { typing = Typing::None; SDL_StopTextInput(); }
+      menuOpen = open;
+    }
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
       if (ev.type == SDL_QUIT) running = false;
       else if (ev.type == SDL_CONTROLLERDEVICEADDED && !pad) pad = SDL_GameControllerOpen(ev.cdevice.which);
-      else if (ev.type == SDL_TEXTINPUT && typingCode) {   // code de salle : lettres et chiffres
-        for (const char *c = ev.text.text; *c; c++)
-          if (std::isalnum(static_cast<unsigned char>(*c)) && code.size() < 12) code += char(std::toupper(static_cast<unsigned char>(*c)));
+      else if (ev.type == SDL_TEXTINPUT && typing != Typing::None) {   // code de salle ou adresse
+        for (const char *c = ev.text.text; *c; c++) {
+          unsigned char ch = static_cast<unsigned char>(*c);
+          if (typing == Typing::Code && std::isalnum(ch) && typed.size() < 12) typed += char(std::toupper(ch));
+          if (typing == Typing::Ip && (std::isalnum(ch) || ch == '.' || ch == ':' || ch == '-') && typed.size() < 40) typed += char(ch);
+        }
       }
-      else if (ev.type == SDL_KEYDOWN && typingCode) {
+      else if (ev.type == SDL_KEYDOWN && typing != Typing::None) {
         SDL_Scancode sc = ev.key.keysym.scancode;
-        if (sc == SDL_SCANCODE_ESCAPE || sc == SDL_SCANCODE_F9) { typingCode = false; SDL_StopTextInput(); }
-        else if (sc == SDL_SCANCODE_BACKSPACE && !code.empty()) code.pop_back();
+        if (sc == SDL_SCANCODE_ESCAPE) { typing = Typing::None; SDL_StopTextInput(); }
+        else if (sc == SDL_SCANCODE_BACKSPACE && !typed.empty()) typed.pop_back();
         else if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER) {
-          if (code.empty()) {   // pas de code : on en invente un à donner à l'autre joueur
-            std::mt19937 rng(unsigned(std::chrono::steady_clock::now().time_since_epoch().count()));
-            code = std::to_string(1000 + rng() % 9000);
-          }
-          typingCode = false; SDL_StopTextInput();
-          net.joinRelay(o.relay, code);
+          if (typing == Typing::Code) {
+            if (typed.empty()) {   // pas de code : on en invente un à donner à l'autre joueur
+              std::mt19937 rng(unsigned(std::chrono::steady_clock::now().time_since_epoch().count()));
+              typed = std::to_string(1000 + rng() % 9000);
+            }
+            net.joinRelay(o.relay, typed);
+          } else if (!typed.empty()) net.joinDirect(typed);
+          typing = Typing::None; SDL_StopTextInput(); menuSel = 0;
+        }
+      }
+      else if (ev.type == SDL_KEYDOWN && menuOpen) {   // menu « Computer Link »
+        SDL_Scancode sc = ev.key.keysym.scancode;
+        auto items = menuItems();
+        int n = int(items.size());
+        if (sc == SDL_SCANCODE_UP) menuSel = (menuSel + n - 1) % n;
+        else if (sc == SDL_SCANCODE_DOWN) menuSel = (menuSel + 1) % n;
+        else if (sc == SDL_SCANCODE_ESCAPE || sc == SDL_SCANCODE_F10) cancelLink();
+        else if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER || sc == SDL_SCANCODE_SPACE)
+          chooseItem(items[size_t(std::min(menuSel, n - 1))]);
+        else if (sc == SDL_SCANCODE_F12) running = false;
+        else if (sc == SDL_SCANCODE_F11 || sc == SDL_SCANCODE_F4) {
+          bool fs = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP;
+          SDL_SetWindowFullscreen(win, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
         }
       }
       else if (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP) {
         bool down = ev.type == SDL_KEYDOWN;
         SDL_Scancode sc = ev.key.keysym.scancode;
         keys[sc] = down;
-        if (down && !ev.key.repeat) {   // multijoueur
-          if (sc == SDL_SCANCODE_F7) net.hostLan();
-          else if (sc == SDL_SCANCODE_F8) net.joinLan();
-          else if (sc == SDL_SCANCODE_F9) { typingCode = true; code.clear(); SDL_StartTextInput(); }
-          else if (sc == SDL_SCANCODE_F10) net.close("déconnexion");
-        }
+        if (down && !ev.key.repeat && sc == SDL_SCANCODE_F10) net.close("déconnexion");   // multijoueur : couper
         if (down && !ev.key.repeat) {
           if (sc == SDL_SCANCODE_F12) running = false;
           else if (sc == SDL_SCANCODE_F3) {   // couper / rétablir le son
@@ -411,7 +499,7 @@ int main(int argc, char **argv) {
             wireNet();
           }
         }
-        if (int st = stScancode(sc)) m->setKey(st, down);
+        if (int st = stScancode(sc)) if (!menuOpen || !down) m->setKey(st, down);
       }
     }
     Joystick j;
@@ -433,7 +521,15 @@ int main(int argc, char **argv) {
                 SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 8000;
       j.fire |= SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A) || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_X);
     }
-    if (typingCode) j = Joystick();
+    if (menuOpen && typing == Typing::None) {   // manette dans le menu « Computer Link »
+      auto items = menuItems();
+      int n = int(items.size());
+      if (j.up && !prevUp) menuSel = (menuSel + n - 1) % n;
+      if (j.down && !prevDown) menuSel = (menuSel + 1) % n;
+      if (j.fire && !prevFire && pad) chooseItem(items[size_t(std::min(menuSel, n - 1))]);
+    }
+    prevUp = j.up; prevDown = j.down; prevFire = j.fire;
+    if (menuOpen || typing != Typing::None) j = Joystick();
     if (net.active()) {
       if (j.fire) fireUntil = tNow + 0.35;
       j.fire = j.fire || tNow < fireUntil;
@@ -460,8 +556,7 @@ int main(int argc, char **argv) {
       static double statusSince = 0;
       std::string st = net.status();
       if (st != lastStatus) { lastStatus = st; statusSince = tNow; }
-      if (typingCode)
-        bannerMsg = "Code de salle : " + code + "_  (Entrée = valider, vide = code au hasard, Échap = annuler)";
+      if (menuOpen) bannerMsg.clear();   // le menu affiche lui-même l'état
       else if (!st.empty() && (net.state() != NetLink::State::Connected || tNow - statusSince < 6))
         bannerMsg = st + (net.state() == NetLink::State::Failed ? "   (F10 : effacer)" : "");
     }
@@ -482,6 +577,60 @@ int main(int argc, char **argv) {
       SDL_Rect r{(logicalW - rw) / 2, 0, rw, rh};
       SDL_RenderCopy(ren, btex, nullptr, &r);
     };
+    // menu « Computer Link », dessiné par-dessus le jeu (même allure que les menus d'origine)
+    auto drawMenu = [&](int logicalW, int logicalH) {
+      if (!menuOpen) return;
+      static std::map<std::string, std::tuple<SDL_Texture *, int, int>> cache;
+      if (cache.size() > 80) { for (auto &kv : cache) SDL_DestroyTexture(std::get<0>(kv.second)); cache.clear(); }
+      int scale = std::max(1, logicalW / 400);
+      struct Line { std::string text; uint32_t fg, bg; };
+      std::vector<Line> lines;
+      lines.push_back({"COMPUTER LINK - CHOISISSEZ L'ADVERSAIRE", 0xffffff00u, 0xe0202020u});
+      std::string st = net.status();
+      if (net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting)
+        st = net.peers().empty() ? "Recherche de joueurs sur le réseau local..." : "Joueurs trouvés sur le réseau local :";
+      lines.push_back({st, 0xffffffffu, 0xe0202020u});
+      auto items = menuItems();
+      if (menuSel >= int(items.size())) menuSel = int(items.size()) - 1;
+      for (size_t k = 0; k < items.size(); k++) {
+        std::string lab = items[k].label;
+        if (typing != Typing::None && int(k) == menuSel)
+          lab = (typing == Typing::Code ? "Code de salle : " : "Adresse : ") + typed + "_";
+        bool sel = int(k) == menuSel;
+        lines.push_back({lab, sel ? 0xff000000u : 0xff202020u, sel ? 0xffff9a00u : 0xffb6b6b6u});
+      }
+      lines.push_back({typing == Typing::Code ? "Entrée : valider (vide = code au hasard)"
+                       : typing == Typing::Ip ? "Entrée : valider     Échap : retour"
+                                              : "Flèches + Entrée : choisir  Échap : annuler", 0xffc0c0c0u, 0xe0202020u});
+      int lineH = 15 * scale, total = int(lines.size()) * lineH;
+      int y = std::max(0, (logicalH - total) / 2);
+      {   // panneau opaque gris (couleur des menus d'origine) qui masque le menu du jeu en dessous
+        int pw = std::min(logicalW, (44 * 6 + 6) * scale + 16 * scale), ph = total + 12 * scale;
+        SDL_Rect pr{(logicalW - pw) / 2, std::max(0, y - 6 * scale), pw, ph};
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+        SDL_SetRenderDrawColor(ren, 0x48, 0x48, 0x48, 255);
+        SDL_RenderFillRect(ren, &pr);
+        SDL_SetRenderDrawColor(ren, 0x24, 0x24, 0x24, 255);
+        SDL_RenderDrawRect(ren, &pr);
+      }
+      for (auto &ln : lines) {
+        std::string key = ln.text + "|" + std::to_string(ln.fg) + "|" + std::to_string(ln.bg) + "|" + std::to_string(scale);
+        auto it = cache.find(key);
+        if (it == cache.end()) {
+          int bw, bh;
+          auto img = renderBanner(ln.text, scale, bw, bh, ln.fg, ln.bg, 44);
+          SDL_Texture *t = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, bw, bh);
+          SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
+          SDL_UpdateTexture(t, nullptr, img.data(), bw * 4);
+          it = cache.emplace(key, std::make_tuple(t, bw, bh)).first;
+        }
+        auto [t, bw, bh] = it->second;
+        int rw = std::min(bw, logicalW), rh = bw > logicalW ? bh * logicalW / bw : bh;
+        SDL_Rect r{(logicalW - rw) / 2, y, rw, rh};
+        SDL_RenderCopy(ren, t, nullptr, &r);
+        y += lineH;
+      }
+    };
     {   // titre de la fenêtre : état du réseau (mode d'origine ; en HD, avec le compteur d'images)
       static double lastTitle = 0;
       if (!hd && tNow - lastTitle > 0.5) {
@@ -501,6 +650,7 @@ int main(int argc, char **argv) {
       SDL_RenderClear(ren);
       SDL_RenderCopy(ren, texHd, nullptr, nullptr);
       drawBanner(o.hdW);
+      drawMenu(o.hdW, o.hdH);
       SDL_RenderPresent(ren);
       // compteur d'images par seconde dans le titre
       fpsN++;
@@ -520,6 +670,15 @@ int main(int argc, char **argv) {
       SDL_RenderClear(ren);
       SDL_RenderCopy(ren, tex, nullptr, nullptr);
       drawBanner(320);
+      drawMenu(320, 200);
+      for (size_t k = 0; k < autoShots.size();)
+        if (m->frames() >= autoShots[k].first) {
+          int w, h; SDL_GetRendererOutputSize(ren, &w, &h);
+          SDL_Surface *sf = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ARGB8888);
+          SDL_RenderReadPixels(ren, nullptr, SDL_PIXELFORMAT_ARGB8888, sf->pixels, sf->pitch);
+          SDL_SaveBMP(sf, autoShots[k].second.c_str()); SDL_FreeSurface(sf);
+          autoShots.erase(autoShots.begin() + long(k));
+        } else k++;
       SDL_RenderPresent(ren);
       if (!n) SDL_Delay(1);
     }
