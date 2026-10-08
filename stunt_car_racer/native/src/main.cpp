@@ -461,16 +461,15 @@ int main(int argc, char **argv) {
       std::string st = net.status();
       if (st != lastStatus) { lastStatus = st; statusSince = tNow; }
       if (typingCode)
-        bannerMsg = "Code de salle : " + code + "_   (Entrée : valider ; vide = nouveau code ; Échap : annuler)";
+        bannerMsg = "Code de salle : " + code + "_  (Entrée = valider, vide = code au hasard, Échap = annuler)";
       else if (!st.empty() && (net.state() != NetLink::State::Connected || tNow - statusSince < 6))
         bannerMsg = st + (net.state() == NetLink::State::Failed ? "   (F10 : effacer)" : "");
-      else if (o.relay.empty() && false) bannerMsg.clear();
     }
     auto drawBanner = [&](int logicalW) {
       static std::string cachedMsg; static int cachedScale = 0, bw = 0, bh = 0;
       static SDL_Texture *btex = nullptr;
       if (bannerMsg.empty()) return;
-      int scale = std::max(1, logicalW / 480);
+      int scale = std::max(1, logicalW / 640);
       if (bannerMsg != cachedMsg || scale != cachedScale || !btex) {
         if (btex) SDL_DestroyTexture(btex);
         auto img = renderBanner(bannerMsg, scale, bw, bh);
@@ -479,7 +478,8 @@ int main(int argc, char **argv) {
         SDL_UpdateTexture(btex, nullptr, img.data(), bw * 4);
         cachedMsg = bannerMsg; cachedScale = scale;
       }
-      SDL_Rect r{std::max(0, (logicalW - bw) / 2), 0, std::min(bw, logicalW), bh};
+      int rw = std::min(bw, logicalW), rh = bw > logicalW ? bh * logicalW / bw : bh;   // réduit sans déformer
+      SDL_Rect r{(logicalW - rw) / 2, 0, rw, rh};
       SDL_RenderCopy(ren, btex, nullptr, &r);
     };
     {   // titre de la fenêtre : état du réseau (mode d'origine ; en HD, avec le compteur d'images)
