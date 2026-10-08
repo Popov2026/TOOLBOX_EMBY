@@ -237,3 +237,33 @@ code et bloquerait le jeu).
   béton avec traces de pneus, panneaux des flancs. La carrosserie a un dégradé, un reflet et des
   joints, et les roues sont rondes, avec sculptures et jantes. L'ombrage est différé (un seul calcul
   par pixel visible) et les lignes sont réparties en entrelacé entre les cœurs.
+
+## 10. Mode « Computer Link » (deux machines reliées par câble série)
+
+* **Menu** : au démarrage, « 3. Computer Link » (`$4BE28`, choix > 1 → `$453B6`).
+* **Accès au câble** : uniquement par le BIOS, sur le périphérique 1 (AUX). `Bconstat` (trap #13
+  fonction 1) en `$4476E`, `Bconin` (2) en `$447A0`, `Bconout` (3) en `$44734` ; `$4475C` émet un
+  mot. Aucun accès direct au MFP. L'émulateur natif fournit ces appels (`Machine::serialOut` /
+  `serialPush`).
+* **Poignée de main** (`$453B6`) : si un octet `$80` attend déjà, la machine devient **esclave**
+  (`$4537A = $40`) et répond `$40` six fois ; sinon elle devient **maître** (`$4537A = $80`) et émet
+  `$80` jusqu'à recevoir `$40`. Échap abandonne (« Link abandoned »).
+* **Paquets** (`$4568A` émission, `$456DC` réception) : en-tête `$16 $D9 $A8`, données, somme 16 bits
+  (`$4537C` / `$4537E`), accusé `$33` (bon) ou `$99` (erreur), avec reprises. Des boucles de
+  temporisation (`$448BA` ≈ 7 ms, `$448DE` ≈ 0,7 ms) espacent les octets.
+* **Déroulement** : le maître saisit les pilotes (au moins deux : les deux joueurs) puis mène les
+  menus, que l'esclave reproduit ; ligue (`$4557C`, bloc de `$C0` octets) ; en course, chaque
+  machine pilote sa voiture et reçoit l'autre comme adversaire (`$10907`/`$108F6`/`$108F7` d'une
+  machine = `$10906`/`$108F4`/`$108F5` de l'autre, vérifié). Le joystick passe aussi par le lien
+  (paquet `$E3`, `$4524E`).
+* **Synchronisation** : les deux jeux avancent cycle de jeu par cycle de jeu (mêmes compteurs de
+  physique des deux côtés). Avec deux machines émulées reliées par un câble virtuel à latence
+  réglable, environ 280 octets/s dans chaque sens :
+
+  | Aller-retour | 0 ms | 40 ms | 80 ms | 120 ms | 160 ms | 240 ms | 400 ms |
+  |---|---|---|---|---|---|---|---|
+  | Cycles de jeu par seconde | 8,10 | 7,96 | 7,07 | 6,18 | 5,52 | 4,52 | 3,31 |
+
+  Au-delà d'environ 50 ms d'aller-retour, le jeu ralentit (il attend l'autre machine) mais ne se
+  désynchronise pas. Les menus lisent le joystick à travers le lien : un appui trop bref sur
+  « feu » peut être manqué quand la latence est forte.

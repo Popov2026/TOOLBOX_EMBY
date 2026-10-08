@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <bitset>
 #include <string>
+#include <deque>
+#include <functional>
 #include <vector>
 
 #include "scrdata.hpp"
@@ -37,6 +39,18 @@ class Machine {
   void startPractice(int track);
 
   void runFrame();                          // une trame vidéo (1/50 s)
+
+  // --- port série de l'Atari (câble « Computer Link » entre deux machines) : le jeu y accède par
+  // le BIOS (Bconstat / Bconin / Bconout sur le périphérique 1). serialOut reçoit chaque octet émis ;
+  // serialPush fournit les octets reçus de l'autre machine.
+  std::function<void(uint8_t)> serialOut;
+  void serialPush(uint8_t v) { serialIn_.push_back(v); }
+  size_t serialPending() const { return serialIn_.size(); }
+  uint64_t serialSent() const { return serialSent_; }
+  uint64_t serialReceived() const { return serialRecv_; }
+  // plusieurs machines dans un même programme : le processeur émulé est global, on sauvegarde et
+  // restaure son état (appelé automatiquement par runFrame et les démarrages)
+  void activate();
   // son : échantillons de la dernière trame (mono, 16 bits) à la fréquence choisie (0 = sans son)
   void setAudioRate(int hz) { audioRate_ = hz; }
   const std::vector<int16_t> &frameAudio() const { return audio_; }
@@ -97,6 +111,10 @@ class Machine {
   static constexpr uint32_t RAMSIZE = 0x100000;
 
  private:
+  std::deque<uint8_t> serialIn_;
+  uint64_t serialSent_ = 0, serialRecv_ = 0;
+  std::vector<uint8_t> cpuCtx_;
+  void hleBios(uint32_t sr, uint32_t pc, uint32_t args);
   void setupLowMem();
   void boot();
   void passChecksum();

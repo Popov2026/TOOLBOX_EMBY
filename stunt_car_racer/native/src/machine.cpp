@@ -41,6 +41,7 @@ static inline void markWrite(Machine *m, uint32_t a, uint32_t v, uint32_t pc, bo
 constexpr uint32_t A_JOYSTICK = 0x106a6, A_KEYS = 0x6f02c;
 constexpr uint32_t HLE = 0xffe00;                 // « ROM » : RTE en fin de RAM
 constexpr uint32_t HLE_GEMDOS = HLE + 0x10, HLE_XBIOS = HLE + 0x20, HLE_LINEA = HLE + 0x30, SENTINEL = HLE + 0x40;
+constexpr uint32_t HLE_BIOS = HLE + 0x50;   // trap #13
 constexpr uint32_t PARK = HLE + 0x70;               // bra.s * : instruction neutre pour s'arrêter
 constexpr uint32_t SCREEN = 0xf8000;
 constexpr uint32_t CYCLES_PER_FRAME = 160256;     // 8 MHz, 50 Hz PAL
@@ -240,11 +241,25 @@ Machine::Machine(const Bytes &file) {
   std::memcpy(ram + BASE, img.data(), img.size());
   // contrôle : noms des circuits à l'adresse attendue
   if (std::memcmp(ram + 0x13498, "LITTLE RAMP", 11) != 0) throw std::runtime_error("version du jeu non reconnue");
+  if (current && current != this) {   // une autre machine existe : on sauve l'état de son processeur
+    current->cpuCtx_.resize(m68k_context_size());
+    m68k_get_context(current->cpuCtx_.data());
+  }
   current = this;
   m68k_init();
   m68k_set_cpu_type(M68K_CPU_TYPE_68000);
   setupLowMem();
   m68k_pulse_reset();
+}
+
+void Machine::activate() {
+  if (current == this) return;
+  if (current) {
+    current->cpuCtx_.resize(m68k_context_size());
+    m68k_get_context(current->cpuCtx_.data());
+  }
+  if (!cpuCtx_.empty()) m68k_set_context(cpuCtx_.data());
+  current = this;
 }
 
 Machine::~Machine() {
@@ -259,7 +274,7 @@ void Machine::setupLowMem() {
   auto w32 = [&](uint32_t a, uint32_t v) { ram[a] = v >> 24; ram[a + 1] = v >> 16; ram[a + 2] = v >> 8; ram[a + 3] = v; };
   for (int v = 2; v < 256; v++) w32(v * 4, HLE);
   w32(0, 0x7000); w32(4, A_BOOT);
-  w32(33 * 4, HLE_GEMDOS); w32(46 * 4, HLE_XBIOS); w32(10 * 4, HLE_LINEA);
+  w32(33 * 4, HLE_GEMDOS); w32(45 * 4, HLE_BIOS); w32(46 * 4, HLE_XBIOS); w32(10 * 4, HLE_LINEA);
   w32(0x42e, RAMSIZE); w32(0x44e, SCREEN);
   ram[0x484] = 7;
 }
@@ -349,6 +364,32 @@ void Machine::hleGemdos(uint32_t sr, uint32_t pc, uint32_t args) {
   hleReturn(sr, pc, 0);
 }
 
+// BIOS : seul le port série (périphérique 1, câble « Computer Link ») est utilisé par le jeu
+void Machine::hleBios(uint32_t sr, uint32_t pc, uint32_t args) {
+  auto rw = [&](uint32_t a) { return (read8(a) << 8) | read8(a + 1); };
+  uint32_t fn = rw(args), dev = rw(args + 2), d0 = 0;
+  switch (fn) {
+    case 1:   // Bconstat : -1 si un octet attend
+      if (dev == 1) d0 = serialIn_.empty() ? 0 : 0xffffffffu;
+      break;
+    case 2:   // Bconin : attend un octet (on rejoue l'appel tant que rien n'est arrivé)
+      if (dev == 1) {
+        if (serialIn_.empty()) { setSR(sr); m68k_set_reg(M68K_REG_PC, pc - 2); return; }
+        d0 = serialIn_.front(); serialIn_.pop_front(); serialRecv_++;
+      }
+      break;
+    case 3:   // Bconout
+      if (dev == 1) { serialSent_++; if (serialOut) serialOut(uint8_t(rw(args + 4))); }
+      d0 = 0xffffffffu;
+      break;
+    case 8:   // Bcostat : toujours prêt à émettre
+      d0 = 0xffffffffu;
+      break;
+    default: break;
+  }
+  hleReturn(sr, pc, d0);
+}
+
 void Machine::hleXbios(uint32_t sr, uint32_t pc, uint32_t args) {
   auto rw = [&](uint32_t a) { return (read8(a) << 8) | read8(a + 1); };
   auto rl = [&](uint32_t a) { return (uint32_t(rw(a)) << 16) | rw(a + 2); };
@@ -401,15 +442,16 @@ void Machine::hook(uint32_t pc) {
   if (pc == A_PHYSICS) ticks_++;
   if (pc == A_RENDER) { std::memcpy(renderSnap_, ram + 0x10ac2, 18); inOpponent_ = false; }
   if (skipWaits_ && pc == A_WAITVBL) ram[A_VBLCOUNTER] = 0;
-  if (pc < HLE || pc >= HLE + 0x40) return;
+  if (pc < HLE || pc >= HLE + 0x60) return;
   uint32_t sp = m68k_get_reg(nullptr, M68K_REG_A7);
-  if (pc != HLE_GEMDOS && pc != HLE_XBIOS && pc != HLE_LINEA) return;   // simple RTE
+  if (pc != HLE_GEMDOS && pc != HLE_XBIOS && pc != HLE_LINEA && pc != HLE_BIOS) return;   // simple RTE
   uint32_t sr = (ram[sp] << 8) | ram[sp + 1];
   uint32_t rpc = (uint32_t(ram[sp + 2]) << 24) | (ram[sp + 3] << 16) | (ram[sp + 4] << 8) | ram[sp + 5];
   m68k_set_reg(M68K_REG_A7, sp + 6);
   uint32_t args = (sr & 0x2000) ? sp + 6 : m68k_get_reg(nullptr, M68K_REG_USP);
   if (pc == HLE_GEMDOS) hleGemdos(sr, rpc, args);
   else if (pc == HLE_XBIOS) hleXbios(sr, rpc, args);
+  else if (pc == HLE_BIOS) hleBios(sr, rpc, args);
   else { setSR(sr); m68k_set_reg(M68K_REG_PC, rpc + 2); }   // Line-A : ignoré
 }
 
@@ -433,6 +475,7 @@ void Machine::vblTick() {
 }
 
 void Machine::runFrame() {
+  activate();
   // écritures restées d'avant (démarrage) : appliquées en début de trame
   for (auto &w : ymWrites_) ym2149_.write(w.reg, w.val);
   ymWrites_.clear();
@@ -464,6 +507,7 @@ void Machine::renderAudio() {
 }
 
 void Machine::runUntil(uint32_t stopAt, uint64_t maxCycles) {
+  activate();
   stopAt_ = stopAt; reached_ = false;
   uint64_t total = 0;
   while (!reached_) {
@@ -490,6 +534,7 @@ void Machine::passChecksum() {
 }
 
 void Machine::coldStart() {
+  activate();
   m68k_set_reg(M68K_REG_PC, A_BOOT);
   m68k_set_reg(M68K_REG_A7, 0x7000);
   m68k_set_reg(M68K_REG_USP, 0x103da);
@@ -508,6 +553,7 @@ void Machine::boot() {
 }
 
 void Machine::startPractice(int track) {
+  activate();
   boot();
   skipWaits_ = true;
   ram[A_TRACKSEL] = uint8_t(track & 7);
