@@ -16,12 +16,22 @@ Toutes les modifications UI issues d'un thread passent par _ui_queue,
 videe une fois par frame dans la boucle principale.
 La bascule FR/EN du bandeau commun retraduit les cinq onglets.
 
+Version 2026-10 :
+  - Doublons : suppression sans faux timeout (attente 180 s puis
+    verification de la disparition de l'item cote Emby).
+  - Base SQLite emby_toolbox_web.db : sauvegarde des ages/notes OMDB-TMDB
+    (explorateur de genres) et des recherches TMDB (RefMatch).
+  - Doublons : "Ouvrir tout" demande un timecode de depart
+    (MPC-HC/MPC-BE, VLC, mpv, PotPlayer).
+
 Lignes de commande utiles :
     python emby_toolbox_dpg.pyw --mkv-selftest   tests du moteur de renommage
 """
 
+APP_VERSION = "2026.10.0"
+
 import dearpygui.dearpygui as dpg
-import threading, queue, json, os, sys, subprocess, time
+import threading, queue, json, os, sys, subprocess, time, socket
 import re, configparser, csv, difflib, base64, traceback, webbrowser
 import sqlite3, unicodedata, warnings
 from pathlib import Path
@@ -47,7 +57,13 @@ except Exception:
 # =====================================================================
 #  Chiffrement partage (clef unique : emby_secret.key)
 # =====================================================================
-_SECRET_KEYFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+def _exe_or_script_dir():
+    """Dossier de l'exe (version compilee PyInstaller) ou du script."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+_SECRET_KEYFILE = os.path.join(_exe_or_script_dir(),
                                "emby_secret.key")
 
 try:
@@ -194,7 +210,7 @@ _shared_cache = None
 
 def _shared_defaults():
     return {"url": "http://localhost:8096", "api_key": "", "user_id": "",
-            "nas_prefix": "/volume1", "nas_unc": r"\\\\192.168.1.x",
+            "nas_prefix": "/volume1", "nas_unc": "",
             "player": "", "omdb_key": "", "tmdb_key": "", "provider": "tmdb",
             "lang": "FR"}
 
@@ -238,7 +254,7 @@ def save_shared_creds(**updates):
         pass
     return d
 
-_TRACE_FILE = Path(__file__).with_name("emby_toolbox_trace.log")
+_TRACE_FILE = APP_DIR / "emby_toolbox_trace.log"
 
 
 def _trace(msg):
@@ -280,7 +296,7 @@ if not CONFIG_FILE.exists() and _sib.exists():
 def load_config():
     cfg = configparser.ConfigParser()
     cfg["emby"] = {"url":"http://localhost:8096","api_key":"","user_id":"",
-                   "nas_prefix":"/volume1","nas_unc":r"\\192.168.1.x","player":""}
+                   "nas_prefix":"/volume1","nas_unc":"","player":""}
     if CONFIG_FILE.exists():
         cfg.read(CONFIG_FILE, encoding="utf-8")
     if cfg.has_section("emby"):
@@ -530,12 +546,13 @@ def fetch_genres_from_server(base, key, uid, movie_lib_ids=None):
     return sorted(genres, key=str.casefold)
 
 
-def fetch_by_genres(base, key, uid, genres, parent_ids, cb):
+def fetch_by_genres(base, key, uid, genres, parent_ids, cb, names=None):
     """
     Récupère les films correspondant à AU MOINS UN des genres listés.
     genres    : liste de chaînes (valeurs API Emby, ex. ["Animation","Horror"])
     parent_ids: liste d'IDs de médiathèques (None = toutes)
-    cb        : callback(fetched, total, page)
+    cb        : callback(fetched, total, page, scope="")
+    names     : {id: nom} des médiathèques, pour afficher le nom en cours
     """
     base_params = {
         "Recursive":         "true",
@@ -550,9 +567,10 @@ def fetch_by_genres(base, key, uid, genres, parent_ids, cb):
     scopes = parent_ids if parent_ids else [None]
     all_items, seen_ids = [], set()
 
-    for pid in scopes:
+    for n_scope, pid in enumerate(scopes, 1):
         params = dict(base_params); params["StartIndex"] = 0
         if pid: params["ParentId"] = pid
+        scope = _scope_label(pid, n_scope, len(scopes), names)
         page = 0
         while True:
             data  = emby_get(base, key, "/Items", dict(params))
@@ -562,11 +580,21 @@ def fetch_by_genres(base, key, uid, genres, parent_ids, cb):
                     seen_ids.add(it.get("Id")); all_items.append(it)
             total = data.get("TotalRecordCount", 0)
             page += 1
-            cb(len(all_items), len(all_items) + max(0, total - len(items)), page)
+            cb(len(all_items), len(all_items) + max(0, total - len(items)), page,
+               scope=scope)
             if len(items) < params["Limit"] or not items: break
             params["StartIndex"] += len(items)
 
     return all_items
+
+
+def _scope_label(pid, n, total, names):
+    """'Médiathèque 2/3 : Films 4K' (ou '' pour un scan global)."""
+    if not pid:
+        return ""
+    nm = (names or {}).get(pid) or pid
+    return (gx(f"Médiathèque {n}/{total} : {nm}", f"Library {n}/{total}: {nm}")
+            if total > 1 else gx(f"Médiathèque : {nm}", f"Library: {nm}"))
 
 
 # ══════════════════════════════════════════════════════════════
@@ -864,8 +892,8 @@ def render_results():
                         callback=lambda s,a,u: do_apply_web_age(u[0],u[1],u[2]))
                     with dpg.tooltip(dpg.last_item()):
                         dpg.add_text(
-                            gx(f"Appliquer l'âge web ({_web_age or '-'}) directement\nsur Emby sans confirmation.",
-                               f"Apply the web age ({_web_age or '-'}) directly\nto Emby without confirmation."), wrap=260)
+                            gx(f"Appliquer l'âge web ({_web_age or '-'}) sur Emby\n(récapitulatif à valider avant écriture).",
+                               f"Apply the web age ({_web_age or '-'}) to Emby\n(summary to confirm before writing)."), wrap=260)
 
 
 def _schedule_render():
@@ -1046,16 +1074,18 @@ def start_scan():
                         f"Searching [{genres_label}] in {scope_msg}..."), 0.10)
 
             t0 = time.time()
-            def on_page(fetched, total, page):
+            def on_page(fetched, total, page, scope=""):
                 pct = 0.10 + 0.80 * (fetched / max(total, 1))
                 el  = time.time() - t0; rate = fetched / el if el > 0 else 0
                 eta = (total - fetched) / rate if rate > 0 else 0
-                msg = (f"Page {page} - {fetched} films ({rate:.0f}/s)"
+                msg = ((scope + "  -  " if scope else "")
+                       + f"Page {page} - {fetched} films ({rate:.0f}/s)"
                        + (f" ~{eta:.0f}s" if eta > 2 else ""))
                 set_step(msg, pct)
 
+            names = {l.get("id"): l.get("name") for l in (G.get("libraries") or [])}
             movies = fetch_by_genres(p["url"], p["key"], p["uid"],
-                                     genres_api, parent_ids, on_page)
+                                     genres_api, parent_ids, on_page, names)
 
             set_step(gx(f"{len(movies)} films - construction de la liste...",
                         f"{len(movies)} movies - building the list..."), 0.92)
@@ -1087,13 +1117,21 @@ def start_scan():
             # Tri alphabétique par défaut
             results.sort(key=lambda r: r["title"].lower())
 
-            def finish(res=results, gl=genres_label, n=len(movies)):
+            # Age web deja connu (base SQLite) : affichage immediat, sans reseau
+            try:
+                n_db = _prefill_web_from_db(results, G.get("api_provider", "tmdb"))
+            except Exception:
+                n_db = 0
+
+            def finish(res=results, gl=genres_label, n=len(movies), n_db=n_db):
                 G["results"] = res
                 dpg.set_value("scan_pb", 1.0)
                 dpg.configure_item("scan_popup", show=False)
                 dpg.configure_item("btn_scan", enabled=True, label="Rechercher")
-                _set_status2(f"{n} film(s) trouvé(s) pour : {gl}",
-                             f"{n} movie(s) found for: {gl}")
+                _set_status2(f"{n} film(s) trouvé(s) pour : {gl}"
+                             + (f"  -  âge web en base : {n_db}" if n_db else ""),
+                             f"{n} movie(s) found for: {gl}"
+                             + (f"  -  web age from DB: {n_db}" if n_db else ""))
                 _rebuild_age_filter()
                 render_results()
 
@@ -1212,7 +1250,48 @@ def _browse_player():
 
 
 def do_apply_web_age(item_id, title, conn):
-    """Applique directement l'age web (OMDB/TMDB) sur Emby, sans modal."""
+    """Recapitulatif (age actuel -> age web) a valider avant ecriture sur Emby."""
+    global _mid
+    omdb = G["omdb_cache"].get(item_id)
+    if not isinstance(omdb, dict) or not (omdb.get("rated") or "").strip() or \
+            omdb.get("rated", "").upper() in ("N/A", "NOT RATED", "UNRATED", "NR", "?"):
+        return _apply_web_age_now(item_id, title, conn)   # affiche l'erreur adaptee
+    row = next((r for r in G["results"] if r.get("item_id") == item_id), {})
+    cur_raw = row.get("rating", "") or ""
+    _mid += 1
+    tag = f"_awa{_mid}"
+    with dpg.window(label=gx("Récapitulatif - appliquer l'âge web", "Summary - apply web age"),
+                    tag=tag, modal=True, width=560, autosize=True, pos=[220, 200],
+                    no_resize=True):
+        dpg.add_text(f"{title}" + (f"  ({row.get('year')})" if row.get("year") else ""),
+                     color=(255, 200, 90), wrap=530)
+        with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True,
+                       borders_innerV=True, borders_outerV=True):
+            dpg.add_table_column(label="")
+            dpg.add_table_column(label=gx("Âge", "Age"))
+            dpg.add_table_column(label=gx("Classification", "Rating"))
+            with dpg.table_row():
+                dpg.add_text(gx("Actuel (Emby)", "Current (Emby)"), color=(136, 136, 170))
+                dpg.add_text(_rated_to_age(cur_raw) if cur_raw else "-")
+                dpg.add_text(cur_raw or gx("(vide)", "(empty)"))
+            with dpg.table_row():
+                dpg.add_text(gx("Nouveau (web)", "New (web)"), color=(136, 136, 170))
+                dpg.add_text(omdb.get("age", "-"), color=(100, 255, 160))
+                dpg.add_text(omdb.get("rated", ""), color=(100, 255, 160))
+        dpg.add_text(gx(f"Source : {omdb.get('source', '?')}   ·   note : {omdb.get('note', '-')}",
+                        f"Source: {omdb.get('source', '?')}   ·   score: {omdb.get('note', '-')}"),
+                     color=(136, 136, 170))
+        dpg.add_separator()
+        with dpg.group(horizontal=True):
+            dpg.add_button(label=gx("Valider et appliquer", "Confirm and apply"), width=200,
+                           callback=lambda: (dpg.delete_item(tag),
+                                             _apply_web_age_now(item_id, title, conn)))
+            dpg.add_button(label=gx("Annuler", "Cancel"), width=120,
+                           callback=lambda: dpg.delete_item(tag))
+
+
+def _apply_web_age_now(item_id, title, conn):
+    """Applique l'age web (OMDB/TMDB) sur Emby (apres validation du recap)."""
     omdb = G["omdb_cache"].get(item_id)
     if not omdb or not isinstance(omdb, dict):
         ui(lambda: modal_err(gx("Âge web indisponible","Web age unavailable"),
@@ -1225,7 +1304,6 @@ def do_apply_web_age(item_id, title, conn):
             gx(f"Pas de classification disponible pour ce film.\nValeur OMDB/TMDB : {age!r}",
                f"No classification available for this movie.\nOMDB/TMDB value: {age!r}")))
         return
-    # Appliquer directement sans modal de confirmation
     _log(f"=== apply_web_age : iid={item_id} titre={title!r} age={age!r} ===")
     def thread(iid=item_id, nr=age, c=conn, ttl=title):
         try:
@@ -1439,35 +1517,85 @@ def do_apply_all_higher():
                       "No movie has a web age higher than the recorded one.\n"
                       "(Remember to run Enrich first.)"))
         return
-    # --- prévisualisation : cocher / décocher avant application ---
+    # --- récapitulatif : cocher / décocher avant application ---
     _mid += 1
     tag = f"_prev{_mid}"
-    def _confirm(s, a, u):
+    rows_by_id = {r.get("item_id"): r for r in G["results"]}
+
+    def _count():
+        n = sum(1 for i in range(len(targets)) if dpg.get_value(f"{tag}_c{i}"))
+        dpg.configure_item(f"{tag}_ok", label=gx(f"Appliquer la sélection ({n})",
+                                                 f"Apply selection ({n})"),
+                           enabled=n > 0)
+        return n
+
+    def _set_all(v):
+        for i in range(len(targets)):
+            dpg.set_value(f"{tag}_c{i}", v)
+        _count()
+
+    def _confirm():
         sel = [(t2[0], t2[1], t2[2]) for i, t2 in enumerate(targets)
-               if dpg.get_value(f"{u}_c{i}")]
-        dpg.delete_item(u)
+               if dpg.get_value(f"{tag}_c{i}")]
+        dpg.delete_item(tag)
         if sel:
             _run_age_updates(sel, record_undo=True,
                              lbl_fr="Application des âges",
                              lbl_en="Applying ages")
-    with dpg.window(label=gx("Prévisualisation - âges à appliquer",
-                             "Preview - ages to apply"),
-                    tag=tag, modal=True, width=640, height=520,
-                    pos=[150, 110], no_resize=True):
-        dpg.add_text(gx(f"{len(targets)} modification(s) proposée(s) - décochez pour exclure :",
-                        f"{len(targets)} proposed change(s) - untick to exclude:"),
-                     color=(255, 200, 80), wrap=610)
-        with dpg.child_window(height=380, border=True):
-            for i, (iid, title, raw, cur, web) in enumerate(targets):
-                dpg.add_checkbox(label=f"{title[:52]}   {cur} -> {web}  ({raw})",
-                                 tag=f"{tag}_c{i}", default_value=True)
-        dpg.add_spacer(height=6)
+
+    with dpg.window(label=gx("Récapitulatif - âges à appliquer sur Emby",
+                             "Summary - ages to apply to Emby"),
+                    tag=tag, modal=True, width=900, height=600,
+                    pos=[100, 80]):
+        dpg.add_text(gx(f"{len(targets)} film(s) ont un âge web SUPÉRIEUR à l'âge enregistré dans Emby.",
+                        f"{len(targets)} movie(s) have a web age HIGHER than the one recorded in Emby."),
+                     color=(255, 200, 80), wrap=870)
+        dpg.add_text(gx("Rien n'est encore modifié. Décochez les films à exclure, puis « Appliquer la sélection ». "
+                        "« Annuler âges » permettra de revenir en arrière.",
+                        "Nothing has been changed yet. Untick the movies to exclude, then \"Apply selection\". "
+                        "\"Undo ages\" will let you roll back."),
+                     color=(170, 170, 170), wrap=870)
         with dpg.group(horizontal=True):
-            dpg.add_button(label=gx("Appliquer", "Apply"), width=180,
-                           user_data=tag, callback=_confirm)
+            dpg.add_button(label=gx("Tout cocher", "Tick all"), width=120,
+                           callback=lambda: _set_all(True))
+            dpg.add_button(label=gx("Tout décocher", "Untick all"), width=120,
+                           callback=lambda: _set_all(False))
+        with dpg.child_window(height=-40, border=True):
+            with dpg.table(header_row=True, row_background=True, resizable=True,
+                           borders_innerH=True, policy=dpg.mvTable_SizingStretchProp):
+                dpg.add_table_column(label="", width_fixed=True, init_width_or_weight=28)
+                dpg.add_table_column(label=gx("Film", "Movie"), init_width_or_weight=0.55)
+                dpg.add_table_column(label=gx("Actuel", "Current"), width_fixed=True,
+                                     init_width_or_weight=110)
+                dpg.add_table_column(label=gx("Nouveau", "New"), width_fixed=True,
+                                     init_width_or_weight=110)
+                dpg.add_table_column(label=gx("Classification web", "Web rating"),
+                                     width_fixed=True, init_width_or_weight=120)
+                dpg.add_table_column(label="Source", width_fixed=True,
+                                     init_width_or_weight=60)
+                for i, (iid, title, raw, cur, web) in enumerate(targets):
+                    r = rows_by_id.get(iid, {})
+                    src = (G["omdb_cache"].get(iid) or {}).get("source", "?")
+                    with dpg.table_row():
+                        dpg.add_checkbox(tag=f"{tag}_c{i}", default_value=True,
+                                         callback=lambda: _count())
+                        dpg.add_text(f"{title}" + (f" ({r.get('year')})" if r.get("year") else ""))
+                        dpg.add_text(f"{cur}" + (f"  [{r.get('rating')}]" if r.get("rating") else ""),
+                                     color=(200, 200, 200))
+                        dpg.add_text(f"-> {web}", color=(100, 255, 160))
+                        dpg.add_text(raw, color=(100, 255, 160))
+                        dpg.add_text(src, color=(136, 136, 170))
+        with dpg.group(horizontal=True):
+            b = dpg.add_button(tag=f"{tag}_ok", width=220,
+                               label=gx(f"Appliquer la sélection ({len(targets)})",
+                                        f"Apply selection ({len(targets)})"),
+                               callback=_confirm)
+            try:
+                dpg.bind_item_theme(b, "th_btn_ok")
+            except Exception:
+                pass
             dpg.add_button(label=gx("Annuler", "Cancel"), width=120,
-                           user_data=tag,
-                           callback=lambda s, a, u: dpg.delete_item(u))
+                           callback=lambda: dpg.delete_item(tag))
 
 def _fetch_one_omdb(imdb_id, key):
     """Retourne un dict enrichi ou leve une exception."""
@@ -1556,59 +1684,196 @@ def _set_webcell(iid, state):
 
 
 # ------------------------------------------------------------------
-#  Cache disque des enrichissements OMDB/TMDB (economise le quota API)
+#  Base SQLite de sauvegarde des recherches OMDB/TMDB
+#  (economise le quota API et survit aux redemarrages / plantages)
+#
+#  - table web_meta   : age / note par identifiant (omdb=tt..., tmdb=123)
+#  - table tmdb_query : resultats bruts des recherches TMDB (RefMatch)
+#  Chaque resultat est ecrit IMMEDIATEMENT (plus de perte si on ferme
+#  l'appli en cours d'enrichissement). L'ancien cache JSON est importe
+#  automatiquement au premier lancement.
 # ------------------------------------------------------------------
 import json as _ejson
-ENRICH_CACHE_FILE = APP_DIR / "emby_enrich_cache.json"
-ENRICH_CACHE_DAYS = 30
+ENRICH_CACHE_FILE = APP_DIR / "emby_enrich_cache.json"     # ancien format (import)
+WEB_DB_FILE       = APP_DIR / "emby_toolbox_web.db"
+ENRICH_CACHE_DAYS    = 365   # resultat AVEC classification d'age
+ENRICH_CACHE_DAYS_NC = 30    # resultat SANS classification (on retentera)
+TMDB_QUERY_DAYS      = 30    # recherches TMDB brutes (RefMatch)
 _CACHE_HITS = 0
+_WEB_DB_LOCK = threading.Lock()
+_WEB_DB = None
+G_FORCE_REFRESH = {"on": False}   # case "Forcer" de l'explorateur de genres
 
-def _load_enrich_cache():
+
+def _web_db():
+    """Connexion unique (partagee entre threads, protegee par _WEB_DB_LOCK)."""
+    global _WEB_DB
+    if _WEB_DB is not None:
+        return _WEB_DB
+    c = sqlite3.connect(str(WEB_DB_FILE), timeout=10, check_same_thread=False)
+    c.execute("CREATE TABLE IF NOT EXISTS web_meta ("
+              " src TEXT NOT NULL, fid TEXT NOT NULL,"
+              " rated TEXT, age TEXT, note TEXT, source TEXT,"
+              " title TEXT, ts REAL NOT NULL,"
+              " PRIMARY KEY (src, fid))")
+    c.execute("CREATE TABLE IF NOT EXISTS tmdb_query ("
+              " qkey TEXT PRIMARY KEY, payload TEXT NOT NULL, ts REAL NOT NULL)")
+    c.commit()
+    _WEB_DB = c
+    _import_json_cache(c)
+    return c
+
+
+def _import_json_cache(c):
+    """Import unique de l'ancien emby_enrich_cache.json dans la base."""
     try:
+        if not ENRICH_CACHE_FILE.exists():
+            return
+        if c.execute("SELECT COUNT(*) FROM web_meta").fetchone()[0]:
+            return
         d = _ejson.loads(ENRICH_CACHE_FILE.read_text(encoding="utf-8"))
-        if isinstance(d, dict):
-            return {"omdb": d.get("omdb", {}) or {}, "tmdb": d.get("tmdb", {}) or {}}
+        rows = []
+        for src in ("omdb", "tmdb"):
+            for fid, e in (d.get(src) or {}).items():
+                if isinstance(e, dict):
+                    rows.append((src, str(fid), e.get("rated", ""), e.get("age", ""),
+                                 e.get("note", ""), e.get("source", ""), "",
+                                 float(e.get("ts", 0) or 0)))
+        if rows:
+            c.executemany("INSERT OR IGNORE INTO web_meta VALUES (?,?,?,?,?,?,?,?)", rows)
+            c.commit()
+        ENRICH_CACHE_FILE.rename(ENRICH_CACHE_FILE.with_suffix(".json.imported"))
     except Exception:
-        pass
-    return {"omdb": {}, "tmdb": {}}
+        traceback.print_exc()
 
-_ENRICH_CACHE = _load_enrich_cache()
-_enrich_dirty = False
 
-def _cache_get(src, fid):
+def _cache_get(src, fid, count=True, ignore_age=False):
+    """Resultat en base pour (src, fid) ou None (absent / perime)."""
     global _CACHE_HITS
-    e = _ENRICH_CACHE.get(src, {}).get(str(fid))
-    if not e:
+    if not fid:
         return None
-    if time.time() - e.get("ts", 0) > ENRICH_CACHE_DAYS * 86400:
+    try:
+        with _WEB_DB_LOCK:
+            row = _web_db().execute(
+                "SELECT rated, age, note, source, ts FROM web_meta "
+                "WHERE src=? AND fid=?", (src, str(fid))).fetchone()
+    except Exception:
         return None
-    _CACHE_HITS += 1
-    return {k: e.get(k, "") for k in ("rated", "age", "note", "source")}
+    if not row:
+        return None
+    res = {"rated": row[0] or "", "age": row[1] or "",
+           "note": row[2] or "", "source": row[3] or ""}
+    if not ignore_age:
+        days = ENRICH_CACHE_DAYS if _usable_age(res) else ENRICH_CACHE_DAYS_NC
+        if time.time() - (row[4] or 0) > days * 86400:
+            return None
+    if count:
+        _CACHE_HITS += 1
+    return res
 
-def _cache_put(src, fid, res):
-    global _enrich_dirty
-    if not isinstance(res, dict):
+
+def _cache_put(src, fid, res, title=""):
+    if not isinstance(res, dict) or not fid:
         return
-    _ENRICH_CACHE.setdefault(src, {})[str(fid)] = {
-        **{k: res.get(k, "") for k in ("rated", "age", "note", "source")},
-        "ts": time.time()}
-    _enrich_dirty = True
+    try:
+        with _WEB_DB_LOCK:
+            c = _web_db()
+            c.execute("INSERT OR REPLACE INTO web_meta VALUES (?,?,?,?,?,?,?,?)",
+                      (src, str(fid), res.get("rated", ""), res.get("age", ""),
+                       res.get("note", ""), res.get("source", ""), title or "",
+                       time.time()))
+            c.commit()
+    except Exception:
+        traceback.print_exc()
+
 
 def _save_enrich_cache():
-    global _enrich_dirty
-    if not _enrich_dirty:
-        return
-    try:
-        tmp = ENRICH_CACHE_FILE.with_suffix(".tmp")
-        tmp.write_text(_ejson.dumps(_ENRICH_CACHE), encoding="utf-8")
-        os.replace(tmp, ENRICH_CACHE_FILE)
-        _enrich_dirty = False
-    except Exception:
-        pass
+    """Conserve pour compatibilite : la base est ecrite au fil de l'eau."""
+    return None
+
 
 def _cache_suffix():
-    _save_enrich_cache()
     return gx(f"  ({_CACHE_HITS} en cache)", f"  ({_CACHE_HITS} cached)") if _CACHE_HITS else ""
+
+
+def web_db_stats():
+    try:
+        with _WEB_DB_LOCK:
+            c = _web_db()
+            n1 = c.execute("SELECT COUNT(*) FROM web_meta").fetchone()[0]
+            n2 = c.execute("SELECT COUNT(*) FROM tmdb_query").fetchone()[0]
+        return n1, n2
+    except Exception:
+        return 0, 0
+
+
+def web_db_clear():
+    with _WEB_DB_LOCK:
+        c = _web_db()
+        c.execute("DELETE FROM web_meta")
+        c.execute("DELETE FROM tmdb_query")
+        c.commit()
+
+
+def tmdb_query_get(qkey):
+    try:
+        with _WEB_DB_LOCK:
+            row = _web_db().execute("SELECT payload, ts FROM tmdb_query WHERE qkey=?",
+                                    (qkey,)).fetchone()
+        if row and time.time() - (row[1] or 0) <= TMDB_QUERY_DAYS * 86400:
+            return _ejson.loads(row[0])
+    except Exception:
+        pass
+    return None
+
+
+def _tmdb_query_stale(qkey):
+    """Comme tmdb_query_get mais sans limite d'age (secours hors ligne)."""
+    try:
+        with _WEB_DB_LOCK:
+            row = _web_db().execute("SELECT payload FROM tmdb_query WHERE qkey=?",
+                                    (qkey,)).fetchone()
+        return _ejson.loads(row[0]) if row else None
+    except Exception:
+        return None
+
+
+def tmdb_query_put(qkey, payload):
+    try:
+        with _WEB_DB_LOCK:
+            c = _web_db()
+            c.execute("INSERT OR REPLACE INTO tmdb_query VALUES (?,?,?)",
+                      (qkey, _ejson.dumps(payload), time.time()))
+            c.commit()
+    except Exception:
+        traceback.print_exc()
+
+
+def _prefill_web_from_db(rows, provider):
+    """Remplit G['omdb_cache'] depuis la base, SANS appel reseau, juste apres
+    un scan : la colonne 'Age web' s'affiche donc immediatement pour les films
+    deja enrichis lors d'une session precedente. Retourne le nombre trouve."""
+    order = ("omdb", "tmdb") if provider == "omdb" else ("tmdb", "omdb")
+    n = 0
+    for r in rows:
+        iid = r.get("item_id")
+        if not iid:
+            continue
+        best = None
+        for src in order:
+            fid = r.get("imdb_id") if src == "omdb" else r.get("tmdb_id")
+            res = _cache_get(src, fid, count=False, ignore_age=True)
+            if res is None:
+                continue
+            if best is None:
+                best = res
+            if _usable_age(res):
+                best = res
+                break
+        if best is not None:
+            G["omdb_cache"][iid] = best
+            n += 1
+    return n
 
 
 def _usable_age(res):
@@ -1616,26 +1881,37 @@ def _usable_age(res):
     return isinstance(res, dict) and _age_to_num(res.get("age", "")) is not None
 
 
-def _fetch_with_fallback(imdb_id, tmdb_id, provider, omdb_key, tmdb_key):
+def _fetch_with_fallback(imdb_id, tmdb_id, provider, omdb_key, tmdb_key,
+                         title="", force=False):
     """Interroge la source principale puis, si elle ne classe pas le film,
     se rabat sur l'autre source (OMDB <-> TMDB). Renvoie le meilleur résultat."""
     if provider == "omdb":
         order = [("omdb", imdb_id, omdb_key), ("tmdb", tmdb_id, tmdb_key)]
     else:
         order = [("tmdb", tmdb_id, tmdb_key), ("omdb", imdb_id, omdb_key)]
+    # 1) Base SQLite : si le film y figure deja (quelle que soit la source
+    #    et l'anciennete de l'entree), AUCUN appel reseau. Seule la case
+    #    "Forcer" relance une vraie recherche.
+    if not force:
+        found = [r for r in (_cache_get(src, fid, ignore_age=True)
+                             for src, fid, _k in order if fid) if r]
+        if found:
+            usable = [r for r in found if _usable_age(r)]
+            return usable[0] if usable else found[0]
+    # 2) Reseau : film absent de la base, ou "Forcer" coche
     best = None
     for src, fid, k in order:
-        if not fid:
+        if not fid or not k:
             continue
-        res = _cache_get(src, fid)          # 1) cache disque (30 jours)
-        if res is None:
-            if not k:
+        try:
+            res = _fetch_one_omdb(fid, k) if src == "omdb" else _fetch_one_tmdb(fid, k)
+        except Exception:
+            # reseau / quota KO : on se rabat sur la base
+            res = _cache_get(src, fid, ignore_age=True)
+            if res is None:
                 continue
-            try:
-                res = _fetch_one_omdb(fid, k) if src == "omdb" else _fetch_one_tmdb(fid, k)
-            except Exception:
-                continue
-            _cache_put(src, fid, res)
+        else:
+            _cache_put(src, fid, res, title)
         if best is None:
             best = res
         if _usable_age(res):
@@ -1677,6 +1953,25 @@ def do_enrich():
                      f"Movies have no {'IMDB' if provider=='omdb' else 'TMDB'} id in Emby."))
         return
 
+    force = bool(G_FORCE_REFRESH["on"])
+    # Films dont l'age est DEJA connu (base SQLite chargee apres le scan, ou
+    # deja enrichis dans cette session) : on ne les recherche pas de nouveau.
+    n_known = 0
+    if not force:
+        todo = []
+        for f in films:
+            if isinstance(G["omdb_cache"].get(f[3]), dict):
+                n_known += 1
+            else:
+                todo.append(f)
+        films = todo
+    if not films:
+        _set_status2(f"Les {n_known} film(s) ont déjà un âge web en base : aucune recherche "
+                     "(cochez « Forcer » pour les rechercher de nouveau).",
+                     f"All {n_known} movie(s) already have a web age in the database: no "
+                     "lookup (tick \"Force\" to look them up again).")
+        return
+
     lbl = "OMDB" if provider == "omdb" else "TMDB"
     for _, _, _, iid in films:
         if iid:
@@ -1687,7 +1982,7 @@ def do_enrich():
                          f"{lbl}: 0 / {len(films)} movies enriched..."))
 
     def thread(films=films, provider=provider, lbl=lbl,
-               omdb_key=omdb_key, tmdb_key=tmdb_key):
+               omdb_key=omdb_key, tmdb_key=tmdb_key, force=force, n_known=n_known):
         ok = 0
         for idx, (imdb, tmdb, title, iid) in enumerate(films):
             if not iid or (not imdb and not tmdb):
@@ -1696,8 +1991,10 @@ def do_enrich():
                     ui(lambda iid=iid: _set_webcell(iid, "error"))
                 continue
             try:
+                hits0 = _CACHE_HITS
                 result = _fetch_with_fallback(imdb, tmdb, provider,
-                                              omdb_key, tmdb_key)
+                                              omdb_key, tmdb_key,
+                                              title=title, force=force)
                 G["omdb_cache"][iid] = result
                 ok += 1
             except Exception:
@@ -1709,17 +2006,19 @@ def do_enrich():
                 ui(lambda total=len(films), o=ok, lb=lbl:
                     dpg.set_value("lbl_status", gx(f"{lb} : {o} / {total} films enrichis",
                                          f"{lb}: {o} / {total} movies enriched")))
-            delay = 0.12 if provider == "omdb" else 0.05
-            time.sleep(delay)
+            if _CACHE_HITS == hits0:     # appel reseau reel : on menage l'API
+                time.sleep(0.12 if provider == "omdb" else 0.05)
 
         # un seul rendu final : rafraichit tooltips, tri et boutons d'age web
-        ui(lambda o=ok, total=len(films), lb=lbl: (
-            dpg.configure_item("btn_enrich", enabled=True, label="Enrichir"),
+        ui(lambda o=ok, total=len(films), lb=lbl, nk=n_known: (
+            dpg.configure_item("btn_enrich", enabled=True, label=gx("Enrichir", "Enrich")),
             dpg.set_value("lbl_status", (_save_enrich_cache(),
                     _set_status2(f"{lb} terminé : {o}/{total} films enrichis"
-                                 + (f"  ({_CACHE_HITS} en cache)" if _CACHE_HITS else ""),
+                                 + (f"  ({_CACHE_HITS} trouvé(s) en base)" if _CACHE_HITS else "")
+                                 + (f"  -  {nk} déjà en base, non recherché(s)" if nk else ""),
                                  f"{lb} done: {o}/{total} movies enriched"
-                                 + (f"  ({_CACHE_HITS} cached)" if _CACHE_HITS else "")))[1]
+                                 + (f"  ({_CACHE_HITS} found in DB)" if _CACHE_HITS else "")
+                                 + (f"  -  {nk} already in DB, not looked up" if nk else "")))[1]
                               or dpg.get_value("lbl_status")),
             render_results()))
 
@@ -1839,6 +2138,8 @@ def setup_theme():
 #  CONSTRUCTION UI
 # ══════════════════════════════════════════════════════════════
 _GENRES_TR = {
+    "g_chk_force_web": ("Forcer", "Force"),
+    "g_btn_webdb": ("Base", "DB"),
     "g_t_appname":     ("Explorateur de genres Emby", "Emby Genre Explorer"),
     "g_t_subtitle":    ("- trouver & déplacer par genre  (DirectX 11)",
                         "- find & move by genre  (DirectX 11)"),
@@ -1921,6 +2222,40 @@ def genres_apply_lang(code):
             except Exception:
                 pass
 
+
+
+def show_web_db_panel():
+    """Petite fenetre : contenu de la base OMDB/TMDB + vidage."""
+    tag = "g_webdb_win"
+    if dpg.does_item_exist(tag):
+        dpg.delete_item(tag)
+    n1, n2 = web_db_stats()
+
+    def _clear(s=None, a=None, u=None):
+        try:
+            web_db_clear()
+            _set_status2("Base OMDB/TMDB vidée.", "OMDB/TMDB database cleared.")
+        except Exception as e:
+            modal_err(gx("Erreur base", "Database error"), str(e))
+        if dpg.does_item_exist(tag):
+            dpg.delete_item(tag)
+
+    with dpg.window(label=gx("Base OMDB / TMDB", "OMDB / TMDB database"), tag=tag,
+                    modal=True, width=460, autosize=True, pos=[260, 220], no_resize=True):
+        dpg.add_text(str(WEB_DB_FILE), wrap=440, color=(136, 136, 170))
+        dpg.add_text(gx(f"Âges / notes enregistrés : {n1}", f"Saved ages / scores: {n1}"))
+        dpg.add_text(gx(f"Recherches TMDB enregistrées : {n2}", f"Saved TMDB searches: {n2}"))
+        dpg.add_text(gx(f"Validité : {ENRICH_CACHE_DAYS} j (classé), {ENRICH_CACHE_DAYS_NC} j (non classé).\n"
+                        "En cas d'erreur réseau, la valeur en base est utilisée même périmée.",
+                        f"Validity: {ENRICH_CACHE_DAYS} d (rated), {ENRICH_CACHE_DAYS_NC} d (unrated).\n"
+                        "On network errors, the stored value is used even if stale."),
+                     wrap=440, color=(136, 136, 170))
+        dpg.add_separator()
+        with dpg.group(horizontal=True):
+            dpg.add_button(label=gx("Vider la base", "Clear database"), width=150,
+                           callback=_clear)
+            dpg.add_button(label="OK", width=-1,
+                           callback=lambda s, a, u: dpg.delete_item(tag))
 
 
 def build_genres_popups():
@@ -2006,8 +2341,24 @@ def build_genres_body():
         dpg.add_spacer(width=8)
         dpg.add_button(label="Enrichir", tag="btn_enrich",
                        callback=lambda s,a,u: do_enrich(), width=75)
-        gtip("Récupère âge + note. Clés sauvegardées auto.",
-             "Fetches age + score. Keys saved automatically.", wrap=260)
+        gtip("Récupère âge + note. Clés sauvegardées auto.\n"
+             "Les résultats sont sauvegardés dans une base SQLite\n"
+             "(emby_toolbox_web.db) : les films déjà connus ne\n"
+             "consomment plus de quota et s'affichent dès le scan.",
+             "Fetches age + score. Keys saved automatically.\n"
+             "Results are saved in a SQLite database\n"
+             "(emby_toolbox_web.db): already known movies no longer\n"
+             "use API quota and show up right after the scan.", wrap=300)
+        dpg.add_checkbox(label="Forcer", tag="g_chk_force_web", default_value=False,
+                         callback=lambda s, v, u: G_FORCE_REFRESH.__setitem__("on", bool(v)))
+        gtip("Ignore la base et réinterroge OMDB/TMDB pour tous les films\n"
+             "(la base est mise à jour avec les nouvelles valeurs).",
+             "Ignores the database and queries OMDB/TMDB again for every movie\n"
+             "(the database is updated with the new values).", wrap=300)
+        dpg.add_button(label="Base", tag="g_btn_webdb", width=50,
+                       callback=lambda s, a, u: show_web_db_panel())
+        gtip("Statistiques / vidage de la base de sauvegarde OMDB/TMDB.",
+             "Stats / clearing of the OMDB/TMDB backup database.", wrap=300)
         dpg.add_spacer(width=6)
         dpg.add_button(label="Appliquer âges sup.", tag="g_btn_applyhigher",
                        callback=lambda s,a,u: do_apply_all_higher(), width=150)
@@ -2172,6 +2523,48 @@ TR = {
         "cand_best": "   <- meilleur",
         "cand_none": "Aucun candidat. Ajuste le titre/année et relance.",
         "cand_no_overview": "(pas de résumé)",
+        "btn_details": "Détails",
+        "pop_title": "Fiche du candidat",
+        "pop_orig": "Titre original : %s",
+        "pop_source": "Source : %s   ·   score %.2f   ·   similarité du titre %d %%",
+        "pop_loading": "Chargement des détails TMDB...",
+        "pop_overview": "Résumé",
+        "pop_emby": "Actuellement dans Emby",
+        "pop_emby_tpl": "Nom : %s\nAnnée : %s\nChemin : %s\nIDs actuels : TMDB=%s   IMDB=%s",
+        "pop_runtime": "Durée : %d min",
+        "pop_genres": "Genres : %s",
+        "pop_director": "Réalisation : %s",
+        "pop_cast": "Avec : %s",
+        "pop_country": "Pays : %s",
+        "pop_vote": "Note TMDB : %.1f / 10  (%d votes)",
+        "pop_release": "Sortie : %s",
+        "pop_seasons": "Saisons : %s   ·   épisodes : %s",
+        "pop_open_tmdb": "Voir sur TMDB",
+        "pop_open_imdb": "Voir sur IMDb",
+        "pop_close": "Fermer",
+        "pop_apply": "Appliquer ce candidat",
+        "pop_check": "Cocher ce film",
+        "pop_uncheck": "Décocher ce film",
+        "recap_title": "Auto-correction - récapitulatif à valider",
+        "recap_summary": "%d analysé(s) : %d correspondance(s) sûre(s) (cochées), %d à vérifier (décochées), %d sans résultat.",
+        "recap_help": "Rien n'a encore été modifié. Coche les films à corriger, 'Détails' pour voir la fiche complète, puis 'Appliquer la sélection'.",
+        "recap_col_emby": "Dans Emby",
+        "recap_col_prop": "Proposition TMDB",
+        "recap_col_sim": "Titre",
+        "recap_col_state": "État",
+        "recap_safe": "sûr",
+        "recap_verify": "à vérifier",
+        "recap_year_far": "année hors tolérance",
+        "recap_all": "Tout cocher",
+        "recap_none": "Tout décocher",
+        "recap_only_safe": "Cocher seulement les sûrs",
+        "recap_apply": "Appliquer la sélection (%d)",
+        "recap_cancel": "Annuler",
+        "recap_nothing": "Aucune proposition TMDB trouvée pour ces films.",
+        "log_auto_analyse": "Auto-correction : analyse de %d film(s) (aucune écriture)...",
+        "log_auto_recap": "Analyse terminée : %d proposition(s). Valide le récapitulatif.",
+        "log_auto_cancel": "Auto-correction annulée : rien n'a été modifié.",
+        "log_auto_apply": "Application de %d correction(s) validée(s)...",
         "libs_nothing": "(rien à afficher)",
         "hint_no_libs": "Aucune médiathèque listée.",
         "hint_count": "%d médiathèque(s) - coche celles à scanner.",
@@ -2269,6 +2662,48 @@ TR = {
         "cand_best": "   <- best",
         "cand_none": "No candidate. Adjust title/year and retry.",
         "cand_no_overview": "(no overview)",
+        "btn_details": "Details",
+        "pop_title": "Candidate details",
+        "pop_orig": "Original title: %s",
+        "pop_source": "Source: %s   ·   score %.2f   ·   title similarity %d %%",
+        "pop_loading": "Loading TMDB details...",
+        "pop_overview": "Overview",
+        "pop_emby": "Currently in Emby",
+        "pop_emby_tpl": "Name: %s\nYear: %s\nPath: %s\nCurrent IDs: TMDB=%s   IMDB=%s",
+        "pop_runtime": "Runtime: %d min",
+        "pop_genres": "Genres: %s",
+        "pop_director": "Directed by: %s",
+        "pop_cast": "Starring: %s",
+        "pop_country": "Country: %s",
+        "pop_vote": "TMDB rating: %.1f / 10  (%d votes)",
+        "pop_release": "Release: %s",
+        "pop_seasons": "Seasons: %s   ·   episodes: %s",
+        "pop_open_tmdb": "Open on TMDB",
+        "pop_open_imdb": "Open on IMDb",
+        "pop_close": "Close",
+        "pop_apply": "Apply this match",
+        "pop_check": "Tick this movie",
+        "pop_uncheck": "Untick this movie",
+        "recap_title": "Auto-fix - summary to validate",
+        "recap_summary": "%d analysed: %d safe match(es) (ticked), %d to check (unticked), %d without result.",
+        "recap_help": "Nothing has been changed yet. Tick the movies to fix, 'Details' to see the full record, then 'Apply selection'.",
+        "recap_col_emby": "In Emby",
+        "recap_col_prop": "TMDB match",
+        "recap_col_sim": "Title",
+        "recap_col_state": "State",
+        "recap_safe": "safe",
+        "recap_verify": "to check",
+        "recap_year_far": "year out of tolerance",
+        "recap_all": "Tick all",
+        "recap_none": "Untick all",
+        "recap_only_safe": "Tick safe ones only",
+        "recap_apply": "Apply selection (%d)",
+        "recap_cancel": "Cancel",
+        "recap_nothing": "No TMDB match found for these movies.",
+        "log_auto_analyse": "Auto-fix: analysing %d movie(s) (no write)...",
+        "log_auto_recap": "Analysis done: %d match(es). Please validate the summary.",
+        "log_auto_cancel": "Auto-fix cancelled: nothing was changed.",
+        "log_auto_apply": "Applying %d validated fix(es)...",
         "libs_nothing": "(nothing to show)",
         "hint_no_libs": "No library listed.",
         "hint_count": "%d library(ies) - tick those to scan.",
@@ -2635,27 +3070,72 @@ class TmdbClient:
                 params["first_air_date_year"] = int(year)
             else:
                 params["year"] = int(year)
-        r = self.s.get(TMDB_BASE + endpoint, params=params, timeout=HTTP_TIMEOUT)
-        r.raise_for_status()
+        # base SQLite : evite de refaire la meme recherche (et marche hors ligne)
+        qkey = "search|%s|%s|%s|%s" % (kind, self.language,
+                                       (query or "").strip().lower(), year or "")
+        cached = tmdb_query_get(qkey)
+        if cached is not None:
+            return cached
+        try:
+            r = self.s.get(TMDB_BASE + endpoint, params=params, timeout=HTTP_TIMEOUT)
+            r.raise_for_status()
+        except Exception:
+            # TMDB injoignable : on tente une version perimee de la base
+            old = _tmdb_query_stale(qkey)
+            if old is not None:
+                return old
+            raise
         results = (r.json() or {}).get("results", []) or []
         if kind == "tv":
             for r2 in results:
                 r2.setdefault("title", r2.get("name"))
                 r2.setdefault("original_title", r2.get("original_name"))
                 r2.setdefault("release_date", r2.get("first_air_date"))
+        if results:
+            tmdb_query_put(qkey, results)
         return results
+
+    def details(self, tmdb_id, kind="movie"):
+        """Fiche complete (duree, genres, equipe, ids...). Sauvegardee dans
+        la base SQLite comme les recherches. {} si indisponible."""
+        if not self.api_key or not tmdb_id:
+            return {}
+        qkey = "details|%s|%s|%s" % (kind, self.language, tmdb_id)
+        cached = tmdb_query_get(qkey)
+        if cached is not None:
+            return cached
+        base = "/tv/%s" if kind == "tv" else "/movie/%s"
+        try:
+            r = self.s.get(TMDB_BASE + base % tmdb_id,
+                           params={"api_key": self.api_key, "language": self.language,
+                                   "append_to_response": "credits,external_ids"},
+                           timeout=HTTP_TIMEOUT)
+            r.raise_for_status()
+            data = r.json() or {}
+            if data:
+                tmdb_query_put(qkey, data)
+            return data
+        except Exception:
+            return _tmdb_query_stale(qkey) or {}
 
     def external_ids(self, movie_id, kind="movie"):
         if not self.api_key:
             return {}
         base = "/tv/%s/external_ids" if kind == "tv" else "/movie/%s/external_ids"
+        qkey = "extids|%s|%s" % (kind, movie_id)
+        cached = tmdb_query_get(qkey)
+        if cached is not None:
+            return cached
         try:
             r = self.s.get(TMDB_BASE + base % movie_id,
                            params={"api_key": self.api_key}, timeout=HTTP_TIMEOUT)
             r.raise_for_status()
-            return r.json() or {}
+            data = r.json() or {}
+            if data:
+                tmdb_query_put(qkey, data)
+            return data
         except Exception:
-            return {}
+            return _tmdb_query_stale(qkey) or {}
 
 
 # ---------------------------------------------------------------------------
@@ -2694,6 +3174,9 @@ class App:
         self.current = None        # film sélectionné
         self.candidates = []       # candidats affichés
         self._tex_tags = []        # textures dynamiques à nettoyer
+        self._pop_tex = []         # textures de la fiche candidat
+        self._pop_gen = 0
+        self._recap = []           # propositions de l'auto-correction
         self._gen = 0              # génération (anti-collision threads)
         self._scanning = False
         self.emby_type = "Movie"   # type d'items courant : "Movie" ou "Series"
@@ -3047,7 +3530,7 @@ class App:
             self._merge_hint("Rien a exporter : lance d'abord l'analyse.",
                              (235, 140, 20))
             return
-        fp = Path(__file__).with_name("emby_versions_multiples.csv")
+        fp = APP_DIR / "emby_versions_multiples.csv"
         try:
             with open(fp, "w", newline="", encoding="utf-8-sig") as fh:
                 w = csv.writer(fh, delimiter=";")
@@ -3248,7 +3731,27 @@ class App:
                 best = {"r": r, "year": cyear, "score": sc, "title_sim": sim}
         return best
 
+    def _cand_from_tmdb(self, r, q_title, q_year):
+        """Candidat TMDB brut -> dict 'candidat' (meme forme que on_search)."""
+        cyear = tmdb_year(r)
+        sc, sim = score_candidate(q_title, q_year, r.get("title"),
+                                  r.get("original_title"), cyear, r.get("popularity"))
+        return {
+            "source": "TMDB",
+            "tmdb_id": r.get("id"),
+            "imdb_id": None,
+            "title": r.get("title") or r.get("original_title") or "?",
+            "orig": r.get("original_title") or "",
+            "year": cyear,
+            "overview": (r.get("overview") or "").strip(),
+            "poster": (TMDB_IMG + r["poster_path"]) if r.get("poster_path") else None,
+            "score": sc,
+            "title_sim": sim,
+        }
+
     def on_auto(self, sender, app_data, user_data):
+        """Auto-correction en 2 temps : analyse SANS ecriture, puis
+        recapitulatif a cases a cocher ; rien n'est ecrit avant validation."""
         if self._scanning:
             return
         if not self.flagged:
@@ -3258,87 +3761,391 @@ class App:
         if not self.tmdb.api_key:
             self.log(self.t("log_auto_needkey"))
             return
-        items = list(self.flagged)
-        tol = self._read_tol()
-        # confirmation avant écriture en masse sur Emby
-        tagc = "auto_confirm_win"
-        if dpg.does_item_exist(tagc):
-            dpg.delete_item(tagc)
-        def _start(sender=None, app_data=None, user_data=None):
-            if dpg.does_item_exist(tagc):
-                dpg.delete_item(tagc)
-            self._start_auto(items, tol)
-        with dpg.window(label=self.t("auto_confirm_title"), tag=tagc, modal=True,
-                        width=540, autosize=True, pos=[220, 220], no_resize=True):
-            dpg.add_text(self.t("auto_confirm_msg") % len(items), wrap=505)
-            dpg.add_spacer(height=4)
-            with dpg.group(horizontal=True):
-                dpg.add_button(label=self.t("btn_yes"), width=150, callback=_start)
-                dpg.add_button(label=self.t("btn_no"), width=110,
-                               callback=lambda s, a, u: dpg.delete_item(tagc))
-        return
+        self._start_auto_analysis(list(self.flagged), self._read_tol())
 
-    def _start_auto(self, items, tol):
+    def _start_auto_analysis(self, items, tol):
         self._scanning = True
         dpg.set_value("status_txt", self.t("status_auto"))
         self._set_progress(0.0, self.t("prog_auto") % (0, len(items)))
-        self.log(self.t("log_auto_start") % len(items))
+        self.log(self.t("log_auto_analyse") % len(items))
+
+        def worker():
+            props, nores = [], 0
+            total = len(items)
+            try:
+                for idx, it in enumerate(items, 1):
+                    title, year = guess_title_year(it.get("Name", ""), it.get("Path", ""))
+                    best = None
+                    try:
+                        best = self._tmdb_best(title, year, tol)
+                    except Exception as exc:
+                        self.log(self.t("log_tmdb_err_name") % (title, exc))
+                    if not best:
+                        nores += 1
+                    else:
+                        cand = self._cand_from_tmdb(best["r"], title, year)
+                        by = cand["year"]
+                        year_ok = not (year and by is not None and abs(by - year) > tol)
+                        safe = cand["title_sim"] >= AUTO_TITLE_MIN and year_ok
+                        props.append({"item": it, "q_title": title, "q_year": year,
+                                      "cand": cand, "r": best["r"],
+                                      "safe": safe, "year_ok": year_ok})
+                    self._set_progress(idx / total, self.t("prog_auto") % (idx, total))
+                    time.sleep(0.05)
+            finally:
+                self._scanning = False
+            props.sort(key=lambda p: (not p["safe"], -p["cand"]["title_sim"]))
+            self._set_progress(1.0, self.t("prog_done"))
+            self.log(self.t("log_auto_recap") % len(props))
+            ui_post(lambda: self._show_auto_recap(props, total, nores))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @staticmethod
+    def _vp_size():
+        try:
+            return (max(900, dpg.get_viewport_client_width() or 1100),
+                    max(600, dpg.get_viewport_client_height() or 760))
+        except Exception:
+            return 1100, 760
+
+    def _recap_count(self):
+        n = sum(1 for i in range(len(self._recap))
+                if dpg.does_item_exist("recap_chk_%d" % i)
+                and dpg.get_value("recap_chk_%d" % i))
+        if dpg.does_item_exist("recap_apply_btn"):
+            dpg.configure_item("recap_apply_btn", label=self.t("recap_apply") % n,
+                               enabled=n > 0)
+        return n
+
+    def _recap_set_all(self, mode):
+        for i, p in enumerate(self._recap):
+            tag = "recap_chk_%d" % i
+            if dpg.does_item_exist(tag):
+                dpg.set_value(tag, True if mode == "all" else
+                              False if mode == "none" else p["safe"])
+        self._recap_count()
+
+    def _show_auto_recap(self, props, total, nores):
+        self._recap = props
+        tag = "auto_recap_win"
+        if dpg.does_item_exist(tag):
+            dpg.delete_item(tag)
+        n_safe = sum(1 for p in props if p["safe"])
+        vw, vh = self._vp_size()
+        w, h = min(1150, vw - 60), min(720, vh - 60)
+
+        def _close(cancelled=True):
+            if dpg.does_item_exist(tag):
+                dpg.delete_item(tag)
+            if cancelled:
+                self.log(self.t("log_auto_cancel"))
+                dpg.set_value("status_txt", self.t("status_remaining") % len(self.flagged))
+
+        def _apply(sender=None, app_data=None, user_data=None):
+            sel = [p for i, p in enumerate(self._recap)
+                   if dpg.does_item_exist("recap_chk_%d" % i)
+                   and dpg.get_value("recap_chk_%d" % i)]
+            _close(cancelled=False)
+            if sel:
+                self._start_auto_apply(sel)
+
+        with dpg.window(label=self.t("recap_title"), tag=tag, modal=True,
+                        width=w, height=h, pos=[(vw - w) // 2, (vh - h) // 2],
+                        on_close=lambda: _close(True)):
+            dpg.add_text(self.t("recap_summary") % (total, n_safe,
+                                                    len(props) - n_safe, nores),
+                         color=(120, 220, 140))
+            dpg.add_text(self.t("recap_help"), wrap=w - 30, color=(170, 170, 170))
+            with dpg.group(horizontal=True):
+                dpg.add_button(label=self.t("recap_all"), width=120,
+                               callback=lambda: self._recap_set_all("all"))
+                dpg.add_button(label=self.t("recap_none"), width=120,
+                               callback=lambda: self._recap_set_all("none"))
+                dpg.add_button(label=self.t("recap_only_safe"), width=190,
+                               callback=lambda: self._recap_set_all("safe"))
+            dpg.add_separator()
+            with dpg.child_window(height=-40, border=False):
+                if not props:
+                    dpg.add_text(self.t("recap_nothing"), color=(200, 160, 80))
+                with dpg.table(header_row=True, resizable=True, row_background=True,
+                               borders_innerH=True, borders_outerH=True,
+                               policy=dpg.mvTable_SizingStretchProp):
+                    dpg.add_table_column(label="", width_fixed=True, init_width_or_weight=30)
+                    dpg.add_table_column(label=self.t("recap_col_emby"), init_width_or_weight=0.40)
+                    dpg.add_table_column(label=self.t("recap_col_prop"), init_width_or_weight=0.36)
+                    dpg.add_table_column(label=self.t("recap_col_sim"), width_fixed=True,
+                                         init_width_or_weight=55)
+                    dpg.add_table_column(label=self.t("recap_col_state"), width_fixed=True,
+                                         init_width_or_weight=150)
+                    dpg.add_table_column(label="", width_fixed=True, init_width_or_weight=70)
+                    for i, p in enumerate(props):
+                        it, c = p["item"], p["cand"]
+                        col = (120, 220, 140) if p["safe"] else (240, 180, 80)
+                        with dpg.table_row():
+                            dpg.add_checkbox(tag="recap_chk_%d" % i, default_value=p["safe"],
+                                             callback=lambda: self._recap_count())
+                            dpg.add_text("%s (%s)" % (it.get("Name", "?"),
+                                                      it.get("ProductionYear") or "-"))
+                            dpg.add_text("%s (%s)%s" % (
+                                c["title"], c["year"] or "-",
+                                ("  [%s]" % c["orig"]) if c["orig"] and c["orig"] != c["title"] else ""),
+                                color=col)
+                            dpg.add_text("%d %%" % round(c["title_sim"] * 100), color=col)
+                            state = self.t("recap_safe") if p["safe"] else (
+                                self.t("recap_year_far") if not p["year_ok"]
+                                else self.t("recap_verify"))
+                            dpg.add_text(state, color=col)
+                            dpg.add_button(label=self.t("btn_details"), width=65,
+                                           user_data=i,
+                                           callback=lambda s, a, u: self._recap_details(u))
+            with dpg.group(horizontal=True):
+                b = dpg.add_button(tag="recap_apply_btn", label=self.t("recap_apply") % n_safe,
+                                   width=240, callback=_apply, enabled=n_safe > 0)
+                dpg.bind_item_theme(b, "th_btn_ok")
+                dpg.add_button(label=self.t("recap_cancel"), width=120,
+                               callback=lambda: _close(True))
+
+    def _recap_details(self, i):
+        if i >= len(self._recap):
+            return
+        p = self._recap[i]
+        chk = "recap_chk_%d" % i
+        ticked = dpg.does_item_exist(chk) and dpg.get_value(chk)
+
+        def _toggle():
+            if dpg.does_item_exist(chk):
+                dpg.set_value(chk, not ticked)
+                self._recap_count()
+        self.show_candidate_popup(p["cand"], p["item"],
+                                  self.t("pop_uncheck") if ticked else self.t("pop_check"),
+                                  _toggle)
+
+    def _start_auto_apply(self, sel):
+        self._scanning = True
+        dpg.set_value("status_txt", self.t("status_auto"))
+        self._set_progress(0.0, self.t("prog_auto") % (0, len(sel)))
+        self.log(self.t("log_auto_apply") % len(sel))
 
         def worker():
             applied, done_ids = 0, set()
-            total = len(items)
-            for idx, it in enumerate(items, 1):
-                title, year = guess_title_year(it.get("Name", ""), it.get("Path", ""))
-                try:
-                    best = self._tmdb_best(title, year, tol)
-                except Exception as exc:
-                    self.log(self.t("log_tmdb_err_name") % (title, exc))
+            total = len(sel)
+            try:
+                for idx, p in enumerate(sel, 1):
+                    it, r, c = p["item"], p["r"], p["cand"]
+                    pids = {"Tmdb": str(r.get("id"))}
+                    try:
+                        ext = self.tmdb.external_ids(r.get("id"), self.tmdb_kind)
+                        if ext.get("imdb_id"):
+                            pids["Imdb"] = ext["imdb_id"]
+                    except Exception:
+                        pass
+                    result = {
+                        "Name": c["title"],
+                        "ProductionYear": c["year"],
+                        "ProviderIds": pids,
+                        "SearchProviderName": "TheMovieDb",
+                        "ImageUrl": c.get("poster"),
+                    }
+                    try:
+                        # replace_images=True : remplace résumé ET images
+                        self.emby.apply_remote_result(it.get("Id"), result,
+                                                      replace_images=True)
+                        applied += 1
+                        done_ids.add(it.get("Id"))
+                        self.log(self.t("log_auto_ok") % (result["Name"], c["year"] or "-"))
+                    except Exception as exc:
+                        self.log(self.t("log_auto_fail") % (p["q_title"], exc))
                     self._set_progress(idx / total, self.t("prog_auto") % (idx, total))
-                    continue
-                # l'annee du candidat est deja dans la fenetre +/- tol (via _filter_year) ;
-                # on applique des que le titre est quasi-exact.
-                if not best or best.get("title_sim", 0.0) < AUTO_TITLE_MIN:
-                    self._set_progress(idx / total, self.t("prog_auto") % (idx, total))
-                    continue
-                # garde-fou : en auto, on borne strictement l'annee a +/- tol
-                by = best.get("year")
-                if year and by is not None and abs(by - year) > tol:
-                    self._set_progress(idx / total, self.t("prog_auto") % (idx, total))
-                    continue
-                r, cyear = best["r"], best["year"]
-                pids = {"Tmdb": str(r.get("id"))}
-                try:
-                    ext = self.tmdb.external_ids(r.get("id"), self.tmdb_kind)
-                    if ext.get("imdb_id"):
-                        pids["Imdb"] = ext["imdb_id"]
-                except Exception:
-                    pass
-                result = {
-                    "Name": r.get("title") or r.get("original_title"),
-                    "ProductionYear": cyear,
-                    "ProviderIds": pids,
-                    "SearchProviderName": "TheMovieDb",
-                    "ImageUrl": (TMDB_IMG + r["poster_path"]) if r.get("poster_path") else None,
-                }
-                try:
-                    # replace_images=True : remplace résumé ET images
-                    self.emby.apply_remote_result(it.get("Id"), result, replace_images=True)
-                    applied += 1
-                    done_ids.add(it.get("Id"))
-                    self.log(self.t("log_auto_ok") % (result["Name"], cyear or "-"))
-                except Exception as exc:
-                    self.log(self.t("log_auto_fail") % (title, exc))
-                self._set_progress(idx / total, self.t("prog_auto") % (idx, total))
-                time.sleep(0.2)  # throttle TMDB/Emby
+                    time.sleep(0.2)  # throttle TMDB/Emby
+            finally:
+                self.flagged = [f for f in self.flagged if f.get("Id") not in done_ids]
+                self._set_progress(1.0, self.t("prog_done"))
+                self.log(self.t("log_auto_done") % (applied, len(self.flagged)))
+                ui_post(lambda: dpg.set_value("status_txt",
+                        self.t("status_remaining") % len(self.flagged)))
+                ui_post(self._refresh_flagged_table)
+                self._scanning = False
 
-            self.flagged = [f for f in self.flagged if f.get("Id") not in done_ids]
-            self._set_progress(1.0, self.t("prog_done"))
-            self.log(self.t("log_auto_done") % (applied, len(self.flagged)))
-            ui_post(lambda: dpg.set_value("status_txt",
-                    self.t("status_remaining") % len(self.flagged)))
-            ui_post(self._refresh_flagged_table)
-            self._scanning = False
+        threading.Thread(target=worker, daemon=True).start()
 
+    # ----- fiche détaillée d'un candidat (popup) -----
+    def _clear_pop_textures(self):
+        for t in self._pop_tex:
+            if dpg.does_item_exist(t):
+                dpg.delete_item(t)
+        self._pop_tex = []
+
+    def _close_candidate_popup(self):
+        if dpg.does_item_exist("cand_pop_win"):
+            dpg.delete_item("cand_pop_win")
+        self._clear_pop_textures()
+
+    def show_candidate_popup(self, c, item, action_label=None, action_cb=None):
+        """Grande fiche lisible d'un candidat + rappel de la fiche Emby."""
+        self._close_candidate_popup()
+        self._pop_gen += 1
+        g = self._pop_gen
+        tag = "cand_pop_win"
+        vw, vh = self._vp_size()
+        w, h = min(900, vw - 80), min(640, vh - 80)
+        kind = self.tmdb_kind
+        tmdb_id = c.get("tmdb_id")
+        imdb_holder = {"id": c.get("imdb_id")}
+
+        def _act():
+            self._close_candidate_popup()
+            if action_cb:
+                action_cb()
+
+        with dpg.window(label=self.t("pop_title"), tag=tag, modal=True,
+                        width=w, height=h, pos=[(vw - w) // 2, (vh - h) // 2],
+                        on_close=lambda: self._clear_pop_textures()):
+            with dpg.group(horizontal=True):
+                dpg.add_text(self.t("pop_loading") if c.get("poster") else "",
+                             tag="cand_pop_img_%d" % g, color=(120, 120, 120))
+                with dpg.group():
+                    dpg.add_text("%s  (%s)" % (c.get("title") or "?", c.get("year") or "-"),
+                                 color=(255, 200, 90))
+                    if c.get("orig") and c["orig"] != c.get("title"):
+                        dpg.add_text(self.t("pop_orig") % c["orig"], color=(190, 190, 190))
+                    sim = c.get("title_sim")
+                    if sim is None:
+                        q_t, q_y = guess_title_year(item.get("Name", ""), item.get("Path", ""))
+                        sim = score_candidate(q_t, q_y, c.get("title"), c.get("orig"),
+                                              c.get("year"), 0)[1]
+                    dpg.add_text(self.t("pop_source") % (c.get("source", "?"),
+                                                         c.get("score", 0.0),
+                                                         round(sim * 100)),
+                                 color=(150, 150, 150))
+                    dpg.add_text("TMDB=%s   IMDB=%s" % (tmdb_id or "-", c.get("imdb_id") or "-"),
+                                 tag="cand_pop_ids_%d" % g, color=(150, 150, 150))
+                    dpg.add_spacer(height=4)
+                    dpg.add_text(self.t("pop_loading") if (tmdb_id and self.tmdb
+                                                            and self.tmdb.api_key) else "",
+                                 tag="cand_pop_extra_%d" % g, wrap=w - 290,
+                                 color=(210, 210, 210))
+                    dpg.add_spacer(height=4)
+                    dpg.add_text(self.t("pop_overview"), color=(136, 136, 170))
+                    dpg.add_text(c.get("overview") or self.t("cand_no_overview"),
+                                 tag="cand_pop_ov_%d" % g, wrap=w - 290,
+                                 color=(220, 220, 220))
+            dpg.add_separator()
+            dpg.add_text(self.t("pop_emby"), color=(136, 136, 170))
+            pid = {k.lower(): v for k, v in (item.get("ProviderIds") or {}).items()}
+            dpg.add_text(self.t("pop_emby_tpl") % (
+                item.get("Name", "?"), item.get("ProductionYear") or "-",
+                item.get("Path", "-"), pid.get("tmdb", "-"), pid.get("imdb", "-")),
+                wrap=w - 30, color=(190, 190, 190))
+            dpg.add_separator()
+            with dpg.group(horizontal=True):
+                if action_label and action_cb:
+                    b = dpg.add_button(label=action_label, width=200, callback=_act)
+                    dpg.bind_item_theme(b, "th_btn_ok")
+                if tmdb_id:
+                    dpg.add_button(label=self.t("pop_open_tmdb"), width=130,
+                                   callback=lambda: webbrowser.open(
+                                       "https://www.themoviedb.org/%s/%s" % (
+                                           "tv" if kind == "tv" else "movie", tmdb_id)))
+                dpg.add_button(label=self.t("pop_open_imdb"), width=130,
+                               tag="cand_pop_imdb_%d" % g, show=bool(imdb_holder["id"]),
+                               callback=lambda: imdb_holder["id"] and webbrowser.open(
+                                   "https://www.imdb.com/title/%s/" % imdb_holder["id"]))
+                dpg.add_button(label=self.t("pop_close"), width=110,
+                               callback=lambda: self._close_candidate_popup())
+
+        # affiche en grand
+        if PIL_OK and c.get("poster"):
+            url = c["poster"].replace("/w185/", "/w342/")
+            self._load_image_async(url, "cand_pop_img_%d" % g, (260, 390),
+                                   lambda: g == self._pop_gen, self._pop_tex)
+
+        # details TMDB (duree, genres, equipe...) en arriere-plan
+        if tmdb_id and self.tmdb and self.tmdb.api_key:
+            def worker():
+                d = self.tmdb.details(tmdb_id, kind)
+                lines = []
+                if d:
+                    rd = d.get("release_date") or d.get("first_air_date")
+                    if rd:
+                        lines.append(self.t("pop_release") % rd)
+                    rt = d.get("runtime") or (d.get("episode_run_time") or [0])[0]
+                    if rt:
+                        lines.append(self.t("pop_runtime") % rt)
+                    if kind == "tv" and d.get("number_of_seasons"):
+                        lines.append(self.t("pop_seasons") % (d.get("number_of_seasons"),
+                                                              d.get("number_of_episodes") or "-"))
+                    gen_ = ", ".join(x.get("name", "") for x in d.get("genres") or [])
+                    if gen_:
+                        lines.append(self.t("pop_genres") % gen_)
+                    crew = (d.get("credits") or {}).get("crew") or []
+                    dirs = [x.get("name") for x in crew if x.get("job") == "Director"]
+                    dirs = dirs or [x.get("name") for x in d.get("created_by") or []]
+                    if dirs:
+                        lines.append(self.t("pop_director") % ", ".join(dirs[:3]))
+                    cast = [x.get("name") for x in ((d.get("credits") or {}).get("cast") or [])[:6]]
+                    if cast:
+                        lines.append(self.t("pop_cast") % ", ".join(cast))
+                    cn = [x.get("name") for x in d.get("production_countries") or []]
+                    if cn:
+                        lines.append(self.t("pop_country") % ", ".join(cn[:3]))
+                    if d.get("vote_count"):
+                        lines.append(self.t("pop_vote") % (d.get("vote_average") or 0,
+                                                           d.get("vote_count") or 0))
+                    imdb = d.get("imdb_id") or (d.get("external_ids") or {}).get("imdb_id")
+                    if imdb:
+                        imdb_holder["id"] = imdb
+                ov = (d.get("overview") or "").strip() if d else ""
+
+                def _do():
+                    if g != self._pop_gen:
+                        return
+                    t_ex = "cand_pop_extra_%d" % g
+                    if dpg.does_item_exist(t_ex):
+                        dpg.set_value(t_ex, "\n".join(lines))
+                    t_ov = "cand_pop_ov_%d" % g
+                    if ov and not c.get("overview") and dpg.does_item_exist(t_ov):
+                        dpg.set_value(t_ov, ov)
+                    if imdb_holder["id"]:
+                        t_ids = "cand_pop_ids_%d" % g
+                        if dpg.does_item_exist(t_ids):
+                            dpg.set_value(t_ids, "TMDB=%s   IMDB=%s" % (tmdb_id, imdb_holder["id"]))
+                        if dpg.does_item_exist("cand_pop_imdb_%d" % g):
+                            dpg.configure_item("cand_pop_imdb_%d" % g, show=True)
+                ui_post(_do)
+            threading.Thread(target=worker, daemon=True).start()
+
+    def _load_image_async(self, url, anchor_tag, max_size, alive, registry):
+        """Charge une image distante a la place de anchor_tag (si toujours valide)."""
+        def worker():
+            try:
+                r = requests.get(url, timeout=HTTP_TIMEOUT)
+                r.raise_for_status()
+                img = Image.open(BytesIO(r.content)).convert("RGBA")
+                img.thumbnail(max_size)
+                w, h = img.size
+                data = [b / 255.0 for b in img.tobytes()]
+            except Exception:
+                def _fail():
+                    if alive() and dpg.does_item_exist(anchor_tag):
+                        dpg.set_value(anchor_tag, "")
+                ui_post(_fail)
+                return
+
+            def _do():
+                if not alive() or not dpg.does_item_exist(anchor_tag):
+                    return
+                tex_tag = "tex_%s" % anchor_tag
+                if dpg.does_item_exist(tex_tag):
+                    return
+                with dpg.texture_registry():
+                    dpg.add_static_texture(w, h, data, tag=tex_tag)
+                registry.append(tex_tag)
+                parent = dpg.get_item_parent(anchor_tag)
+                dpg.add_image(tex_tag, parent=parent, before=anchor_tag,
+                              width=w, height=h)
+                dpg.delete_item(anchor_tag)
+            ui_post(_do)
         threading.Thread(target=worker, daemon=True).start()
 
     # ----- sélection d'un film -----
@@ -3475,6 +4282,9 @@ class App:
                                 label=self.t("btn_apply"), width=155,
                                 callback=self.on_apply, user_data=i)
                             dpg.bind_item_theme(apply_btn, "th_btn_ok")
+                            dpg.add_button(label=self.t("btn_details"), width=70,
+                                           user_data=i,
+                                           callback=lambda s, a, u: self._open_search_popup(u))
                             head = "%s (%s)  ·  %s  ·  score %.2f%s" % (
                                 c["title"], c["year"] or "-", c["source"],
                                 c["score"], self.t("cand_best") if best else "")
@@ -3489,6 +4299,15 @@ class App:
                                      color=(180, 180, 180))
             if PIL_OK and c.get("poster"):
                 self._load_poster_async(c["poster"], img_tag, gen)
+        # fiche du meilleur candidat ouverte d'office pour bien voir le film
+        self._open_search_popup(0)
+
+    def _open_search_popup(self, i):
+        if i is None or i >= len(self.candidates) or not self.current:
+            return
+        self.show_candidate_popup(self.candidates[i], self.current,
+                                  self.t("pop_apply"),
+                                  lambda i=i: self.on_apply(None, None, i))
 
     def _load_poster_async(self, url, anchor_tag, gen):
         def worker():
@@ -3932,6 +4751,8 @@ def _init_doublons():
             "ignored_panel":"Groupes ignores","remove_ignore":"Retirer",
             "hidden_score":"{n} groupe(s) masque(s) par le seuil de score.",
             "refresh_emby":"Analyser Emby",
+            "tc_lbl":"Depart Ouvrir tout :",
+            "tip_tc":"Timecode de depart utilise par 'Ouvrir tout' (et 'Ouvrir les deux').\nToutes les fenetres MPC-HC / MPC-BE / VLC / mpv / PotPlayer\ndemarrent a cet endroit. Vide ou 0 = depuis le debut.\n\nFormats : 1:02:30  45:00  1h05m  90s  45 (= minutes).\nMemorise automatiquement.",
             "tip_refresh_emby":"Lance l'analyse des mediatheques SELECTIONNEES sur le serveur Emby\n(equivalent de Tableau de bord > Mediatheques > Analyser).\nA utiliser apres avoir supprime des fichiers manuellement :\npatientez quelques instants puis relancez un scan pour rafraichir les resultats.",
         },
         "en": {
@@ -4003,6 +4824,8 @@ def _init_doublons():
             "ignored_panel":"Ignored groups","remove_ignore":"Remove",
             "hidden_score":"{n} group(s) hidden by score threshold.",
             "refresh_emby":"Scan Emby",
+            "tc_lbl":"Open all start:",
+            "tip_tc":"Start timecode used by 'Open all' (and 'Open both').\nEvery MPC-HC / MPC-BE / VLC / mpv / PotPlayer window\nstarts there. Empty or 0 = from the start.\n\nFormats: 1:02:30  45:00  1h05m  90s  45 (= minutes).\nSaved automatically.",
             "tip_refresh_emby":"Triggers a scan of the SELECTED libraries on the Emby server\n(same as Dashboard > Libraries > Scan).\nUse after manually deleting files:\nwait a moment then re-run a scan to refresh results.",
         }
     }
@@ -4021,7 +4844,7 @@ def _init_doublons():
     def load_config():
         cfg = configparser.ConfigParser()
         cfg["emby"] = {"url":"http://localhost:8096","api_key":"","user_id":"",
-                       "nas_prefix":"/volume1","nas_unc":r"\\192.168.1.x","player":""}
+                       "nas_prefix":"/volume1","nas_unc":"","player":""}
         if CONFIG_FILE.exists():
             cfg.read(CONFIG_FILE, encoding="utf-8")
         if cfg.has_section("emby"):
@@ -4096,9 +4919,39 @@ def _init_doublons():
                     raise
                 time.sleep(1.5 ** attempt)  # backoff : 1s, 1.5s...
 
-    def emby_delete(base, key, item_id, delete_file=False):
+    # La suppression d'un gros fichier sur un NAS (disques en veille, SMB,
+    # corbeille Synology...) peut largement depasser 15 s alors qu'Emby
+    # termine bien l'operation : l'ancien timeout de 15 s affichait une
+    # erreur pour une suppression pourtant reussie.
+    DELETE_TIMEOUT = 180       # attente max de la reponse HTTP
+    DELETE_VERIFY_SECS = 90    # apres un timeout : verification de disparition
+
+    def emby_item_exists(base, key, item_id):
+        """True si l'item est encore connu d'Emby, False s'il a disparu."""
+        try:
+            d = emby_get(base, key, "/Items",
+                         {"Ids": item_id, "Recursive": "true", "Fields": "Path"},
+                         _retry=1)
+            return bool((d or {}).get("Items"))
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return False
+            raise
+
+    def _is_timeout(exc):
+        if isinstance(exc, (TimeoutError, socket.timeout)):
+            return True
+        if isinstance(exc, urllib.error.URLError):
+            r = getattr(exc, "reason", None)
+            return isinstance(r, (TimeoutError, socket.timeout)) or "timed out" in str(r)
+        return "timed out" in str(exc).lower()
+
+    def emby_delete(base, key, item_id, delete_file=False, progress=None):
         """Appelle DELETE /Items/{id} sur le serveur Emby.
-        Double auth (query param + header) pour compatibilité maximale."""
+        Double auth (query param + header) pour compatibilité maximale.
+        Timeout long ; si la reponse n'arrive quand meme pas, on verifie
+        aupres d'Emby que l'item a bien disparu avant de conclure a un echec.
+        Retourne le code HTTP, ou 0 si le succes a ete constate apres timeout."""
         params = {"api_key": key}
         if delete_file:
             params["deleteFiles"] = "true"
@@ -4106,8 +4959,28 @@ def _init_doublons():
         req = urllib.request.Request(url, method="DELETE",
                                      headers={"X-Emby-Token": key,
                                               "Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=15) as r:
-            return r.status
+        try:
+            with urllib.request.urlopen(req, timeout=DELETE_TIMEOUT) as r:
+                return r.status
+        except Exception as e:
+            if not _is_timeout(e):
+                raise
+        # Timeout : Emby continue souvent la suppression en arriere-plan.
+        t_end = time.time() + DELETE_VERIFY_SECS
+        while time.time() < t_end:
+            if progress:
+                progress(int(t_end - time.time()))
+            try:
+                if not emby_item_exists(base, key, item_id):
+                    return 0
+            except Exception:
+                pass
+            time.sleep(3)
+        raise TimeoutError(
+            f"Emby n'a pas répondu en {DELETE_TIMEOUT} s et l'élément est "
+            f"toujours présent après {DELETE_VERIFY_SECS} s de vérification.\n"
+            "La suppression continue peut-être côté serveur : relancez un scan "
+            "dans quelques minutes avant de réessayer.")
 
     def emby_refresh_item(base, key, item_id):
         """Déclenche l'analyse d'UNE médiathèque (POST /Items/{id}/Refresh).
@@ -4122,7 +4995,7 @@ def _init_doublons():
         with urllib.request.urlopen(req, timeout=15) as r:
             return r.status
 
-    def fetch_movies(base, key, uid, cb, parent_ids=None):
+    def fetch_movies(base, key, uid, cb, parent_ids=None, names=None):
         """
         parent_ids : liste d'IDs de médiathèques à scanner.
         Si None ou vide → scan global (comportement original).
@@ -4137,10 +5010,11 @@ def _init_doublons():
         scopes = parent_ids if parent_ids else [None]
         all_items, seen_ids = [], set()
 
-        for pid in scopes:
+        for n_scope, pid in enumerate(scopes, 1):
             if _cancel_scan.is_set(): break
             params = dict(base_params); params["StartIndex"] = 0
             if pid: params["ParentId"] = pid
+            scope = _scope_label(pid, n_scope, len(scopes), names)
             page = 0
             while True:
                 if _cancel_scan.is_set(): break
@@ -4152,7 +5026,8 @@ def _init_doublons():
                 total_scope = data.get("TotalRecordCount",0)
                 fetched_in_scope = params["StartIndex"] + len(items)
                 remaining = max(0, total_scope - fetched_in_scope)
-                page += 1; cb(len(all_items), len(all_items) + remaining, page)
+                page += 1; cb(len(all_items), len(all_items) + remaining, page,
+                              scope=scope)
                 if len(items)<params["Limit"] or not items: break
                 params["StartIndex"] += len(items)
 
@@ -4689,19 +5564,154 @@ def _init_doublons():
     # ══════════════════════════════════════════════════════════════
     #  OUVERTURE FICHIERS
     # ══════════════════════════════════════════════════════════════
+    def _clean_player(p):
+        return (p or "").strip().strip('"').strip("'").strip()
+
     def get_player():
-        """Lit toujours le champ lecteur depuis l'UI - jamais de valeur figée."""
+        """Lit toujours le lecteur depuis l'UI - jamais de valeur figée.
+        Priorite au champ VISIBLE du bandeau commun (sh_player) : le champ
+        de l'onglet (dbl_inp_player, masque) n'est resynchronise qu'au clic
+        sur Enregistrer, il pouvait donc etre vide ou perime."""
+        cands = []
+        for tag in ("sh_player", "dbl_inp_player"):
+            try:
+                if dpg.does_item_exist(tag):
+                    cands.append(_clean_player(dpg.get_value(tag)))
+            except Exception:
+                pass
         try:
-            return dpg.get_value("dbl_inp_player").strip()
+            cands.append(_clean_player(get_shared_creds().get("player", "")))
         except Exception:
-            return G.get("player","")
+            pass
+        cands.append(_clean_player(G.get("player", "")))
+        cands = [c for c in cands if c]
+        for c in cands:
+            if Path(c).is_file():
+                return c
+        return cands[0] if cands else ""
+
+    _KNOWN_PLAYERS = (
+        r"%ProgramFiles%\MPC-HC\mpc-hc64.exe",
+        r"%ProgramFiles(x86)%\MPC-HC\mpc-hc.exe",
+        r"%ProgramFiles(x86)%\K-Lite Codec Pack\MPC-HC64\mpc-hc64.exe",
+        r"%ProgramFiles(x86)%\K-Lite Codec Pack\MPC-HC\mpc-hc.exe",
+        r"%ProgramFiles%\MPC-BE x64\mpc-be64.exe",
+        r"%ProgramFiles(x86)%\MPC-BE\mpc-be.exe",
+        r"%ProgramFiles%\VideoLAN\VLC\vlc.exe",
+        r"%ProgramFiles(x86)%\VideoLAN\VLC\vlc.exe",
+        r"%ProgramFiles%\DAUM\PotPlayer\PotPlayerMini64.exe",
+    )
+
+    def _assoc_player(ext):
+        """Programme associe a l'extension par Windows (ex. MPC-HC pour .mkv)."""
+        if sys.platform != "win32":
+            return ""
+        try:
+            import ctypes
+            from ctypes import wintypes
+            fn = ctypes.windll.shlwapi.AssocQueryStringW
+            fn.argtypes = [ctypes.c_uint, ctypes.c_uint, wintypes.LPCWSTR,
+                           wintypes.LPCWSTR, wintypes.LPWSTR,
+                           ctypes.POINTER(wintypes.DWORD)]
+            size = wintypes.DWORD(1024)
+            buf = ctypes.create_unicode_buffer(1024)
+            # ASSOCF_NONE=0, ASSOCSTR_EXECUTABLE=2
+            if fn(0, 2, ext or ".mkv", "open", buf, ctypes.byref(size)) == 0:
+                return buf.value
+        except Exception:
+            pass
+        return ""
+
+    def resolve_player(player, sample_path=""):
+        """Chemin d'un lecteur utilisable : celui configure s'il existe, sinon
+        le lecteur associe par Windows a l'extension, sinon une installation
+        standard de MPC-HC / MPC-BE / VLC / PotPlayer. '' si rien."""
+        player = _clean_player(player)
+        if player and Path(player).is_file():
+            return player
+        ext = Path(sample_path).suffix if sample_path else ".mkv"
+        a = _assoc_player(ext)
+        if a and Path(a).is_file() and player_kind(a):
+            return a
+        if sys.platform == "win32":
+            for c in _KNOWN_PLAYERS:
+                c = os.path.expandvars(c)
+                if Path(c).is_file():
+                    return c
+        return ""
 
 
-    def open_file(path, player=""):
+    # ── Timecode de depart (bouton "Ouvrir tout") ──────────────────
+    TIMECODE_FILE = APP_DIR / "emby_toolbox_timecode.json"
+
+    def parse_timecode(txt):
+        """'1:23:45' / '23:45' / '1h23m' / '45m' / '90s' / '42' (minutes)
+        -> secondes (int). '' ou '0' -> 0. Invalide -> None."""
+        t = (txt or "").strip().lower().replace(" ", "")
+        if not t:
+            return 0
+        if ":" in t:
+            parts = t.split(":")
+            if len(parts) > 3 or not all(p.isdigit() for p in parts):
+                return None
+            sec = 0
+            for p in parts:
+                sec = sec * 60 + int(p)
+            return sec
+        m = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m(?:in)?)?(?:(\d+)s?)?", t)
+        if not m or not any(m.groups()):
+            return None
+        h, mi, se = (int(g) if g else 0 for g in m.groups())
+        if not t.endswith("s") and m.group(3) and not m.group(2):
+            mi, se = se, 0                   # '42' ou '1h30' : minutes
+        return h * 3600 + mi * 60 + se
+
+    def fmt_timecode(sec):
+        sec = int(sec or 0)
+        return f"{sec // 3600}:{sec // 60 % 60:02d}:{sec % 60:02d}"
+
+    def load_last_timecode():
+        try:
+            return json.loads(TIMECODE_FILE.read_text("utf-8")).get("timecode", "")
+        except Exception:
+            return ""
+
+    def save_last_timecode(tc):
+        try:
+            TIMECODE_FILE.write_text(json.dumps({"timecode": tc}), "utf-8")
+        except Exception:
+            pass
+
+    def player_kind(player):
+        n = re.split(r"[\\/]", (player or "").strip())[-1].lower()
+        if n.startswith("mpc"):        return "mpc"      # mpc-hc, mpc-hc64, mpc-be64
+        if n.startswith("vlc"):        return "vlc"
+        if n.startswith("mpv"):        return "mpv"
+        if "potplayer" in n:           return "pot"
+        return ""
+
+    def player_cmd(player, path, start_s=0):
+        """Ligne de commande du lecteur, avec position de depart si demandee."""
+        start_s = int(start_s or 0)
+        k = player_kind(player)
+        if start_s <= 0 or not k:
+            return [player, path]
+        if k == "mpc":   # MPC-HC / MPC-BE : /start en millisecondes
+            return [player, path, "/start", str(start_s * 1000)]
+        if k == "vlc":
+            return [player, f"--start-time={start_s}", path]
+        if k == "mpv":
+            return [player, f"--start={start_s}", path]
+        if k == "pot":
+            return [player, path, f"/seek={fmt_timecode(start_s)}"]
+        return [player, path]
+
+    def open_file(path, player="", start_s=0):
         if not path: return
+        player = resolve_player(player, path) or player
         try:
             if player and Path(player).exists():
-                subprocess.Popen([player, path])
+                subprocess.Popen(player_cmd(player, path, start_s))
             elif sys.platform == "win32":
                 # os.startfile gère mieux les chemins UNC que cmd /c start
                 os.startfile(path)
@@ -4731,16 +5741,17 @@ def _init_doublons():
                 f"Chemin tente :\n{p}\n\nErreur : {e}"))
 
 
-    def open_files_tiled(paths, player):
+    def open_files_tiled(paths, player, start_s=0):
         """Ouvre plusieurs fichiers et dispose les fenêtres en mosaïque (Windows).
         2 fichiers -> côte à côte plein écran ; 3 -> en ligne ; 4+ -> grille carrée.
         Hors Windows ou sans lecteur défini -> ouverture simple (empilée)."""
         paths = [p for p in paths if p]
         if not paths:
             return
+        player = resolve_player(player, paths[0]) or player
         if sys.platform != "win32" or not (player and Path(player).exists()):
             for p in paths:
-                open_file(p, player)
+                open_file(p, player, start_s)
             return
 
         def worker():
@@ -4797,7 +5808,7 @@ def _init_doublons():
             # 2. Lancer chaque fichier (léger décalage = fenêtres distinctes)
             for p in paths:
                 try:
-                    subprocess.Popen([player, p])
+                    subprocess.Popen(player_cmd(player, p, start_s))
                 except Exception as e:
                     ui(lambda e=e, pp=p: modal_err("Erreur ouverture", f"{pp}\n\n{e}"))
                 time.sleep(0.25)
@@ -4918,6 +5929,10 @@ def _init_doublons():
             dpg.add_separator()
             dpg.add_button(label="OK",width=-1,user_data=tag,callback=lambda s,a,u:dpg.delete_item(u))
 
+    # ids en cours de suppression -> (titre, debut) : anti double-clic +
+    # sablier anime / chrono affiches par _tick() tant que la liste n'est pas vide
+    _deleting = {}
+
     def modal_confirm_delete(item_id, item_name, group_key):
         """Modale de confirmation avant suppression via l'API Emby."""
         nonlocal _mid; _mid+=1; tag=f"dbl_del{_mid}"
@@ -4937,9 +5952,20 @@ def _init_doublons():
             with dpg.group(horizontal=True):
                 def _do_delete(delete_file, _t=tag, _id=item_id, _key=group_key, _nm=item_name):
                     dpg.delete_item(_t)
+                    if _id in _deleting:
+                        _set_status(f"Suppression déjà en cours : {_nm}", (240,160,0))
+                        return
+                    _deleting[_id] = (_nm, time.time())
+                    _set_status(f"Suppression en cours (jusqu'à {DELETE_TIMEOUT} s) : {_nm}",
+                                (240,160,0))
+                    def _prog(left, _nm=_nm):
+                        ui(lambda l=left: _set_status(
+                            f"Emby lent - vérification de la suppression ({l} s) : {_nm}",
+                            (240,160,0)))
                     def thread():
                         try:
-                            emby_delete(url, key, _id, delete_file=delete_file)
+                            emby_delete(url, key, _id, delete_file=delete_file,
+                                        progress=_prog)
                             def on_ok():
                                 # Retirer l'item du groupe dans G["dupes"]
                                 grp = G["dupes"].get(_key, [])
@@ -4961,8 +5987,14 @@ def _init_doublons():
                             else:
                                 m = f"ERREUR - HTTP {e.code}: {e.reason}"
                             ui(lambda m=m: _set_status(m, (233,69,96)))
+                        except TimeoutError as e:
+                            ui(lambda m=str(e): (
+                                _set_status("ERREUR suppression - délai dépassé", (233,69,96)),
+                                modal_err("Suppression : délai dépassé", m)))
                         except Exception as e:
                             ui(lambda m=str(e): _set_status(f"ERREUR suppression - {m}", (233,69,96)))
+                        finally:
+                            _deleting.pop(_id, None)
                     threading.Thread(target=thread, daemon=True).start()
                 dpg.add_button(label=t("del_emby_only"), width=230,
                     callback=lambda s,a,u: _do_delete(False))
@@ -4973,6 +6005,91 @@ def _init_doublons():
             dpg.add_button(label=t("cancel"), width=-1,
                 user_data=tag,
                 callback=lambda s,a,u: dpg.delete_item(u))
+
+    def get_start_timecode():
+        """Timecode du champ 'Départ' (barre de l'onglet). (secondes, texte)."""
+        try:
+            txt = (dpg.get_value("dbl_inp_tc") or "").strip()
+        except Exception:
+            txt = G.get("last_timecode", "")
+        return parse_timecode(txt), txt
+
+    def on_timecode_change(s=None, v=None, u=None):
+        txt = (v or "").strip()
+        sec = parse_timecode(txt)
+        try:
+            if sec is None:
+                dpg.set_value("dbl_lbl_tc_state", "?")
+                dpg.configure_item("dbl_lbl_tc_state", color=(233,69,96))
+                return
+            dpg.set_value("dbl_lbl_tc_state", fmt_timecode(sec) if sec else
+                          ("début" if G.get("lang","fr") != "en" else "start"))
+            dpg.configure_item("dbl_lbl_tc_state", color=(136,136,170))
+        except Exception:
+            pass
+        G["last_timecode"] = txt
+        save_last_timecode(txt)
+
+    def open_all_now(paths):
+        """'Ouvrir tout' : ouvre directement, au timecode réglé en amont."""
+        paths = [p for p in paths if p]
+        if not paths:
+            return
+        en = G.get("lang", "fr") == "en"
+        L = (lambda fr, e: e if en else fr)
+        sec, txt = get_start_timecode()
+        if sec is None:
+            _set_status(L(f"Timecode de départ invalide : {txt!r} (ex : 1:02:30, 45:00, 1h05m, 45)",
+                          f"Invalid start timecode: {txt!r} (e.g. 1:02:30, 45:00, 1h05m, 45)"),
+                        (233,69,96))
+            return
+        player = resolve_player(get_player(), paths[0])
+        _trace("Ouvrir tout : lecteur=%r start=%ss prefixe=%r unc=%r fichiers=%r"
+               % (player or get_player(), sec, G.get("nas_prefix"), G.get("nas_unc"), paths))
+
+        def _check_then_open(paths=paths, pl=player or get_player(), sec=sec):
+            # Verification AVANT lancement (dans un thread : un NAS en veille
+            # peut mettre quelques secondes a repondre) : un chemin faux donnait
+            # seulement "fichier introuvable" dans le lecteur, sans indice.
+            missing = []
+            for p in paths:
+                try:
+                    if not os.path.exists(p):
+                        missing.append(p)
+                except Exception:
+                    missing.append(p)
+            ok = [p for p in paths if p not in missing]
+            if ok:
+                open_files_tiled(ok, pl, sec)
+            if missing:
+                _trace("Ouvrir tout : introuvable(s) : %r" % missing)
+                ui(lambda m=missing: modal_err(
+                    L("Fichier introuvable", "File not found"),
+                    L("Ce(s) chemin(s) n'existe(nt) pas depuis ce PC :\n\n",
+                      "This/these path(s) do not exist from this PC:\n\n")
+                    + "\n".join(m)
+                    + L(f"\n\nConversion utilisée : préfixe Linux {G.get('nas_prefix')!r}"
+                        f"  ->  UNC {G.get('nas_unc')!r}\n"
+                        "Vérifiez le préfixe NAS et le chemin UNC dans le bandeau du haut,"
+                        " puis cliquez Enregistrer et relancez le scan.",
+                        f"\n\nConversion used: Linux prefix {G.get('nas_prefix')!r}"
+                        f"  ->  UNC {G.get('nas_unc')!r}\n"
+                        "Check the NAS prefix and UNC path in the top bar,"
+                        " then click Save and scan again.")))
+        threading.Thread(target=_check_then_open, daemon=True).start()
+        name = Path(player).name if player else L("lecteur système", "system player")
+        if sec and not player_kind(player):
+            _set_status(L(f"Lecteur non reconnu ({name}) : ouverture SANS timecode. "
+                          "Indiquez le chemin de mpc-hc64.exe / vlc.exe dans le bandeau du haut.",
+                          f"Unknown player ({name}): opening WITHOUT timecode. "
+                          "Set the path of mpc-hc64.exe / vlc.exe in the top bar."),
+                        (240,160,0))
+        else:
+            _set_status(L(f"Ouverture de {len(paths)} fichier(s) avec {name}"
+                          + (f" à {fmt_timecode(sec)}" if sec else " depuis le début"),
+                          f"Opening {len(paths)} file(s) with {name}"
+                          + (f" at {fmt_timecode(sec)}" if sec else " from the start")),
+                        (46,204,113))
 
     def show_ignored_panel():
         """Panneau listant les groupes ignorés avec bouton Retirer individuel."""
@@ -5256,15 +6373,19 @@ def _init_doublons():
                     dpg.add_spacer(width=10)
                     dpg.add_button(label=t("open_all"), width=80,
                         user_data=all_wp,
-                        callback=lambda s,a,u: open_files_tiled(u, get_player()))
+                        callback=lambda s,a,u: open_all_now(u))
                     tip("Ouvre tous les fichiers du groupe et dispose les fenetres\n"
-                        "cote a cote (mosaique) automatiquement.\n\n"
+                        "cote a cote (mosaique) automatiquement.\n"
+                        "Toutes les fenetres demarrent au timecode du champ 'Depart'\n"
+                        "(MPC-HC, MPC-BE, VLC, mpv, PotPlayer).\n\n"
                         "ATTENTION : votre lecteur video doit supporter\n"
                         "plusieurs instances simultanées (sessions multiples).\n"
                         "VLC : Preferences > Interface > decocher 'Une seule instance'.\n"
                         "MPC-BE : Options > Lecteur > 'Permettre plusieurs instances'.", wrap=360,
                         en="Opens all files in the group and arranges the windows\n"
-                           "side by side (mosaic) automatically.\n\n"
+                           "side by side (mosaic) automatically.\n"
+                           "Every window starts at the timecode of the 'Start' field\n"
+                           "(MPC-HC, MPC-BE, VLC, mpv, PotPlayer).\n\n"
                            "WARNING: your video player must support\n"
                            "multiple simultaneous instances (multi-session).\n"
                            "VLC: Preferences > Interface > uncheck 'Allow only one instance'.\n"
@@ -5413,7 +6534,7 @@ def _init_doublons():
             with dpg.group(horizontal=True):
                 dpg.add_button(label=t("open_both"), width=130,
                     user_data=wp,
-                    callback=lambda s,a,u: open_files_tiled(u, get_player()))
+                    callback=lambda s,a,u: open_all_now(u))
                 tip("Ouvre tous les fichiers du groupe avec le lecteur configure.",
                     en="Opens all files in the group with the configured player.")
                 dpg.add_spacer(width=10)
@@ -5458,7 +6579,7 @@ def _init_doublons():
             try: dpg.configure_item(tag, label=L[key])
             except Exception: pass
         # Labels texte
-        for tag, key in [("dbl_lbl_url","url_lbl"),("dbl_lbl_apikey","apikey_lbl"),
+        for tag, key in [("dbl_lbl_tc","tc_lbl"),("dbl_lbl_url","url_lbl"),("dbl_lbl_apikey","apikey_lbl"),
                          ("dbl_t_appname","app_title"),
                          ("dbl_lbl_uid","userid_lbl"),("dbl_lbl_prefix","prefix_lbl"),
                          ("dbl_lbl_player","player_lbl"),("dbl_lbl_filter","filter_lbl"),
@@ -5880,15 +7001,17 @@ def _init_doublons():
                 set_step(f"OK - recuperation films ({scope_msg})...",0.05)
                 t0=time.time()
 
-                def on_page(fetched,total,page):
+                def on_page(fetched,total,page,scope=""):
                     pct=0.05+0.55*(fetched/max(total,1))
                     el=time.time()-t0; rate=fetched/el if el>0 else 0
                     eta=(total-fetched)/rate if rate>0 else 0
-                    msg=(f"Page {page} - {fetched} films ({rate:.0f}/s)"
+                    msg=((scope+"  -  " if scope else "")
+                         +f"Page {page} - {fetched} films ({rate:.0f}/s)"
                          +(f" ~{eta:.0f}s" if eta>2 else ""))
                     set_step(msg,pct)
 
-                movies=fetch_movies(p["url"],p["key"],p["uid"],on_page,parent_ids)
+                names={l.get("id"):l.get("name") for l in (G.get("libraries") or [])}
+                movies=fetch_movies(p["url"],p["key"],p["uid"],on_page,parent_ids,names)
                 set_step(f"{len(movies)} films - analyse...",0.62)
 
                 def on_step(idx,total,title):
@@ -6021,6 +7144,20 @@ def _init_doublons():
                            callback=lambda s,a,u: do_refresh_emby(),width=120)
             tip_t("tip_refresh_emby", wrap=380)
             dpg.add_spacer(width=10)
+            dpg.add_text("Depart Ouvrir tout :",tag="dbl_lbl_tc",color=(136,136,170))
+            dpg.add_input_text(tag="dbl_inp_tc",width=80,hint="0:45:00",
+                               default_value=G.get("last_timecode") or load_last_timecode(),
+                               callback=on_timecode_change)
+            tip_t("tip_tc", wrap=360)
+            dpg.add_text("",tag="dbl_lbl_tc_state",color=(136,136,170))
+            dpg.add_spacer(width=10)
+            # Sablier : visible seulement pendant une suppression
+            with dpg.group(horizontal=True, tag="dbl_grp_del_busy", show=False):
+                dpg.add_loading_indicator(style=1, radius=1.4, thickness=1.6,
+                                          color=(240,160,0),
+                                          secondary_color=(90,70,30))
+                dpg.add_text("", tag="dbl_lbl_del_busy", color=(240,160,0))
+                dpg.add_spacer(width=10)
             dpg.add_text("",tag="dbl_lbl_scan_info",color=(136,136,170))
         dpg.add_spacer(height=4)
 
@@ -6112,11 +7249,41 @@ def _init_doublons():
     #  POINT D'ENTREE
     # ══════════════════════════════════════════════════════════════
 
+    _spin_state = {"shown": False, "txt": ""}
+
+    def _update_delete_spinner():
+        """Sablier anime + chrono pendant les suppressions en cours."""
+        busy = bool(_deleting)
+        try:
+            if busy != _spin_state["shown"]:
+                dpg.configure_item("dbl_grp_del_busy", show=busy)
+                _spin_state["shown"] = busy
+            if not busy:
+                return
+            en = G.get("lang", "fr") == "en"
+            items = list(_deleting.values())
+            name, t0 = min(items, key=lambda x: x[1])
+            el = int(time.time() - t0)
+            chrono = f"{el // 60}:{el % 60:02d}"
+            if len(items) > 1:
+                txt = (f"Deleting {len(items)} items... {chrono}" if en
+                       else f"Suppression de {len(items)} éléments... {chrono}")
+            else:
+                short = name if len(name) <= 45 else name[:42] + "..."
+                txt = (f"Deleting: {short}  {chrono}" if en
+                       else f"Suppression : {short}  {chrono}")
+            if txt != _spin_state["txt"]:
+                dpg.set_value("dbl_lbl_del_busy", txt)
+                _spin_state["txt"] = txt
+        except Exception:
+            pass
+
     def _tick():
         nonlocal _render_timer
         if _render_timer > 0 and time.time() >= _render_timer:
             _render_timer = 0.0
             render_results()
+        _update_delete_spinner()
 
     def _set_lang(code):
         G["lang"] = "en" if str(code).upper() == "EN" else "fr"
@@ -6167,11 +7334,15 @@ def _push_doublons(c):
             dpg.set_value(tag, c.get(k, "") or "")
 
 def migrate_into_shared(app, DBL):
-    """Au premier lancement : agrege les clefs des anciens fichiers de
-    config (genres, refmatch, doublons) dans le magasin partage chiffre."""
-    if SHARED_CREDS_FILE.exists():
-        load_shared_creds()
-        return
+    """Agrege les clefs des fichiers de config de chaque outil (genres
+    emby_toolbox_dpg.ini, refmatch, doublons, api_config), tous lus A COTE DU
+    SCRIPT, dans le magasin partage chiffre emby_toolbox_creds.ini.
+
+    Avant : des que emby_toolbox_creds.ini existait, les autres .ini etaient
+    ignores, meme si ce fichier etait vide ou ne contenait que les valeurs par
+    defaut -> bandeau vide alors que emby_toolbox_dpg.ini etait renseigne.
+    Maintenant : chaque champ vide (ou reste a sa valeur par defaut) du magasin
+    partage est complete depuis les .ini des outils, a chaque lancement."""
 
     def first(*vals):
         for v in vals:
@@ -6189,21 +7360,41 @@ def migrate_into_shared(app, DBL):
         api = {}
     leg = DBL.get("legacy", {})
 
-    save_shared_creds(
-        url=first(g.get("url"), app.get("emby", "url", ""), leg.get("url")),
-        api_key=first(g.get("api_key"),
-                      decrypt_secret(app.get("emby", "api_key", "")),
-                      leg.get("api_key")),
-        user_id=first(g.get("user_id"), leg.get("user_id")),
-        nas_prefix=first(g.get("nas_prefix"), leg.get("nas_prefix")),
-        nas_unc=first(g.get("nas_unc"), leg.get("nas_unc")),
-        player=first(g.get("player"), leg.get("player")),
-        omdb_key=first(api.get("omdb_key")),
-        tmdb_key=first(api.get("tmdb_key"),
-                       decrypt_secret(app.get("tmdb", "api_key", ""))),
-        provider=first(api.get("provider")),
-        lang=first(getattr(app, "lang", "FR")),
-    )
+    found = {
+        "url": first(g.get("url"), app.get("emby", "url", ""), leg.get("url")),
+        "api_key": first(g.get("api_key"),
+                         decrypt_secret(app.get("emby", "api_key", "")),
+                         leg.get("api_key")),
+        "user_id": first(g.get("user_id"), leg.get("user_id")),
+        "nas_prefix": first(g.get("nas_prefix"), leg.get("nas_prefix")),
+        "nas_unc": first(g.get("nas_unc"), leg.get("nas_unc")),
+        "player": first(g.get("player"), leg.get("player")),
+        "omdb_key": first(api.get("omdb_key")),
+        "tmdb_key": first(api.get("tmdb_key"),
+                          decrypt_secret(app.get("tmdb", "api_key", ""))),
+        "provider": first(api.get("provider")),
+        "lang": first(getattr(app, "lang", "FR")),
+    }
+
+    if not SHARED_CREDS_FILE.exists():
+        save_shared_creds(**found)
+        _trace("config : %s cree depuis %s" % (SHARED_CREDS_FILE, CONFIG_FILE))
+        return
+
+    cur = load_shared_creds()
+    dflt = _shared_defaults()
+    fill = {}
+    for k, v in found.items():
+        if not v or k in ("lang", "provider") or v == dflt.get(k) \
+                or "192.168.1.x" in str(v):      # valeurs d'exemple
+            continue
+        if not cur.get(k) or cur.get(k) == dflt.get(k) \
+                or "192.168.1.x" in str(cur.get(k)):   # exemple resté en place
+            fill[k] = v
+    if fill:
+        save_shared_creds(**fill)
+        _trace("config : champs completes depuis %s : %s"
+               % (CONFIG_FILE, ", ".join(sorted(fill))))
 
 # =====================================================================
 #  OUTIL 4 : MKV Renamer  --  renommage automatique des films MKV
@@ -9657,7 +10848,7 @@ def main():
     SES = _init_sessions()             # espace de noms Sessions
     app = App()                        # instance RefMatch
 
-    dpg.create_viewport(title="Emby Toolbox  -  Genres / IDFinder / Doublons "
+    dpg.create_viewport(title=f"Emby Toolbox {APP_VERSION}  -  Genres / IDFinder / Doublons "
                               "/ MKV / Sessions",
                         width=1320, height=920, min_width=1024, min_height=640)
 
@@ -10023,4 +11214,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
