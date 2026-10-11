@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v25"
+#define SCR_VERSION "v26"
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -239,6 +239,30 @@ std::string paramsSummary(const std::string &s) {
   return r.empty() ? "physique standard" : r;
 }
 
+// découpe un texte en lignes d'au plus w caractères (UTF-8), aux espaces si possible
+std::vector<std::string> wrapText(const std::string &s, size_t w) {
+  std::vector<std::string> out;
+  std::string line, word;
+  auto len = [](const std::string &x) { size_t n = 0; for (unsigned char c : x) n += (c & 0xc0) != 0x80; return n; };
+  auto flushWord = [&] {
+    while (len(word) > w) {   // mot trop long : coupé
+      size_t n = 0, i = 0;
+      for (; i < word.size() && n < w; i++) n += (static_cast<unsigned char>(word[i]) & 0xc0) != 0x80;
+      while (i < word.size() && (static_cast<unsigned char>(word[i]) & 0xc0) == 0x80) i++;
+      if (!line.empty()) { out.push_back(line); line.clear(); }
+      out.push_back(word.substr(0, i)); word = word.substr(i);
+    }
+    if (line.empty()) line = word;
+    else if (len(line) + 1 + len(word) <= w) line += " " + word;
+    else { out.push_back(line); line = word; }
+    word.clear();
+  };
+  for (char c : s) { if (c == ' ') { if (!word.empty()) flushWord(); } else word += c; }
+  if (!word.empty()) flushWord();
+  if (!line.empty()) out.push_back(line);
+  return out;
+}
+
 // enregistre « relais = valeur » dans scr.ini : remplace la ligne relais existante (même mise en
 // commentaire par un #), sinon l'ajoute à la fin
 void saveRelay(const std::string &path, const std::string &value) {
@@ -323,7 +347,7 @@ int main(int argc, char **argv) {
   // menu « Computer Link » : quand le joueur choisit « 3. Computer Link », le jeu est retenu à l'entrée
   // du lien et ce menu propose les adversaires trouvés sur le réseau local, une salle du serveur
   // relais (code) ou une adresse IP. Celui qui choisit l'adversaire devient le maître (il mène les menus).
-  enum class Typing { None, Code, Ip, Server };
+  enum class Typing { None, Code, Ip, Server, Chat };
   Typing typing = Typing::None;
   std::string typed;
   int menuSel = 0;
@@ -449,6 +473,7 @@ int main(int argc, char **argv) {
       bool inRoom = net.relayRoom() && net.state() == NetLink::State::Waiting;   // salle privée du relais
       if (inRoom)
         for (auto &p : net.peers()) it.push_back({"Affronter " + p.name.substr(0, 20), 0, p});
+      if (inRoom) it.push_back({"Écrire un message (F9)", 8, {}});
       if (idle) {
         if (probe.ok()) {
           it.push_back({"Premier joueur disponible", 5, {}});
@@ -486,6 +511,7 @@ int main(int argc, char **argv) {
       case 5: if (!o.relay.empty()) net.joinRelay(o.relay, ""); menuSel = 0; break;
       case 6: probe.start(o.relay); menuSel = 0; break;
       case 7: typing = Typing::Server; typed = o.relay; SDL_StartTextInput(); break;
+      case 8: if (net.canChat()) { typing = Typing::Chat; typed.clear(); SDL_StartTextInput(); } break;
     }
   };
   // aide aux tests automatiques (aucun effet sinon) : SCR_AUTOKEYS="trame:Touche,..." simule des appuis
@@ -522,7 +548,8 @@ int main(int argc, char **argv) {
         if (online()) { if (net.mode() == NetLink::Mode::Lobby) net.close(); if (!net.active()) probe.start(o.relay); }
         else if (!net.active() || net.mode() == NetLink::Mode::Relay) net.lobby();
       }
-      if (!open && menuOpen && typing != Typing::None) { typing = Typing::None; SDL_StopTextInput(); }
+      if (!open && menuOpen && typing != Typing::None && typing != Typing::Chat) { typing = Typing::None; SDL_StopTextInput(); }
+      if (typing == Typing::Chat && !net.canChat()) { typing = Typing::None; SDL_StopTextInput(); }
       menuOpen = open;
     }
     SDL_Event ev;
@@ -534,12 +561,19 @@ int main(int argc, char **argv) {
           unsigned char ch = static_cast<unsigned char>(*c);
           if (typing == Typing::Code && std::isalnum(ch) && typed.size() < 12) typed += char(std::toupper(ch));
           if ((typing == Typing::Ip || typing == Typing::Server) && (std::isalnum(ch) || ch == '.' || ch == ':' || ch == '-') && typed.size() < 60) typed += char(ch);
+          if (typing == Typing::Chat && ch >= 32 && typed.size() < 110) typed += char(ch);
         }
+      }
+      else if (ev.type == SDL_KEYDOWN && typing == Typing::None && ev.key.keysym.scancode == SDL_SCANCODE_F9) {
+        if (net.canChat()) { typing = Typing::Chat; typed.clear(); SDL_StartTextInput(); }   // discussion
       }
       else if (ev.type == SDL_KEYDOWN && typing != Typing::None) {
         SDL_Scancode sc = ev.key.keysym.scancode;
         if (sc == SDL_SCANCODE_ESCAPE) { typing = Typing::None; SDL_StopTextInput(); }
-        else if (sc == SDL_SCANCODE_BACKSPACE && !typed.empty()) typed.pop_back();
+        else if (sc == SDL_SCANCODE_BACKSPACE && !typed.empty()) {   // un caractère (UTF-8) entier
+          while (!typed.empty() && (static_cast<unsigned char>(typed.back()) & 0xc0) == 0x80) typed.pop_back();
+          if (!typed.empty()) typed.pop_back();
+        }
         else if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER) {
           if (typing == Typing::Code) {
             if (typed.empty()) {   // pas de code : on en invente un à donner aux autres joueurs
@@ -547,6 +581,8 @@ int main(int argc, char **argv) {
               typed = std::to_string(1000 + rng() % 9000);
             }
             net.joinRelay(o.relay, typed);
+          } else if (typing == Typing::Chat) {   // message envoyé ; F9 pour le suivant
+            net.sendChat(typed);
           } else if (typing == Typing::Server) {   // adresse du serveur relais : enregistrée dans scr.ini
             if (!typed.empty()) {
               if (typed.find(':') == std::string::npos) typed += ":" + std::to_string(NET_PORT);
@@ -728,6 +764,41 @@ int main(int argc, char **argv) {
       SDL_Rect r{(logicalW - rw) / 2, 0, rw, rh};
       SDL_RenderCopy(ren, btex, nullptr, &r);
     };
+    // discussion hors du menu (pendant le jeu) : derniers messages en bas de l'image, saisie (F9)
+    auto drawChat = [&](int logicalW, int logicalH) {
+      if (menuOpen) return;   // dans le menu, la discussion est dans le panneau
+      double now = NetLink::clock();
+      std::vector<std::pair<std::string, uint32_t>> ls;
+      int scale = std::max(1, logicalW / 640);
+      size_t cols = size_t(std::max(20, logicalW / (6 * scale) - 2));
+      for (auto &c : net.chat())
+        if (now - c.t < 10 || typing == Typing::Chat)
+          for (auto &w : wrapText(c.from + " : " + c.text, cols)) ls.push_back({w, c.mine ? 0xffa0e0ffu : 0xffffffa0u});
+      if (ls.size() > 5) ls.erase(ls.begin(), ls.end() - 5);
+      if (typing == Typing::Chat)
+        for (auto &w : wrapText("Message (Entrée : envoyer, Échap : fermer) : " + typed + "_", cols)) ls.push_back({w, 0xffffffffu});
+      if (ls.empty()) return;
+      static std::map<std::string, std::tuple<SDL_Texture *, int, int>> cache;
+      if (cache.size() > 60) { for (auto &kv : cache) SDL_DestroyTexture(std::get<0>(kv.second)); cache.clear(); }
+      int lineH = 13 * scale, y = logicalH - int(ls.size()) * lineH - 2 * scale;
+      for (auto &l : ls) {
+        std::string key = l.first + "|" + std::to_string(l.second) + "|" + std::to_string(scale);
+        auto it = cache.find(key);
+        if (it == cache.end()) {
+          int bw, bh;
+          auto img = renderBanner(l.first, scale, bw, bh, l.second, 0xc0000000u);
+          SDL_Texture *t = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, bw, bh);
+          SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
+          SDL_UpdateTexture(t, nullptr, img.data(), bw * 4);
+          it = cache.emplace(key, std::make_tuple(t, bw, bh)).first;
+        }
+        auto [t, bw, bh] = it->second;
+        int rw = std::min(bw, logicalW), rh = bw > logicalW ? bh * logicalW / bw : bh;
+        SDL_Rect r{0, y, rw, rh};
+        SDL_RenderCopy(ren, t, nullptr, &r);
+        y += lineH;
+      }
+    };
     // menu « Computer Link », dessiné par-dessus le jeu (même allure que les menus d'origine)
     auto drawMenu = [&](int logicalW, int logicalH) {
       if (!menuOpen) return;
@@ -776,12 +847,26 @@ int main(int argc, char **argv) {
       if (menuSel >= int(items.size())) menuSel = int(items.size()) - 1;
       for (size_t k = 0; k < items.size(); k++) {
         std::string lab = items[k].label;
-        if (typing != Typing::None && int(k) == menuSel)
+        if (typing != Typing::None && typing != Typing::Chat && int(k) == menuSel)
           lab = (typing == Typing::Code ? "Code de salle : " : typing == Typing::Server ? "Serveur : " : "Adresse : ") + typed + "_";
         bool sel = int(k) == menuSel;
         lines.push_back({lab, sel ? 0xff000000u : 0xff202020u, sel ? 0xffff9a00u : 0xffb6b6b6u});
       }
-      lines.push_back({typing == Typing::Code ? "Entrée : valider (vide = code au hasard)"
+      if (net.canChat() || !net.chat().empty()) {   // discussion de la salle (3 derniers messages)
+        const auto &ch = net.chat();
+        std::vector<Line> cl;
+        for (size_t k = ch.size() > 3 ? ch.size() - 3 : 0; k < ch.size(); k++)
+          for (auto &w : wrapText(ch[k].from + " : " + ch[k].text, 44))
+            cl.push_back({w, ch[k].mine ? 0xffa0e0ffu : 0xffffffa0u, 0xe0101830u});
+        if (cl.size() > 4) cl.erase(cl.begin(), cl.end() - 4);   // au plus 4 lignes dans le panneau
+        lines.insert(lines.end(), cl.begin(), cl.end());
+        if (typing == Typing::Chat) {
+          auto in = wrapText("Message : " + typed + "_", 44);
+          for (size_t k = in.size() > 2 ? in.size() - 2 : 0; k < in.size(); k++) lines.push_back({in[k], 0xffffffffu, 0xe0303860u});
+        }
+      }
+      lines.push_back({typing == Typing::Chat ? "Entrée : envoyer     Échap : fermer"
+                       : typing == Typing::Code ? "Entrée : valider (vide = code au hasard)"
                        : typing == Typing::Ip ? "Entrée : valider     Échap : retour"
                        : typing == Typing::Server ? "Adresse[:port], Entrée : enregistrer"
                                               : "Flèches + Entrée : choisir  Échap : annuler", 0xffc0c0c0u, 0xe0202020u});
@@ -834,6 +919,7 @@ int main(int argc, char **argv) {
       SDL_RenderCopy(ren, texHd, nullptr, nullptr);
       drawBanner(o.hdW);
       drawMenu(o.hdW, o.hdH);
+      drawChat(o.hdW, o.hdH);
       SDL_RenderPresent(ren);
       // compteur d'images par seconde dans le titre
       fpsN++;
@@ -859,6 +945,7 @@ int main(int argc, char **argv) {
       SDL_RenderCopy(ren, tex, nullptr, nullptr);
       drawBanner(320);
       drawMenu(320, 200);
+      drawChat(320, 200);
       for (size_t k = 0; k < autoShots.size();)
         if (m->frames() >= autoShots[k].first) {
           int w, h; SDL_GetRendererOutputSize(ren, &w, &h);

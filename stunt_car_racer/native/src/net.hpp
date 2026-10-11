@@ -26,7 +26,7 @@ constexpr int NET_PORT = 27420;           // TCP : hébergement en réseau local
 constexpr int NET_DISCOVERY_PORT = 27421; // UDP : annonces de parties en réseau local
 
 enum NetFrame : uint8_t { NF_HELLO = 1, NF_DATA = 2, NF_PING = 3, NF_PONG = 4, NF_BYE = 5, NF_JOIN = 10, NF_INFO = 11,
-                          NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16 };
+                          NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16, NF_CHAT = 17 };
 
 class NetLink {
  public:
@@ -61,6 +61,13 @@ class NetLink {
   bool joinRelay(const std::string &server, const std::string &room);
   bool relayRoom() const { return mode_ == Mode::Relay && !room_.empty(); }
   const std::string &room() const { return room_; }
+
+  // discussion : avec les joueurs de la salle privée (par le serveur), puis avec l'adversaire
+  struct ChatLine { std::string from, text; double t; bool mine; };
+  bool canChat() const { return (relayRoom() && state_ == State::Waiting) || state_ == State::Connected; }
+  void sendChat(const std::string &text);
+  const std::deque<ChatLine> &chat() const { return chat_; }
+  static double clock() { return now(); }
   void close(const std::string &why = "");
 
   // à appeler souvent (plusieurs fois par trame) : connexions, lecture, écriture, annonces, ping
@@ -100,6 +107,7 @@ class NetLink {
   bool helloSent_ = false, helloOk_ = false, relayPaired_ = false, master_ = false, waitedFirst_ = false;
   uint32_t id_ = 0;                  // identifiant de ce jeu dans les annonces
   std::vector<Peer> peers_;
+  std::deque<ChatLine> chat_;
   bool openListener(int port);
   bool openDiscovery(bool broadcast);
   void announce(double t);

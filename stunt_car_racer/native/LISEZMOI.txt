@@ -20,7 +20,7 @@ Page préc./suiv. circuit précédent/suivant (mode entraînement), F12 quitter.
 Multijoueur (à deux, en réseau) : premier menu du jeu, « 3. Computer Link - Local LAN » (même
 réseau : les adversaires trouvés sont proposés, ou une adresse IP) ou « 4. Online Multiplayer »
 (par Internet, via le serveur relais de scr.ini, dont la disponibilité est testée).
-F10 coupe la connexion. Voir LISEZMOI_MULTIJOUEUR.txt.
+F9 discuter avec les autres joueurs, F10 coupe la connexion. Voir LISEZMOI_MULTIJOUEUR.txt.
 
 Son : puce sonore YM2149 de l'Atari ST émulée (moteur, chocs...).
 

@@ -77,7 +77,7 @@ void NetLink::close(const std::string &why) {
   mode_ = Mode::Off; state_ = State::Off; connecting_ = false;
   in_.clear(); out_.clear(); rx_.clear(); dataOut_.clear(); peers_.clear();
   helloSent_ = helloOk_ = relayPaired_ = master_ = waitedFirst_ = false;
-  ping_ = -1; peerName_.clear(); peerTuning_.clear(); serverParams_.clear(); info_.clear(); error_.clear();
+  ping_ = -1; peerName_.clear(); peerTuning_.clear(); serverParams_.clear(); chat_.clear(); info_.clear(); error_.clear();
 }
 
 void NetLink::fail(const std::string &why) {
@@ -385,6 +385,15 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
       break;
     }
     case NF_PARAMS: serverParams_.assign(reinterpret_cast<const char *>(p), n); break;
+    case NF_CHAT: {   // « nom \t texte » (salle, par le serveur) ou « texte » (adversaire)
+      std::string s(reinterpret_cast<const char *>(p), n), from = peerName_;
+      size_t tab = s.find('\t');
+      if (tab != std::string::npos) { from = s.substr(0, tab); s = s.substr(tab + 1); }
+      if (from.empty()) from = "Adversaire";
+      chat_.push_back({from, s.substr(0, 120), now(), false});
+      while (chat_.size() > 30) chat_.pop_front();
+      break;
+    }
     case NF_LIST: {   // salle privée : joueurs présents et libres, « numéro \t nom \n »
       std::string s(reinterpret_cast<const char *>(p), n);
       peers_.clear();
@@ -408,6 +417,15 @@ void NetLink::flush() {
     if (r > 0) out_.erase(out_.begin(), out_.begin() + r);
     else { if (r < 0 && SCR_WOULDBLOCK(sockErr())) break; fail("connexion perdue"); break; }
   }
+}
+
+void NetLink::sendChat(const std::string &text) {
+  if (!canChat() || text.empty()) return;
+  std::string t = text.substr(0, 120);
+  frame(NF_CHAT, t);
+  flush();
+  chat_.push_back({name_, t, now(), true});
+  while (chat_.size() > 30) chat_.pop_front();
 }
 
 void NetLink::send(uint8_t b) {

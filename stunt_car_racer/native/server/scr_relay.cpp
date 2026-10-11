@@ -21,6 +21,8 @@
 // Protocole (trames : type 1 octet, longueur 2 octets gros-boutiste, données) :
 //   client -> serveur : JOIN2 (12) "AUTO|SALLE \0 code \0 version \0 nom"
 //                       PICK (14) "numéro"  (salle privée : choix de l'adversaire)
+//                       CHAT (17) "texte"   (salle privée : à tous les joueurs libres de la salle,
+//                                            reçu « nom\ttexte » ; en partie : retransmis à l'adversaire)
 //                       PROBE (15) ""       (test du serveur par le jeu : réponse INFO "SERVER joueurs parties")
 //                       JOIN (10) "code\0version"  (ancienne version : appariement par code)
 //   serveur -> client : INFO (11) "WAIT" | "PAIRED 1" (maître) | "PAIRED 2" | "GONE" | "BUSY" | "ERR message"
@@ -94,7 +96,7 @@ static const char *errText(int e) { return std::strerror(e); }
 
 namespace {
 
-constexpr uint8_t NF_JOIN = 10, NF_INFO = 11, NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16;
+constexpr uint8_t NF_JOIN = 10, NF_INFO = 11, NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16, NF_CHAT = 17;
 constexpr size_t MAX_CLIENTS = 512, MAX_PER_IP = 16, MAX_BUFFER = 1 << 20;
 const Sock NONE = Sock(-1);
 constexpr double JOIN_TIMEOUT = 20, PAIR_TIMEOUT = 3600, IDLE_TIMEOUT = 90;
@@ -152,7 +154,7 @@ struct Client {
   std::vector<uint8_t> in, out;
   Sock peer = NONE;              // partenaire une fois apparié
   bool joined = false, closing = false, probe = false;
-  double since = 0, lastRx = 0, pairedAt = 0;
+  double since = 0, lastRx = 0, pairedAt = 0, lastChat = 0;
   uint64_t rxBytes = 0, rxMark = 0;
   double rate = 0;               // octets reçus par seconde
   std::string lastList;          // dernière liste envoyée (salle privée)
@@ -278,10 +280,10 @@ bool validRoom(const std::string &r) {
   return true;
 }
 
-std::string cleanName(const std::string &s) {
+std::string cleanName(const std::string &s, size_t maxw = 24) {
   std::string r;
   for (unsigned char ch : s) if (ch >= 32 && ch != 127) r += char(ch);
-  while (width(r) > 24) r.pop_back();
+  while (width(r) > maxw) r.pop_back();
   while (!r.empty() && (static_cast<unsigned char>(r.back()) & 0xc0) == 0xc0) r.pop_back();   // UTF-8 coupé
   return r;
 }
@@ -350,6 +352,17 @@ void process(Client &c) {
       Client &o = clients[c.peer];
       if (o.out.size() < MAX_BUFFER) o.out.insert(o.out.end(), c.in.begin() + long(pos), c.in.begin() + long(pos + 3 + n));
     } else if (type == NF_PICK) onPick(c, std::string(reinterpret_cast<const char *>(p), n));
+    else if (type == NF_CHAT && c.mode == Mode::Room && now() - c.lastChat > 0.3) {   // discussion de la salle
+      c.lastChat = now();
+      std::string text = cleanName(std::string(reinterpret_cast<const char *>(p), std::min<size_t>(n, 360)), 120);
+      if (text.empty()) { pos += 3 + n; continue; }
+      std::string msg = (c.name.empty() ? "Joueur " + std::to_string(c.id) : c.name) + "\t" + text;
+      for (auto &kv : clients) {
+        Client &o = kv.second;
+        if (&o != &c && o.mode == Mode::Room && free_(o) && o.room == c.room) frame(o, NF_CHAT, msg);
+      }
+      logf("salle %s, %s : %s", c.room.c_str(), c.name.c_str(), text.c_str());
+    }
     pos += 3 + n;
     if (c.closing) break;
   }
