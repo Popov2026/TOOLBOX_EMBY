@@ -24,11 +24,12 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <cmath>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v24"
+#define SCR_VERSION "v25"
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -192,6 +193,52 @@ std::unique_ptr<Machine> start(const Bytes &disk, const Options &o, int track) {
   return m;
 }
 
+// réglages de physique en texte (échangés entre les deux jeux) et retour
+std::string tuningText(const Tuning &t) {
+  char b[160];
+  std::snprintf(b, sizeof b, "%.6g %.6g %.6g %.6g %.6g %.6g %d", t.gravity, t.thrust, t.brake, t.timeStep, t.damping,
+                t.boostUse, t.shockTolerance);
+  return b;
+}
+bool parseTuning(const std::string &s, Tuning &t) {
+  return std::sscanf(s.c_str(), "%lf %lf %lf %lf %lf %lf %d", &t.gravity, &t.thrust, &t.brake, &t.timeStep, &t.damping,
+                     &t.boostUse, &t.shockTolerance) == 7;
+}
+
+// réglages imposés par le serveur relais : « gravity=1 thrust=1 ... cadence=400 » (clé absente = 1)
+bool parseServerParams(const std::string &s, Tuning &t, int &rate) {
+  if (s.empty()) return false;
+  t = Tuning();
+  std::stringstream ss(s); std::string kv;
+  while (ss >> kv) {
+    size_t e = kv.find('=');
+    if (e == std::string::npos) continue;
+    std::string k = kv.substr(0, e); double v = std::atof(kv.c_str() + e + 1);
+    if (k == "gravity") t.gravity = v;
+    else if (k == "thrust") t.thrust = v;
+    else if (k == "brake") t.brake = v;
+    else if (k == "timestep") t.timeStep = v;
+    else if (k == "damping") t.damping = v;
+    else if (k == "boostuse") t.boostUse = v;
+    else if (k == "shock") t.shockTolerance = int(v);
+    else if (k == "cadence") rate = std::clamp(int(v), 50, 2000);
+  }
+  return true;
+}
+
+// résumé lisible des réglages du serveur pour le menu (« standard » si tout vaut 1)
+std::string paramsSummary(const std::string &s) {
+  Tuning t; int rate = 400;
+  if (!parseServerParams(s, t, rate)) return "";
+  std::string r;
+  auto add = [&](const char *n, double v, double def) {
+    if (std::fabs(v - def) > 1e-9) { char b[48]; std::snprintf(b, sizeof b, "%s%s %g", r.empty() ? "" : ", ", n, v); r += b; }
+  };
+  add("gravité", t.gravity, 1); add("poussée", t.thrust, 1); add("frein", t.brake, 1); add("pas", t.timeStep, 1);
+  add("amorti", t.damping, 1); add("boost", t.boostUse, 1); add("chocs", t.shockTolerance, 0);
+  return r.empty() ? "physique standard" : r;
+}
+
 // enregistre « relais = valeur » dans scr.ini : remplace la ligne relais existante (même mise en
 // commentaire par un #), sinon l'ajoute à la fin
 void saveRelay(const std::string &path, const std::string &value) {
@@ -266,11 +313,12 @@ int main(int argc, char **argv) {
   // --- multijoueur : le câble série du jeu passe par le réseau
   NetLink net;
   {
+    // empreinte du programme du jeu seulement ; les réglages de physique (scr.ini) sont envoyés en
+    // texte et l'esclave adopte ceux du maître pendant la partie
     uint32_t h = fnv1a(m->image().data(), m->image().size());
-    h = fnv1a(&o.tuning, sizeof o.tuning, h);   // mêmes réglages de physique des deux côtés
     std::string nm = o.playerName;
     if (nm.empty()) { const char *u = std::getenv("USERNAME"); if (!u) u = std::getenv("USER"); nm = u ? u : "Joueur"; }
-    net.setIdentity(SCR_VERSION, h, nm);
+    net.setIdentity(SCR_VERSION, h, nm, tuningText(o.tuning));
   }
   // menu « Computer Link » : quand le joueur choisit « 3. Computer Link », le jeu est retenu à l'entrée
   // du lien et ce menu propose les adversaires trouvés sur le réseau local, une salle du serveur
@@ -392,6 +440,7 @@ int main(int argc, char **argv) {
   // 6 tester à nouveau le serveur
   struct MenuItem { std::string label; int kind; NetLink::Peer peer; };
   RelayProbe probe;                 // « Online Multiplayer » : le serveur relais répond-il ?
+  int netRate = o.netRate;          // cadence réseau en cours (scr.ini, ou imposée par le serveur relais)
   auto online = [&] { return m->selectChoice() == 3; };   // 4. Online Multiplayer (sinon 3. Computer Link - Local LAN)
   auto menuItems = [&] {
     std::vector<MenuItem> it;
@@ -603,6 +652,24 @@ int main(int argc, char **argv) {
     }
     m->setJoystick(j);
     net.poll();   // aussi entre les trames (connexion, annonces), pas seulement pendant l'émulation
+    {   // réglages de physique : l'esclave prend ceux du maître le temps de la partie (course équitable)
+      static std::string adopted;
+      static const Machine *adoptedOn = nullptr;
+      if (adoptedOn != m.get()) { adoptedOn = m.get(); adopted.clear(); }   // F6 : nouvelle machine, réglages de scr.ini
+      Tuning t;
+      std::string want;
+      int rate = o.netRate;
+      // en ligne : le serveur relais impose ses réglages à tous ; en réseau local : ceux du maître
+      if (net.mode() == NetLink::Mode::Relay && parseServerParams(net.serverParams(), t, rate)) want = tuningText(t);
+      else if (net.connected() && !net.master() && parseTuning(net.peerTuning(), t)) want = net.peerTuning();
+      netRate = rate;
+      if (want == tuningText(o.tuning)) want.clear();
+      if (want != adopted) {
+        if (!want.empty()) { m->setTuning(t); std::fprintf(stderr, "réglages de physique appliqués (%s) : %s\n", net.mode() == NetLink::Mode::Relay ? "serveur" : "maître", want.c_str()); }
+        else m->setTuning(o.tuning);
+        adopted = want;
+      }
+    }
 
     uint64_t now = SDL_GetPerformanceCounter();
     acc += double(now - last) / double(freq);
@@ -611,7 +678,7 @@ int main(int argc, char **argv) {
     int n = 0;
     // multijoueur : chaque trame est émulée en tranches réparties dans le temps réel, le câble est lu
     // et écrit à chaque tranche (reseau_cadence fois par seconde) ; sinon, trames entières
-    const int parts = net.active() ? std::clamp((o.netRate + 25) / 50, 1, 40) : 0;
+    const int parts = net.active() ? std::clamp((netRate + 25) / 50, 1, 40) : 0;
     {
       static bool vsyncOff = false;   // la synchro verticale bloquerait la boucle entre deux tranches
       if (vsyncOff != (parts > 0)) { vsyncOff = parts > 0; SDL_RenderSetVSync(ren, vsyncOff ? 0 : 1); }
@@ -676,6 +743,11 @@ int main(int argc, char **argv) {
         if (net.state() == NetLink::State::Failed) lines.push_back({st, 0xffff8080u, 0xe0202020u});
         st = probe.text();
         stCol = probe.state() == RelayProbe::State::Ok ? 0xff80ff80u : probe.state() == RelayProbe::State::Failed ? 0xffff8080u : 0xffffffffu;
+        if (probe.ok() && !probe.params().empty()) {   // réglages que le serveur imposera pendant la partie
+          lines.push_back({st, stCol, 0xe0202020u});
+          st = "Réglages du serveur : " + paramsSummary(probe.params());
+          stCol = 0xffc0c0c0u;
+        }
         lines.push_back({o.relay.empty() ? "Aucun serveur indiqué (scr.ini : relais =)" : "Serveur : " + o.relay,
                          0xffc0c0c0u, 0xe0202020u});
       }

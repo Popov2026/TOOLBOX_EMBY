@@ -63,8 +63,8 @@ double NetLink::now() {
 NetLink::NetLink() = default;
 NetLink::~NetLink() { close(); }
 
-void NetLink::setIdentity(const std::string &version, uint32_t gameHash, const std::string &name) {
-  version_ = version; hash_ = gameHash; name_ = name.substr(0, 40);
+void NetLink::setIdentity(const std::string &version, uint32_t gameHash, const std::string &name, const std::string &tuning) {
+  version_ = version; hash_ = gameHash; name_ = name.substr(0, 40); tuning_ = tuning;
 }
 
 void NetLink::closeSock(Sock &s) {
@@ -77,7 +77,7 @@ void NetLink::close(const std::string &why) {
   mode_ = Mode::Off; state_ = State::Off; connecting_ = false;
   in_.clear(); out_.clear(); rx_.clear(); dataOut_.clear(); peers_.clear();
   helloSent_ = helloOk_ = relayPaired_ = master_ = waitedFirst_ = false;
-  ping_ = -1; peerName_.clear(); info_.clear(); error_.clear();
+  ping_ = -1; peerName_.clear(); peerTuning_.clear(); serverParams_.clear(); info_.clear(); error_.clear();
 }
 
 void NetLink::fail(const std::string &why) {
@@ -333,6 +333,7 @@ void NetLink::startSession() {
   h.push_back('\0'); h += version_; h.push_back('\0');
   for (int k = 3; k >= 0; k--) h.push_back(char((hash_ >> (8 * k)) & 255));
   h += name_;
+  h.push_back('\0'); h += tuning_;   // réglages de physique (scr.ini)
   frame(NF_HELLO, h);
   helloSent_ = true;
   lastRx_ = now();
@@ -349,8 +350,11 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
       uint32_t h = 0;
       for (int k = 0; k < 4; k++) h = (h << 8) | uint8_t(s[z2 + 1 + k]);
       peerName_ = s.substr(z2 + 5);
+      peerTuning_.clear();
+      size_t z3 = peerName_.find('\0');
+      if (z3 != std::string::npos) { peerTuning_ = peerName_.substr(z3 + 1); peerName_ = peerName_.substr(0, z3); }
       if (ver != version_) { fail("versions différentes (ici " + version_ + ", en face " + ver + ")"); return; }
-      if (h != hash_) { fail("jeu ou réglages différents de l'autre joueur (image disque, scr.ini)"); return; }
+      if (h != hash_) { fail("image disque du jeu différente de celle de l'autre joueur (même fichier .st requis)"); return; }
       helloOk_ = true; state_ = State::Connected;
       break;
     }
@@ -380,6 +384,7 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
       else if (s.compare(0, 4, "ERR ") == 0) fail("relais : " + s.substr(4));
       break;
     }
+    case NF_PARAMS: serverParams_.assign(reinterpret_cast<const char *>(p), n); break;
     case NF_LIST: {   // salle privée : joueurs présents et libres, « numéro \t nom \n »
       std::string s(reinterpret_cast<const char *>(p), n);
       peers_.clear();
@@ -558,9 +563,19 @@ void RelayProbe::start(const std::string &server) {
     std::lock_guard<std::mutex> lk(sh->mu);
     sh->pingMs = int((t1 - t0) * 1000 + 0.5);
     std::string msg = got.substr(3);
-    if (uint8_t(got[0]) == NF_INFO && msg.compare(0, 7, "SERVER ") == 0) std::sscanf(msg.c_str() + 7, "%d %d", &sh->players, &sh->games);
+    if (uint8_t(got[0]) == NF_INFO && msg.compare(0, 7, "SERVER ") == 0) {
+      std::sscanf(msg.c_str() + 7, "%d %d", &sh->players, &sh->games);
+      size_t sc = msg.find(';');
+      if (sc != std::string::npos) sh->params = msg.substr(sc + 1);
+    }
     sh->state = State::Ok;   // un ancien relais répond aussi (message d'erreur) : il est en service
   });
+}
+
+std::string RelayProbe::params() const {
+  if (!sh_) return "";
+  std::lock_guard<std::mutex> l(sh_->mu);
+  return sh_->params;
 }
 
 RelayProbe::State RelayProbe::state() const {

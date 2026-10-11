@@ -26,7 +26,7 @@ constexpr int NET_PORT = 27420;           // TCP : hébergement en réseau local
 constexpr int NET_DISCOVERY_PORT = 27421; // UDP : annonces de parties en réseau local
 
 enum NetFrame : uint8_t { NF_HELLO = 1, NF_DATA = 2, NF_PING = 3, NF_PONG = 4, NF_BYE = 5, NF_JOIN = 10, NF_INFO = 11,
-                          NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15 };
+                          NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16 };
 
 class NetLink {
  public:
@@ -40,7 +40,12 @@ class NetLink {
   NetLink &operator=(const NetLink &) = delete;
 
   // identité de ce jeu : version du programme, empreinte du jeu et des réglages, nom affiché
-  void setIdentity(const std::string &version, uint32_t gameHash, const std::string &name);
+  // gameHash : empreinte du programme du jeu (image disque) ; tuning : réglages de physique en texte
+  // (le jeu esclave adopte ceux du maître pendant la partie)
+  void setIdentity(const std::string &version, uint32_t gameHash, const std::string &name, const std::string &tuning = "");
+  const std::string &peerTuning() const { return peerTuning_; }
+  // réglages imposés par le serveur relais (« gravity=1 thrust=1 ... cadence=400 »), vide sinon
+  const std::string &serverParams() const { return serverParams_; }
 
   // salon du réseau local (menu « Computer Link ») : ce jeu s'annonce et liste les autres jeux qui
   // attendent ; on en choisit un (connectPeer) ou un autre joueur nous choisit (connexion entrante).
@@ -86,7 +91,7 @@ class NetLink {
   State state_ = State::Off;
   Sock listen_ = BAD, tcp_ = BAD, udp_ = BAD;
   bool connecting_ = false;
-  std::string version_, name_, peerName_, room_, info_, error_;
+  std::string version_, name_, peerName_, room_, info_, error_, tuning_, peerTuning_, serverParams_;
   uint32_t hash_ = 0;
   int port_ = NET_PORT;
   std::vector<uint8_t> in_, out_;    // tampons TCP (trames)
@@ -129,12 +134,13 @@ class RelayProbe {
   State state() const;
   std::string text() const;                // texte pour le menu
   bool ok() const { return state() == State::Ok; }
+  std::string params() const;              // réglages imposés par le serveur (vide si inconnus)
 
  private:
   struct Shared {
     std::mutex mu;
     State state = State::Off;
-    std::string server, error;
+    std::string server, error, params;
     int players = -1, games = -1, pingMs = -1;
   };
   std::shared_ptr<Shared> sh_;

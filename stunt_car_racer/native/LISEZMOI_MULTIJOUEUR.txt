@@ -5,8 +5,9 @@ Le jeu d'origine permettait de relier deux Atari ST par un câble série pour fa
 contre l'autre. Ici, ce câble passe par le réseau : chaque joueur lance scr.exe sur son PC et
 retrouve l'autre joueur comme adversaire sur la piste.
 
-Il faut que les deux joueurs aient la même version de scr.exe, la même image disque et les mêmes
-réglages de physique dans scr.ini (c'est vérifié à la connexion).
+Il faut que les deux joueurs aient la même version de scr.exe et la même image disque (c'est
+vérifié à la connexion). Les réglages de physique sont uniformisés automatiquement : en ligne,
+ceux du serveur ; en réseau local, ceux du joueur qui a choisi l'adversaire.
 
 
 1. Se relier et lancer la course
@@ -53,6 +54,9 @@ réglages de physique dans scr.ini (c'est vérifié à la connexion).
          « Affronter ... » pour en choisir un (celui qui choisit est le maître). Plusieurs joueurs
          peuvent attendre dans la même salle ; ceux qui sont déjà en partie n'y apparaissent plus.
      Aucun port à ouvrir sur les box des joueurs : les PC appellent le serveur relais.
+     Réglages : en ligne, c'est le serveur qui impose la physique et la cadence réseau à tous les
+     joueurs (fichier scr_relay.ini du serveur) ; le menu les affiche (« Réglages du serveur »).
+     En réseau local (menu 3), le jeu qui rejoint prend les réglages de celui qui l'a choisi.
      Par adresse IP (sans serveur) : menu 3, « Par adresse IP ».
 
   Celui qui a choisi l'adversaire (ou le premier arrivé en mode automatique) est le « maître » : il saisit

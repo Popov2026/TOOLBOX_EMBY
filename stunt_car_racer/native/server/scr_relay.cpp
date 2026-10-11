@@ -12,7 +12,11 @@
 // Compilation  Linux   : g++ -O2 -std=c++17 scr_relay.cpp -o scr_relay
 //              Windows : g++ (MinGW) -O2 -std=c++17 -static scr_relay.cpp -o scr_relay.exe -lws2_32
 //                        ou cl /O2 /EHsc /std:c++17 scr_relay.cpp ws2_32.lib
-// Lancement           : scr_relay [--port 27420] [--log fichier.txt] [--journal]
+// Lancement           : scr_relay [--port 27420] [--log fichier.txt] [--journal] [--config scr_relay.ini]
+//
+// Réglages imposés aux jeux (fichier scr_relay.ini à côté du programme ou --config) : physique
+// (gravity, thrust, brake, timestep, damping, boostuse, shock) et cadence réseau (reseau_cadence).
+// Tous les joueurs connectés à ce serveur jouent avec les mêmes réglages.
 //
 // Protocole (trames : type 1 octet, longueur 2 octets gros-boutiste, données) :
 //   client -> serveur : JOIN2 (12) "AUTO|SALLE \0 code \0 version \0 nom"
@@ -21,6 +25,7 @@
 //                       JOIN (10) "code\0version"  (ancienne version : appariement par code)
 //   serveur -> client : INFO (11) "WAIT" | "PAIRED 1" (maître) | "PAIRED 2" | "GONE" | "BUSY" | "ERR message"
 //                       LIST (13) "numéro\tnom\n..." (salle privée : joueurs présents et libres)
+//                       PARAMS (16) "gravity=1 thrust=1 ... cadence=400" (réglages imposés, après l'inscription)
 //   ensuite, les trames de chaque joueur sont retransmises telles quelles à l'autre.
 #include <algorithm>
 #include <cctype>
@@ -89,7 +94,7 @@ static const char *errText(int e) { return std::strerror(e); }
 
 namespace {
 
-constexpr uint8_t NF_JOIN = 10, NF_INFO = 11, NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15;
+constexpr uint8_t NF_JOIN = 10, NF_INFO = 11, NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16;
 constexpr size_t MAX_CLIENTS = 512, MAX_PER_IP = 16, MAX_BUFFER = 1 << 20;
 const Sock NONE = Sock(-1);
 constexpr double JOIN_TIMEOUT = 20, PAIR_TIMEOUT = 3600, IDLE_TIMEOUT = 90;
@@ -159,6 +164,66 @@ uint64_t totalConnections = 0, totalGames = 0;
 double startedAt = 0;
 int listenPort = 27420;
 std::string machineAddresses;
+
+// réglages imposés aux jeux
+struct Params {
+  double gravity = 1, thrust = 1, brake = 1, timestep = 1, damping = 1, boostuse = 1;
+  int shock = 0, cadence = 400;
+} params;
+
+std::string paramsText() {
+  char b[256];
+  std::snprintf(b, sizeof b, "gravity=%.6g thrust=%.6g brake=%.6g timestep=%.6g damping=%.6g boostuse=%.6g shock=%d cadence=%d",
+                params.gravity, params.thrust, params.brake, params.timestep, params.damping, params.boostuse,
+                params.shock, params.cadence);
+  return b;
+}
+
+// lecture de scr_relay.ini : « clé = valeur », # commentaire
+bool readConfig(const std::string &path, int &port) {
+  FILE *f = std::fopen(path.c_str(), "r");
+  if (!f) return false;
+  char line[512];
+  while (std::fgets(line, sizeof line, f)) {
+    std::string l = line;
+    size_t h = l.find('#'); if (h != std::string::npos) l.resize(h);
+    size_t eq = l.find('=');
+    if (eq == std::string::npos) continue;
+    auto trim = [](std::string x) {
+      while (!x.empty() && std::isspace(static_cast<unsigned char>(x.back()))) x.pop_back();
+      while (!x.empty() && std::isspace(static_cast<unsigned char>(x.front()))) x.erase(x.begin());
+      return x;
+    };
+    std::string k = trim(l.substr(0, eq)), v = trim(l.substr(eq + 1));
+    if (v.empty()) continue;
+    double d = std::atof(v.c_str());
+    if (k == "port") port = std::atoi(v.c_str());
+    else if (k == "gravity") params.gravity = d;
+    else if (k == "thrust") params.thrust = d;
+    else if (k == "brake") params.brake = d;
+    else if (k == "timestep") params.timestep = d;
+    else if (k == "damping") params.damping = d;
+    else if (k == "boostuse") params.boostuse = d;
+    else if (k == "shock") params.shock = std::atoi(v.c_str());
+    else if (k == "reseau_cadence" || k == "cadence") params.cadence = std::max(50, std::min(2000, std::atoi(v.c_str())));
+  }
+  std::fclose(f);
+  return true;
+}
+
+// dossier du programme (pour trouver scr_relay.ini à côté de lui)
+std::string exeDir() {
+#ifdef _WIN32
+  char b[MAX_PATH]; DWORD n = GetModuleFileNameA(nullptr, b, MAX_PATH);
+  std::string p(b, n);
+  size_t k = p.find_last_of("\\/");
+#else
+  char b[4096]; ssize_t n = readlink("/proc/self/exe", b, sizeof b - 1);
+  std::string p = n > 0 ? std::string(b, size_t(n)) : "";
+  size_t k = p.find_last_of('/');
+#endif
+  return k == std::string::npos ? "" : p.substr(0, k + 1);
+}
 
 void frame(Client &c, uint8_t type, const std::string &s) {
   size_t n = std::min<size_t>(s.size(), 0xffff);
@@ -233,6 +298,7 @@ void onJoin(Client &c, Mode mode, const std::string &room, const std::string &ve
   for (auto &ch : c.room) ch = char(std::toupper(static_cast<unsigned char>(ch)));
   if (mode != Mode::Auto && !validRoom(c.room)) { frame(c, NF_INFO, "ERR code de salle invalide"); c.closing = true; return; }
   c.joined = true; dirty = true;
+  frame(c, NF_PARAMS, paramsText());   // réglages imposés, appliqués par le jeu pendant la partie
   frame(c, NF_INFO, "WAIT");
   if (mode == Mode::Room) { logf("%s entre dans la salle %s", who(c).c_str(), c.room.c_str()); return; }
   // automatique (ou ancien appariement par code) : le premier joueur libre compatible, arrivé avant
@@ -276,7 +342,7 @@ void process(Client &c) {
       else if (type == NF_PROBE) {   // le jeu vérifie que le serveur répond
         size_t players = 0, games = 0;
         for (auto &kv : clients) { players += kv.second.joined; games += kv.second.peer != NONE; }
-        frame(c, NF_INFO, "SERVER " + std::to_string(players) + " " + std::to_string(games / 2));
+        frame(c, NF_INFO, "SERVER " + std::to_string(players) + " " + std::to_string(games / 2) + ";" + paramsText());
         c.probe = c.closing = true;
       }
       else { frame(c, NF_INFO, "ERR inscription attendue"); c.closing = true; }
@@ -312,6 +378,7 @@ void draw(double t) {
                 duration(t - startedAt).c_str(), stamp("%H:%M:%S").c_str());
   o += b;
   if (!machineAddresses.empty()) o += "Adresse(s) de cette machine : " + machineAddresses + "\n";
+  o += "Réglages imposés aux jeux : " + paramsText() + "\n";
   std::snprintf(b, sizeof b, "Joueurs connectés : %zu    parties en cours : %zu    depuis le lancement : %llu connexions, %llu parties\n\n",
                 clients.size(), games / 2, static_cast<unsigned long long>(totalConnections), static_cast<unsigned long long>(totalGames));
   o += b;
@@ -367,13 +434,21 @@ std::string localAddresses() {
 int main(int argc, char **argv) {
   int port = 27420;
   bool journal = false;
+  std::string config;
+  for (int i = 1; i + 1 < argc; i++) if (!std::strcmp(argv[i], "--config")) config = argv[i + 1];
+  bool haveConfig = false;
+  if (!config.empty()) {
+    if (!(haveConfig = readConfig(config, port))) { std::fprintf(stderr, "fichier de réglages introuvable : %s\n", config.c_str()); return 1; }
+  } else if ((haveConfig = readConfig(exeDir() + "scr_relay.ini", port))) config = exeDir() + "scr_relay.ini";
+  else if ((haveConfig = readConfig("scr_relay.ini", port))) config = "scr_relay.ini";
   for (int i = 1; i < argc; i++) {
     if (!std::strcmp(argv[i], "--port") && i + 1 < argc) port = std::atoi(argv[++i]);
+    else if (!std::strcmp(argv[i], "--config") && i + 1 < argc) i++;
     else if (!std::strcmp(argv[i], "--journal")) journal = true;
     else if (!std::strcmp(argv[i], "--log") && i + 1 < argc) {
       logFile = std::fopen(argv[++i], "a");
       if (!logFile) { std::fprintf(stderr, "impossible d'ouvrir le journal %s\n", argv[i]); return 1; }
-    } else { std::fprintf(stderr, "usage : %s [--port N] [--log fichier] [--journal]\n", argv[0]); return 1; }
+    } else { std::fprintf(stderr, "usage : %s [--port N] [--log fichier] [--journal] [--config scr_relay.ini]\n", argv[0]); return 1; }
   }
 #ifdef _WIN32
   WSADATA wsa;
@@ -404,6 +479,8 @@ int main(int argc, char **argv) {
   live = !journal && isConsole();
   logf("relais Stunt Car Racer : écoute sur le port TCP %d", port);
   if (!machineAddresses.empty()) logf("adresse(s) de cette machine : %s", machineAddresses.c_str());
+  logf("réglages imposés aux jeux%s : %s", haveConfig ? (" (" + config + ")").c_str() : " (par défaut, pas de scr_relay.ini)",
+       paramsText().c_str());
   logf("scr.ini des joueurs : relais = ADRESSE:%d (en réseau local : adresse ci-dessus ; par Internet : adresse", port);
   logf("publique de la box ou nom de domaine, avec le port TCP %d redirigé vers cette machine)", port);
   double lastDraw = 0, lastRate = now(), lastSummary = now();

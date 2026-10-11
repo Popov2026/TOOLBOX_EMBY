@@ -9,6 +9,18 @@ données de l'un à l'autre. Deux façons de se trouver (menu « Computer Link �
 écoute (port TCP 27420 par défaut). Trafic : environ 300 octets/s par joueur pendant une course.
 
 
+0. Réglages imposés aux joueurs : scr_relay.ini
+-----------------------------------------------
+
+  Le serveur impose ses réglages à tous les jeux qui s'y connectent : physique (gravity, thrust,
+  brake, timestep, damping, boostuse, shock) et cadence réseau (reseau_cadence). Les scr.ini des
+  joueurs n'ont plus d'importance en ligne : tout le monde joue avec la même physique.
+  Modifiez scr_relay.ini (à côté de scr_relay.exe / scr_relay) puis relancez le serveur. Le port
+  d'écoute s'y règle aussi (port = 27420). Les réglages en cours sont affichés dans la fenêtre du
+  serveur, et dans le menu « 4. Online Multiplayer » des joueurs (« Réglages du serveur : ... »).
+  Autre fichier : scr_relay --config mes_reglages.ini
+
+
 1. Serveur sous Windows (le plus simple pour commencer)
 --------------------------------------------------------
 
@@ -54,6 +66,7 @@ données de l'un à l'autre. Deux façons de se trouver (menu « Computer Link �
     scr_relay            le programme, déjà compilé pour Linux x86-64 (sans dépendance)
     scr_relay.exe        le même pour Windows
     scr_relay.cpp        son code source (le même pour Windows et Linux)
+    scr_relay.ini        réglages imposés aux joueurs (physique, cadence réseau) et port
     scr-relay.service    lancement automatique au démarrage (systemd)
 
   Sur le serveur (en tant que root) :
@@ -62,6 +75,7 @@ données de l'un à l'autre. Deux façons de se trouver (menu « Computer Link �
     #   scp scr_relay scr-relay.service root@ADRESSE_DU_SERVEUR:/root/
 
     install -m 755 scr_relay /usr/local/bin/scr_relay
+    install -m 644 scr_relay.ini /usr/local/bin/scr_relay.ini   # réglages (lus à côté du programme)
     useradd --system --no-create-home scrrelay
     install -m 644 scr-relay.service /etc/systemd/system/scr-relay.service
     systemctl daemon-reload
