@@ -65,7 +65,8 @@ ceux du serveur ; en réseau local, ceux du joueur qui a choisi l'adversaire.
      même temps à tous. Grille de départ : 3 rangées de 2 (gauche / droite), ordre tiré au sort
      à chaque course ; les rangées 2 et 3 partent un peu en arrière (le temps et le classement
      comptent depuis la ligne de départ). Les autres joueurs sont des voitures « fantômes » : on les voit rouler
-     (avec leur nom au-dessus, et les flammes quand ils utilisent le boost) mais on passe à
+     (avec leur nom au-dessus, et les 8 flammes du moteur V8 sur le capot quand ils utilisent le
+     boost) mais on passe à
      travers, sans collision. Le jeu passe en HD (F1)
      au départ, car le rendu d'origine ne sait dessiner qu'une seule voiture adverse.
      En haut à droite : tour, temps et classement en direct. À la fin (tous arrivés, ou deux

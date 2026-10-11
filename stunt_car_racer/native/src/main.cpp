@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v29"
+#define SCR_VERSION "v30"
 
 #include "banner.hpp"
 #include "hdview.hpp"
