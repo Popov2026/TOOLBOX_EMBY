@@ -28,7 +28,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v20"
+#define SCR_VERSION "v21"
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -593,6 +593,21 @@ int main(int argc, char **argv) {
       if (net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting)
         st = net.peers().empty() ? "Recherche de joueurs sur le réseau local..." : "Joueurs trouvés sur le réseau local :";
       lines.push_back({st, 0xffffffffu, 0xe0202020u});
+      bool lobbyWait = net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting;
+      if (lobbyWait) {   // adresse de ce PC (pour « Par adresse IP » si la détection ne passe pas)
+        static std::string addrs; static double addrsAt = -1e9;
+        double tn = double(SDL_GetTicks()) / 1000.0;
+        if (tn - addrsAt > 5) {
+          addrsAt = tn; addrs.clear();
+          for (auto &a : net.localAddresses()) {
+            if (addrs.size() > 30) break;
+            addrs += (addrs.empty() ? "" : "  ") + a;
+          }
+        }
+        if (!addrs.empty()) lines.push_back({"Ce PC : " + addrs, 0xffc0c0c0u, 0xe0202020u});
+        if (net.peers().empty() && net.sinceStart() > 8)
+          lines.push_back({"Personne ? Pare-feu : autoriser scr.exe", 0xffffc040u, 0xe0202020u});
+      }
       auto items = menuItems();
       if (menuSel >= int(items.size())) menuSel = int(items.size()) - 1;
       for (size_t k = 0; k < items.size(); k++) {

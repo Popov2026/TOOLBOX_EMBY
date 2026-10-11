@@ -66,9 +66,13 @@ if(WIN32)
   target_link_libraries(scrcore PUBLIC ws2_32)
 endif()
 
-# --- serveur relais (multijoueur en ligne), pour un serveur Linux
-if(NOT WIN32)
-  add_executable(scr_relay server/scr_relay.cpp)
+# --- serveur relais (multijoueur en ligne), programme autonome pour Windows ou Linux
+add_executable(scr_relay server/scr_relay.cpp)
+if(WIN32)
+  target_link_libraries(scr_relay ws2_32)
+  if(MSVC)
+    set_property(TARGET scr_relay PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")   # sans DLL d'exécution
+  endif()
 endif()
 
 # --- test / outil sans fenêtre

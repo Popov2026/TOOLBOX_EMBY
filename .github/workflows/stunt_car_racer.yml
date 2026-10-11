@@ -43,6 +43,7 @@ jobs:
           Copy-Item stunt_car_racer/native/LISEZMOI_MULTIJOUEUR.txt dist/
           New-Item -ItemType Directory dist/serveur | Out-Null
           Copy-Item stunt_car_racer/native/server/* dist/serveur/
+          Copy-Item build/Release/scr_relay.exe dist/serveur/
       - uses: actions/upload-artifact@v4
         with:
           name: stunt-car-racer-windows-x64

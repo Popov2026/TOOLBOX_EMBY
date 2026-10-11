@@ -27,7 +27,7 @@ enum NetFrame : uint8_t { NF_HELLO = 1, NF_DATA = 2, NF_PING = 3, NF_PONG = 4, N
 class NetLink {
  public:
   enum class Mode { Off, Lobby, LanHost, LanJoin, Direct, Relay };
-  struct Peer { uint32_t id; std::string name, ip; int port; double seen; };   // partie vue en réseau local
+  struct Peer { uint32_t id; std::string name, ip; int port; double seen; double replied = -1e9; };   // partie vue en réseau local
   enum class State { Off, Waiting, Connecting, Handshake, Connected, Failed };
 
   NetLink();
@@ -64,6 +64,9 @@ class NetLink {
   int pingMs() const { return ping_; }
   const std::string &peerName() const { return peerName_; }
   std::string status() const;        // texte court pour le titre de la fenêtre
+  // adresses IPv4 de ce PC sur le réseau local (affichées dans le menu, pour « Par adresse IP »)
+  std::vector<std::string> localAddresses();
+  double sinceStart() const { return now() - started_; }
   uint64_t bytesSent() const { return sent_; }
   uint64_t bytesReceived() const { return received_; }
 
@@ -86,6 +89,11 @@ class NetLink {
   bool openListener(int port);
   bool openDiscovery(bool broadcast);
   void announce(double t);
+  void sendDiscovery(const std::string &msg);   // diffusion sur chaque réseau local + boucle locale
+  struct LocalNet { uint32_t addr, bcast; };    // ordre hôte
+  std::vector<LocalNet> nets_;
+  double netsAt_ = -1e9;
+  void refreshNets(double t);
   void readAnnounces(double t);
   double lastAnnounce_ = -1e9, lastPing_ = -1e9, lastRx_ = 0, started_ = 0;
   int ping_ = -1;

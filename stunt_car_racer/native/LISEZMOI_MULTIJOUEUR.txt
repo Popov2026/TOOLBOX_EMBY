@@ -27,6 +27,22 @@ réglages de physique dans scr.ini (c'est vérifié à la connexion).
     joueurs choisit « Affronter ... » : les deux jeux se relient et la mise en relation du jeu
     d'origine démarre toute seule (« Link complete »). Au premier lancement, Windows demande
     d'autoriser scr.exe sur les réseaux privés : acceptez.
+    Si l'autre joueur n'apparaît pas :
+      * les deux jeux doivent être dans ce menu en même temps (la recherche ne tourne que là) ;
+      * pare-feu Windows : autorisez scr.exe (Paramètres > Confidentialité et sécurité > Sécurité
+        Windows > Pare-feu > Autoriser une application) pour les réseaux privés ET publics, ou
+        passez le réseau de la box en « Privé » ; faites-le sur les DEUX PC ;
+      * les deux PC doivent être sur la même box (pas un réseau « invité » ni un Wi-Fi isolé) ;
+      * sinon : la ligne « Ce PC : 192.168.x.y » du menu donne l'adresse de chaque PC ; l'un choisit
+        « Par adresse IP » et tape l'adresse affichée chez l'autre.
+    Si l'autre joueur n'apparaît pas :
+      * les deux jeux doivent être dans ce menu en même temps (la recherche ne tourne que là) ;
+      * pare-feu Windows : autorisez scr.exe (Sécurité Windows > Pare-feu > Autoriser une
+        application) pour les réseaux privés ET publics, ou passez le réseau de la box en
+        « Privé » ; faites-le sur les DEUX PC ;
+      * les deux PC doivent être sur la même box (pas un réseau « invité » ni un Wi-Fi isolé) ;
+      * sinon : la ligne « Ce PC : 192.168.x.y » du menu donne l'adresse de chaque PC ; l'un choisit
+        « Par adresse IP » et tape l'adresse affichée chez l'autre.
   - Par Internet : les deux joueurs choisissent « Par Internet » et tapent le même code de salle
     (lettres ou chiffres). Code vide : le jeu en invente un, à donner à l'autre joueur. Aucun port
     à ouvrir sur les box : les deux PC appellent le serveur relais, qui les met en relation.
@@ -60,6 +76,7 @@ réglages de physique dans scr.ini (c'est vérifié à la connexion).
 3. Le serveur relais
 --------------------
 
-  Il n'est utile que pour jouer par Internet. C'est un petit programme pour un serveur Linux
-  (voir le dossier serveur et serveur/LISEZMOI_SERVEUR.txt). Un petit serveur virtuel à quelques
+  Il n'est utile que pour jouer par Internet. C'est un petit programme autonome, pour Windows
+  (scr_relay.exe : double-clic) ou pour un serveur Linux (voir le dossier serveur et
+  serveur/LISEZMOI_SERVEUR.txt). Un petit serveur virtuel à quelques
   euros par mois suffit très largement : le trafic est d'environ 300 octets par seconde par joueur.

@@ -6,20 +6,41 @@ transmet leurs données de l'un à l'autre. Les joueurs n'ont aucun port à ouvr
 écoute (port TCP 27420 par défaut). Trafic : environ 300 octets/s par joueur pendant une course.
 
 
-1. Choisir un serveur
----------------------
+1. Serveur sous Windows (le plus simple pour commencer)
+--------------------------------------------------------
+
+  scr_relay.exe est un programme autonome (aucune installation, aucune DLL).
+
+  - Double-cliquez sur scr_relay.exe (ou sur lancer_serveur.bat, qui garde aussi un journal dans
+    scr_relay.log). Une fenêtre s'ouvre et affiche :
+        écoute sur le port TCP 27420
+        adresse(s) de cette machine : 192.168.1.20
+    Laissez-la ouverte tant qu'on joue ; fermer la fenêtre arrête le serveur.
+  - Au premier lancement, Windows demande d'autoriser scr_relay.exe sur le réseau : acceptez
+    (réseaux privés, et publics si le PC est sur un réseau marqué « public »).
+  - Joueurs sur le même réseau que ce PC : relais = 192.168.1.20 (l'adresse affichée).
+  - Joueurs par Internet : sur la box, redirigez le port TCP 27420 vers l'adresse du PC serveur
+    (menu « NAT / redirection de ports » de la box), puis donnez aux joueurs l'adresse publique de
+    la box (ou un nom de domaine, par exemple une adresse DynDNS / No-IP) : relais = ADRESSE:27420.
+  - Options : scr_relay.exe --port 30000 --log journal.txt
+
+  Démarrage automatique avec Windows (en attendant une version « service Windows ») :
+  Planificateur de tâches > Créer une tâche > Déclencheur « Au démarrage », Action « Démarrer un
+  programme » = scr_relay.exe, avec « Exécuter même si l'utilisateur n'est pas connecté ».
+
+
+2. Serveur Linux (VPS ou machine à la maison)
+---------------------------------------------
 
   N'importe quel petit serveur Linux joignable depuis Internet suffit : un serveur virtuel
-  (VPS) d'entrée de gamme à quelques euros par mois (OVH, Scaleway, Hetzner, Ionos...), ou une offre
-  gratuite. Pour des joueurs en France, un serveur en France donne le meilleur ping.
-
-
-2. Installer
-------------
+  (VPS) d'entrée de gamme à quelques euros par mois (OVH, Scaleway, Hetzner, Ionos...), un
+  Raspberry Pi, ou une offre gratuite. Pour des joueurs en France, un serveur en France donne le
+  meilleur ping.
 
   Le dossier contient :
     scr_relay            le programme, déjà compilé pour Linux x86-64 (sans dépendance)
-    scr_relay.cpp        son code source
+    scr_relay.exe        le même pour Windows
+    scr_relay.cpp        son code source (le même pour Windows et Linux)
     scr-relay.service    lancement automatique au démarrage (systemd)
 
   Sur le serveur (en tant que root) :
@@ -38,7 +59,7 @@ transmet leurs données de l'un à l'autre. Les joueurs n'ont aucun port à ouvr
 
   Vérifier :  systemctl status scr-relay      journal :  journalctl -u scr-relay -f
 
-  Autre processeur (ARM...) ou recompilation :
+  Autre processeur (ARM, Raspberry Pi...) ou recompilation :
     g++ -O2 -std=c++17 scr_relay.cpp -o scr_relay
 
   Port différent :  scr_relay --port 30000   (à reporter dans scr.ini des joueurs)

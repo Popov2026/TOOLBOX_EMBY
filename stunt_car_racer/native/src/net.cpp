@@ -12,6 +12,7 @@
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <ws2ipdef.h>
 typedef int socklen_t;
 typedef SOCKET SockRaw;
 #define SCR_WOULDBLOCK(e) ((e) == WSAEWOULDBLOCK || (e) == WSAEINPROGRESS || (e) == WSAEALREADY)
@@ -28,6 +29,8 @@ struct WsaInit {
 #include <arpa/inet.h>
 #include <cerrno>
 #include <fcntl.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -132,16 +135,67 @@ bool NetLink::connectPeer(const Peer &p) {
   return connectTo(p.ip, p.port);
 }
 
+// adresses et diffusions dirigées de chaque carte réseau active : la diffusion générale
+// 255.255.255.255 ne part que sur une seule carte sous Windows (souvent une carte virtuelle :
+// Hyper-V, VirtualBox, VPN...), elle n'atteint alors pas l'autre PC
+void NetLink::refreshNets(double t) {
+  if (t - netsAt_ < 5.0) return;
+  netsAt_ = t;
+  nets_.clear();
+#ifdef _WIN32
+  SOCKET s = udp_ != BAD ? SOCKET(udp_) : socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  if (s == INVALID_SOCKET) return;
+  INTERFACE_INFO info[32]; DWORD got = 0;
+  if (WSAIoctl(s, SIO_GET_INTERFACE_LIST, nullptr, 0, info, sizeof info, &got, nullptr, nullptr) == 0) {
+    for (DWORD k = 0; k < got / sizeof(INTERFACE_INFO); k++) {
+      const INTERFACE_INFO &f = info[k];
+      if (!(f.iiFlags & IFF_UP) || (f.iiFlags & IFF_LOOPBACK) || f.iiAddress.Address.sa_family != AF_INET) continue;
+      uint32_t a = ntohl(f.iiAddress.AddressIn.sin_addr.s_addr), m = ntohl(f.iiNetmask.AddressIn.sin_addr.s_addr);
+      if (a) nets_.push_back({a, (a & m) | ~m});
+    }
+  }
+  if (udp_ == BAD) closesocket(s);
+#else
+  ifaddrs *list = nullptr;
+  if (getifaddrs(&list) != 0) return;
+  for (ifaddrs *f = list; f; f = f->ifa_next) {
+    if (!f->ifa_addr || f->ifa_addr->sa_family != AF_INET || !(f->ifa_flags & IFF_UP) || (f->ifa_flags & IFF_LOOPBACK)) continue;
+    uint32_t a = ntohl(reinterpret_cast<sockaddr_in *>(f->ifa_addr)->sin_addr.s_addr);
+    uint32_t m = f->ifa_netmask ? ntohl(reinterpret_cast<sockaddr_in *>(f->ifa_netmask)->sin_addr.s_addr) : 0xffffff00u;
+    if (a) nets_.push_back({a, (a & m) | ~m});
+  }
+  freeifaddrs(list);
+#endif
+}
+
+std::vector<std::string> NetLink::localAddresses() {
+  refreshNets(now());
+  std::vector<std::string> r;
+  for (auto &n : nets_) {
+    in_addr ia; ia.s_addr = htonl(n.addr);
+    r.push_back(inet_ntoa(ia));
+  }
+  return r;
+}
+
+void NetLink::sendDiscovery(const std::string &msg) {
+  refreshNets(now());
+  sockaddr_in b{}; b.sin_family = AF_INET; b.sin_port = htons(NET_DISCOVERY_PORT);
+  auto to = [&](uint32_t a) {
+    b.sin_addr.s_addr = htonl(a);
+    sendto(udp_, msg.data(), int(msg.size()), 0, reinterpret_cast<sockaddr *>(&b), sizeof b);
+  };
+  to(INADDR_BROADCAST);
+  for (auto &n : nets_) if (n.bcast != INADDR_BROADCAST) to(n.bcast);
+  to(INADDR_LOOPBACK);   // deux jeux sur le même PC
+}
+
 void NetLink::announce(double t) {
   if (udp_ == BAD || t - lastAnnounce_ < 1.0) return;
   lastAnnounce_ = t;
   std::string msg = mode_ == Mode::Lobby ? ANNOUNCE2 + std::to_string(id_) + " " + std::to_string(port_) + " " + name_
                                          : ANNOUNCE + std::to_string(port_) + " " + name_;
-  sockaddr_in b{}; b.sin_family = AF_INET; b.sin_port = htons(NET_DISCOVERY_PORT);
-  b.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-  sendto(udp_, msg.data(), int(msg.size()), 0, reinterpret_cast<sockaddr *>(&b), sizeof b);
-  b.sin_addr.s_addr = htonl(INADDR_LOOPBACK);   // deux jeux sur le même PC
-  sendto(udp_, msg.data(), int(msg.size()), 0, reinterpret_cast<sockaddr *>(&b), sizeof b);
+  sendDiscovery(msg);
 }
 
 void NetLink::readAnnounces(double t) {
@@ -157,10 +211,17 @@ void NetLink::readAnnounces(double t) {
     int port = int(std::strtol(e, &e, 10));
     std::string name = (e && *e == ' ') ? e + 1 : "";
     std::string ip = inet_ntoa(a.sin_addr);
-    bool found = false;
+    Peer *pp = nullptr;
     for (auto &p : peers_)
-      if (p.id == id) { p.name = name; p.port = port; p.seen = t; if (p.ip == "127.0.0.1" || ip != "127.0.0.1") p.ip = ip; found = true; }
-    if (!found && port > 0) peers_.push_back({id, name, ip, port, t});
+      if (p.id == id) { p.name = name; p.port = port; p.seen = t; if (p.ip == "127.0.0.1" || ip != "127.0.0.1") p.ip = ip; pp = &p; }
+    if (!pp && port > 0) { peers_.push_back({id, name, ip, port, t}); pp = &peers_.back(); }
+    // réponse directe à l'expéditeur : si ses annonces nous parviennent mais pas les nôtres (pare-feu,
+    // carte réseau), il nous voit quand même (le pare-feu de Windows laisse passer la réponse à une diffusion)
+    if (pp && t - pp->replied > 1.0) {
+      pp->replied = t;
+      std::string msg = ANNOUNCE2 + std::to_string(id_) + " " + std::to_string(port_) + " " + name_;
+      sendto(udp_, msg.data(), int(msg.size()), 0, reinterpret_cast<sockaddr *>(&a), sizeof a);
+    }
   }
   // une partie qui ne s'annonce plus depuis 3,5 s a disparu
   for (size_t i = 0; i < peers_.size();)
@@ -356,12 +417,7 @@ void NetLink::poll() {
     if (s != BAD) { tcp_ = s; nonBlock(tcp_); info_ = inet_ntoa(a.sin_addr); startSession(); }
     else if (udp_ != BAD && t - lastAnnounce_ > 1.0) {
       lastAnnounce_ = t;
-      std::string msg = ANNOUNCE + std::to_string(port_) + " " + name_;
-      sockaddr_in b{}; b.sin_family = AF_INET; b.sin_port = htons(NET_DISCOVERY_PORT);
-      b.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-      sendto(udp_, msg.data(), int(msg.size()), 0, reinterpret_cast<sockaddr *>(&b), sizeof b);
-      b.sin_addr.s_addr = htonl(INADDR_LOOPBACK);   // deux jeux sur le même PC
-      sendto(udp_, msg.data(), int(msg.size()), 0, reinterpret_cast<sockaddr *>(&b), sizeof b);
+      sendDiscovery(ANNOUNCE + std::to_string(port_) + " " + name_);
     }
   }
   // réseau local, invité : écouter les annonces
