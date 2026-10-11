@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v31"
+#define SCR_VERSION "v32"
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -814,8 +814,12 @@ int main(int argc, char **argv) {
           std::sscanf(ev.c_str() + 5, "%d %d", &t, &l);
           {   // ordre sur la grille de départ (numéros des joueurs après circuit et tours)
             std::stringstream ss(ev.substr(5)); int skip; ss >> skip >> skip;
-            uint32_t id; gr.slot = 0;
-            for (int k = 0; ss >> id; k++) if (id == net.groupMe()) gr.slot = k;
+            std::vector<uint32_t> order; uint32_t id;
+            while (ss >> id) order.push_back(id);
+            if (order.empty())   // serveur antérieur à la v28 (pas d'ordre) : ordre des joueurs du groupe, le même partout
+              for (auto &gm : net.groupMembers()) order.push_back(gm.id);
+            gr.slot = 0;
+            for (size_t k = 0; k < order.size(); k++) if (order[k] == net.groupMe()) gr.slot = int(k);
           }
           gr.track = t & 7; gr.laps = l; gr.active = true; gr.waitingGo = true; gr.racing = false; gr.finished = false;
           gr.lastRel = -1; gr.total = 0; gr.lapOffset = 0; gr.lastTick = 0; gr.goAt = 0;
@@ -1001,11 +1005,16 @@ int main(int argc, char **argv) {
       if (!gr.active || !net.inGroup() || menuOpen) return;
       int scale = std::max(1, logicalW / 640), big = std::max(2, logicalW / 240);
       double now = NetLink::clock();
+      const std::string place = "Grille : rangée " + std::to_string(gr.slot / 2 + 1) + (gr.slot % 2 ? ", à droite" : ", à gauche");
       if (gr.waitingGo) {
-        drawText("Course à plusieurs : départ dès que tous les joueurs sont prêts...", logicalW / 2, logicalH / 3, scale,
-                 0xffffffffu, 0xc0000000u, 1, logicalW);
+        int yy = logicalH / 3;
+        yy += drawText("Course à plusieurs : départ dès que tous les joueurs sont prêts...", logicalW / 2, yy, scale,
+                       0xffffffffu, 0xc0000000u, 1, logicalW);
+        drawText(place, logicalW / 2, yy + 2 * scale, scale, 0xffffff60u, 0xc0000000u, 1, logicalW);
         return;
       }
+      if (gr.racing && now - gr.goAt < 15)   // place sur la grille, rappelée pendant la descente de la grue
+        drawText(place, logicalW / 2, logicalH / 3 + 20 * scale, scale, 0xffffff60u, 0xc0000000u, 1, logicalW);
       for (auto &g : view->ghosts)   // noms au-dessus des voitures (HD)
         if (hd && g.onScreen && g.dist < 20000)
           drawText(g.name, int(g.sx), int(g.sy) - 10 * scale, scale, 0xffffff60u, 0x90000000u, 1, logicalW);
