@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v33"
+#define SCR_VERSION "v34"
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -522,6 +522,8 @@ int main(int argc, char **argv) {
     bool racing = false;      // entre le départ et la fin de la course
     bool menu = false;        // menu du groupe ouvert hors du « Computer Link »
     bool finished = false;
+    bool out = false;         // abandon : voiture détruite (« wrecked »)
+    int wreckFrames = 0;
     int track = 0, laps = 3;
     double goAt = 0, finishSecs = 0, lapOffset = 0, lastRel = -1, total = 0;
     uint32_t lastTick = 0;
@@ -821,7 +823,7 @@ int main(int argc, char **argv) {
             gr.slot = 0;
             for (size_t k = 0; k < order.size(); k++) if (order[k] == net.groupMe()) gr.slot = int(k);
           }
-          gr.track = t & 7; gr.laps = l; gr.active = true; gr.waitingGo = true; gr.racing = false; gr.finished = false;
+          gr.track = t & 7; gr.laps = l; gr.active = true; gr.waitingGo = true; gr.racing = false; gr.finished = false; gr.out = false; gr.wreckFrames = 0;
           gr.lastRel = -1; gr.total = 0; gr.lapOffset = 0; gr.lastTick = 0; gr.goAt = 0;
           if (typing != Typing::None && typing != Typing::Chat) { typing = Typing::None; SDL_StopTextInput(); }
           if (!hd) { hd = true; applyMode(true); }   // les autres voitures ne sont visibles qu'en HD
@@ -945,8 +947,6 @@ int main(int argc, char **argv) {
         else if (gr.lastRel < 0.25 * ns && rel > 0.75 * ns) gr.lapOffset -= ns;   // marche arrière
         gr.lastRel = rel;
         gr.total = gr.lapOffset + rel;
-        if (m->b(0x1090a) >= gr.laps && m->b(0x1090a) < 0x80)   // compteur de tours du jeu : ligne franchie gr.laps fois
-          gr.total = std::max(gr.total, double(gr.laps) * ns);
         if (const char *ff = std::getenv("SCR_FAKEFINISH"))   // test : arrivée simulée après N secondes
           if (NetLink::clock() - gr.goAt > std::atof(ff)) gr.total = double(gr.laps) * ns;
         if (!gr.finished && gr.total >= double(gr.laps) * ns) {
@@ -968,6 +968,17 @@ int main(int argc, char **argv) {
           for (auto &sd : vis) boost = boost || sd.id == 6 || sd.id == 7 || sd.id == 49 || sd.id == 8 || sd.id == 9 || sd.id == 50;
         }
         net.sendGhost(v, uint8_t(std::clamp(int(gr.total / ns) + 1, 0, 255)), uint8_t((gr.finished ? 1 : 0) | (boost ? 2 : 0)));
+      }
+    }
+    // voiture détruite : le jeu lance le compte à rebours de fin ($10956) et arrête la physique ; le joueur abandonne
+    if (gr.active && gr.racing && !gr.finished && gr.sideDone) {
+      if (const char *fw = std::getenv("SCR_FAKEWRECK"))   // test : casse simulée après N secondes
+        if (NetLink::clock() - gr.goAt > std::atof(fw) && !m->b(0x10956)) m->ram[0x10956] = 0x3c;
+      gr.wreckFrames = m->b(0x10956) != 0 ? gr.wreckFrames + 1 : 0;
+      if (gr.wreckFrames > 25) {
+        gr.finished = gr.out = true;
+        gr.finishSecs = NetLink::clock() - gr.goAt;
+        net.groupCommand("OUT");
       }
     }
 
@@ -1041,18 +1052,20 @@ int main(int argc, char **argv) {
           drawText(g.name, int(g.sx), int(g.sy) - 10 * scale, scale, 0xffffff60u, 0x90000000u, 1, logicalW);
       if (gr.racing && now - gr.goAt < 2) drawText("GO !", logicalW / 2, logicalH / 4, big, 0xff60ff60u, 0x80000000u, 1, logicalW);
       // classement : arrivés (par temps), puis par distance parcourue
-      struct Row { std::string name; double total; long ms; bool me; };
+      struct Row { std::string name; double total; long ms; bool me; bool out; };
       std::vector<Row> rows;
       const int ns = trackList.empty() ? 1 : int(trackList[size_t(gr.track) % trackList.size()].secs.size());
       for (auto &gm : net.groupMembers()) {
-        Row r{gm.name, -1e9, -1, gm.id == net.groupMe()};
+        Row r{gm.name, -1e9, -1, gm.id == net.groupMe(), gm.state == "out"};
         if (gm.state.rfind("finished:", 0) == 0) r.ms = std::atol(gm.state.c_str() + 9);
         if (r.me) r.total = gr.total / std::max(1, ns);
         else { auto it = net.ghosts().find(gm.id); if (it != net.ghosts().end() && !it->second.empty()) r.total = it->second.back().v[6]; }
-        if (r.me && gr.finished && r.ms < 0) r.ms = long(gr.finishSecs * 1000);
+        if (r.me && gr.out) r.out = true;
+        if (r.me && gr.finished && !gr.out && r.ms < 0) r.ms = long(gr.finishSecs * 1000);
         rows.push_back(r);
       }
       std::sort(rows.begin(), rows.end(), [](const Row &a, const Row &b) {
+        if (a.out != b.out) return b.out;   // abandons en dernier
         if ((a.ms >= 0) != (b.ms >= 0)) return a.ms >= 0;
         if (a.ms >= 0) return a.ms < b.ms;
         return a.total > b.total;
@@ -1061,12 +1074,13 @@ int main(int argc, char **argv) {
       int y = 2 * scale;
       double el = gr.finished ? gr.finishSecs : now - gr.goAt;
       int lap = std::clamp(int(std::floor(gr.total / std::max(1, ns))) + 1, 1, gr.laps);
-      y += drawText(gr.finished ? "Arrivé en " + fmt(gr.finishSecs) : "Tour " + std::to_string(lap) + "/" + std::to_string(gr.laps) + "   " + fmt(el),
+      y += drawText(gr.out ? std::string("Abandon : voiture détruite") : gr.finished ? "Arrivé en " + fmt(gr.finishSecs) : "Tour " + std::to_string(lap) + "/" + std::to_string(gr.laps) + "   " + fmt(el),
                     logicalW - 2 * scale, y, scale, 0xffffffffu, 0xc0000000u, 2, logicalW);
       for (size_t k = 0; k < rows.size(); k++) {
         const Row &r = rows[k];
         std::string t = std::to_string(k + 1) + ". " + r.name.substr(0, 14);
-        if (r.ms >= 0) t += "  " + fmt(r.ms / 1000.0);
+        if (r.out) t += "  abandon";
+        else if (r.ms >= 0) t += "  " + fmt(r.ms / 1000.0);
         else if (r.total > -1e8) t += "  tour " + std::to_string(std::clamp(int(std::floor(r.total)) + 1, 1, gr.laps));
         y += drawText(t, logicalW - 2 * scale, y, scale, r.me ? 0xffa0e0ffu : 0xffffffa0u, 0xa0000000u, 2, logicalW);
       }
@@ -1122,7 +1136,8 @@ int main(int argc, char **argv) {
         std::string hostName;
         for (auto &gm : net.groupMembers()) if (gm.id == net.groupHost()) hostName = gm.name;
         bool host = net.groupHost() == net.groupMe();
-        st = net.groupPhase() != "lobby" ? (gr.finished ? "Arrivé ! En attente des autres joueurs..." : "Course en cours...")
+        st = net.groupPhase() != "lobby" ? (gr.out ? "Abandon (voiture détruite). Attente des autres..."
+                                                : gr.finished ? "Arrivé ! En attente des autres joueurs..." : "Course en cours...")
              : host ? (net.groupMembers().size() < 2 ? "En attente d'autres joueurs (2 à 6)" : "Choisissez le circuit puis lancez")
                     : "En attente du départ donné par " + hostName;
         std::vector<NetLink::GroupMember> ms = net.groupMembers();
@@ -1138,7 +1153,7 @@ int main(int argc, char **argv) {
             long msv = std::atol(gm.state.c_str() + 9);
             char b[48]; std::snprintf(b, sizeof b, "%d. ", ++rank); t = b + t;
             std::snprintf(b, sizeof b, "  %ld:%04.1f", msv / 60000, (msv % 60000) / 1000.0); t += b;
-          } else t = "-  " + t;
+          } else t = "-  " + t + (gm.state == "out" ? "  abandon" : "");
           if (gm.id == net.groupHost()) t += "  (organisateur)";
           groupLines.push_back({t, gm.id == net.groupMe() ? 0xffa0e0ffu : 0xffffffffu, 0xe0202020u});
         }

@@ -64,7 +64,9 @@ ceux du serveur ; en réseau local, ceux du joueur qui a choisi l'adversaire.
      Chaque jeu se place sur le circuit et attend que tous soient prêts : le départ est donné en
      même temps à tous. Grille de départ : 3 rangées de 2 (gauche / droite), ordre tiré au sort
      à chaque course ; les rangées 2 et 3 partent un peu en arrière (le temps et le classement
-     comptent depuis la ligne de départ). Les autres joueurs sont des voitures « fantômes » : on les voit rouler
+     comptent depuis la ligne de départ). La grue descend la voiture comme dans le jeu d'origine
+     (même trajectoire qu'en championnat) ; chaque voiture glisse ensuite à sa place, à gauche
+     ou à droite. Les autres joueurs sont des voitures « fantômes » : on les voit rouler
      (avec leur nom au-dessus, et les 8 flammes du moteur V8 sur le capot quand ils utilisent le
      boost) mais on passe à
      travers, sans collision. Le jeu passe en HD (F1)
@@ -72,7 +74,9 @@ ceux du serveur ; en réseau local, ceux du joueur qui a choisi l'adversaire.
      En haut à droite : tour, temps et classement en direct. Le nombre de tours est celui de
      l'organisateur (1 à 9 ; l'arrêt de l'entraînement d'origine après 3 tours est désactivé).
      Dès qu'un joueur a franchi l'arrivée, le menu du groupe s'ouvre chez lui (classement en
-     direct). À la fin (tous arrivés, ou deux minutes après le premier), le menu affiche les
+     direct). Voiture détruite (« wrecked ») : le joueur abandonne, le menu du groupe s'ouvre chez
+     lui et « abandon » s'affiche à côté de son nom. À la fin (tous arrivés ou abandonnés, ou deux
+     minutes après le premier arrivé), le menu affiche les
      temps et l'organisateur peut relancer une course. « Quitter la course à plusieurs » (ou Échap) ramène au titre du jeu.
      Discussion : dans la salle privée, « Écrire un message (F9) » (ou la touche F9) : le message va
      à tous les joueurs présents dans la salle ; les derniers s'affichent dans le menu. Une fois la

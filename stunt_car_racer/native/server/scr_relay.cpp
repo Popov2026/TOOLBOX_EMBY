@@ -23,7 +23,7 @@
 //                       PICK (14) "numéro"  (salle privée : choix de l'adversaire)
 //                       CHAT (17) "texte"   (salle privée : à tous les joueurs libres de la salle,
 //                                            reçu « nom\ttexte » ; en partie : retransmis à l'adversaire)
-//                       GCMD (19) "ENTER" | "LEAVE" | "START circuit tours" | "LOADED" | "FINISH ms"
+//                       GCMD (19) "ENTER" | "LEAVE" | "START circuit tours" | "LOADED" | "FINISH ms" | "OUT"
 //                                            (course à plusieurs, 2 à 6 joueurs d'une salle privée)
 //                       GPOS (21) position de la voiture (binaire), retransmise aux autres membres
 //                                 précédée du numéro du joueur (4 octets)
@@ -33,7 +33,7 @@
 //                       LIST (13) "numéro\tnom\n..." (salle privée : joueurs présents et libres)
 //                       GSTATE (18) état du groupe : "me N\nhost N\nphase lobby|loading|racing\n
 //                                   track T laps L\nm N état nom\n..." (état : lobby, loading, loaded,
-//                                   racing, finished:ms)
+//                                   racing, finished:ms, out = abandon)
 //                       GEVENT (20) "START circuit tours n1 n2 ..." (ordre sur la grille) | "GO" | "END"
 //                       PARAMS (16) "gravity=1 thrust=1 ... cadence=400" (réglages imposés, après l'inscription)
 //   ensuite, les trames de chaque joueur sont retransmises telles quelles à l'autre.
@@ -166,7 +166,7 @@ struct Client {
   bool joined = false, closing = false, probe = false;
   double since = 0, lastRx = 0, pairedAt = 0, lastChat = 0;
   bool inGroup = false;          // course à plusieurs
-  std::string gstate = "lobby";  // lobby, loading, loaded, racing, finished:ms
+  std::string gstate = "lobby";  // lobby, loading, loaded, racing, finished:ms, out (voiture détruite)
   uint64_t rxBytes = 0, rxMark = 0;
   double rate = 0;               // octets reçus par seconde
   std::string lastList;          // dernière liste envoyée (salle privée)
@@ -331,6 +331,11 @@ void groupCmd(Client &c, const std::string &cmd) {
       if (!g.firstFinish) g.firstFinish = now();
       logf("salle %s : %s arrive en %ld,%03ld s", c.room.c_str(), c.name.c_str(), ms / 1000, ms % 1000);
     }
+  } else if (cmd == "OUT") {   // voiture détruite : abandon
+    if (g.phase == "racing" && c.gstate == "racing") {
+      c.gstate = "out";
+      logf("salle %s : %s abandonne (voiture détruite)", c.room.c_str(), c.name.c_str());
+    }
   }
   groupState(c.room);
 }
@@ -351,13 +356,13 @@ void groupTick() {
       }
     } else if (g.phase == "racing") {
       bool all = true;
-      for (Sock f : g.members) all = all && clients[f].gstate.rfind("finished", 0) == 0;
-      // fin : tous arrivés, ou 2 minutes après le premier, ou 30 minutes de course
+      for (Sock f : g.members) all = all && (clients[f].gstate.rfind("finished", 0) == 0 || clients[f].gstate == "out");
+      // fin : tous arrivés ou abandonnés, ou 2 minutes après le premier, ou 30 minutes de course
       if (all || (g.firstFinish && t - g.firstFinish > 120) || t - g.startedAt > 1800) {
         g.phase = "lobby";
         groupSend(g, NF_GEVENT, "END");
         groupState(kv.first, true);
-        for (Sock f : g.members) if (clients[f].gstate.rfind("finished", 0) != 0) clients[f].gstate = "lobby";
+        for (Sock f : g.members) if (clients[f].gstate.rfind("finished", 0) != 0 && clients[f].gstate != "out") clients[f].gstate = "lobby";
         logf("salle %s : course terminée", kv.first.c_str());
       }
     }
@@ -517,6 +522,7 @@ std::string stateOf(const Client &c, double t) {
   if (c.inGroup) {
     const std::string &g = c.gstate;
     if (g.rfind("finished:", 0) == 0) { long ms = std::atol(g.c_str() + 9); char b[64]; std::snprintf(b, sizeof b, "course à plusieurs : arrivé %ld,%ld s", ms / 1000, ms % 1000 / 100); return b; }
+    if (g == "out") return "course à plusieurs : abandon (voiture détruite)";
     return "course à plusieurs : " + std::string(g == "lobby" ? "attente du départ" : g == "racing" ? "en course" : "chargement");
   }
   return c.mode == Mode::Room ? "dans la salle, libre" : "attend un adversaire";

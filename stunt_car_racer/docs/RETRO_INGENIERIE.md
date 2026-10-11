@@ -298,3 +298,13 @@ code et bloquerait le jeu).
   écran noir). La course à plusieurs met `$10983` à `$FF` et décide elle-même de l'arrivée.
 * **Grue de départ** : `$109D4` change de valeur à l'atterrissage (`$B000` -> `$6000`) ; un recul
   de la voiture avant la descente est conservé, un décalage latéral est ramené au milieu par la grue.
+  Trajectoire (mesurée, circuit 1) : la voiture part à côté de la route, à environ 280 unités à
+  droite du point de pose, est soulevée puis ramenée vers la gauche sur la route ; elle est
+  identique en championnat (course contre l'ordinateur) et en entraînement. `$109C9` sert de
+  compte à rebours de la descente (`$F0` au départ, `$E6` après une sortie de route) ; `$109EA`
+  (±`$2C` selon le signe de `$109CB`) n'est pas le côté de la grue (la forcer fait tomber la
+  voiture hors de la route).
+* **Voiture détruite** : au-delà de `$EF` de dégâts (`$1093F`), `$4BDC4` lance le compte à
+  rebours de fin `$10956` (`$3C`) puis la physique s'arrête. `$10956` ne passe à une valeur non
+  nulle qu'à ce moment (8 circuits vérifiés, arrêt de fin de course désactivé) : la course à
+  plusieurs s'en sert pour déclarer l'abandon (commande `OUT` au serveur relais).

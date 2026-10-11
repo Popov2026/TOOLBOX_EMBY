@@ -113,7 +113,8 @@ données de l'un à l'autre. Deux façons de se trouver (menu « Computer Link �
     et en choisit un. Une fois en partie, les deux joueurs disparaissent de la liste.
   - Course à plusieurs : dans une salle privée, de 2 à 6 joueurs ; le serveur donne le départ
     quand tous sont prêts (30 s au plus), relaie les positions et collecte les temps ; la course
-    se termine quand tous sont arrivés, ou deux minutes après le premier arrivé.
+    se termine quand tous sont arrivés ou ont abandonné (voiture détruite), ou deux minutes
+    après le premier arrivé. Il faut ce serveur v34 pour que la casse termine la course.
   - Les deux joueurs doivent avoir la même version de scr.exe (le serveur refuse sinon).
   - Une connexion silencieuse plus de 90 s est fermée ; 16 connexions au plus par adresse IP,
     512 en tout.
