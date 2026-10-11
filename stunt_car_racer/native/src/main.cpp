@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v27"
+#define SCR_VERSION "v28"
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -456,6 +456,16 @@ int main(int argc, char **argv) {
     setupAudio();
     wireNet();
   };
+  // déplace la voiture du joueur : vers l'avant (fwd) et vers la droite (side), unités de géométrie
+  auto moveCar = [&](double fwd, double side) {
+    double yaw = m->w(0x10ad0) * 2 * M_PI / 65536;
+    double dx = std::sin(yaw) * fwd + std::cos(yaw) * side, dz = std::cos(yaw) * fwd - std::sin(yaw) * side;
+    auto add = [&](uint32_t a, double d) {
+      uint32_t v = m->l(a) + uint32_t(int32_t(d / 16 * 65536));
+      m->ram[a] = uint8_t(v >> 24); m->ram[a + 1] = uint8_t(v >> 16); m->ram[a + 2] = uint8_t(v >> 8); m->ram[a + 3] = uint8_t(v);
+    };
+    add(0x10ac2, dx); add(0x10aca, dz);
+  };
   uint64_t lastPresent = 0, fpsT0 = SDL_GetPerformanceCounter();
   int fpsN = 0;
   bool fpsLog = std::getenv("SCR_FPS") != nullptr;
@@ -489,6 +499,9 @@ int main(int argc, char **argv) {
     int track = 0, laps = 3;
     double goAt = 0, finishSecs = 0, lapOffset = 0, lastRel = -1, total = 0;
     uint32_t lastTick = 0;
+    int slot = 0;             // place sur la grille : rangée slot / 2 (0 devant), côté slot % 2
+    bool sideDone = false;    // décalage sur le côté appliqué (après l'atterrissage de la grue)
+    uint16_t dropMode = 0;
   } gr;
   int gTrack = 0, gLaps = 3;      // choix de l'organisateur
   auto trackName = [&](int t) {
@@ -762,11 +775,20 @@ int main(int argc, char **argv) {
         if (ev.rfind("START", 0) == 0) {
           int t = 0, l = 3;
           std::sscanf(ev.c_str() + 5, "%d %d", &t, &l);
+          {   // ordre sur la grille de départ (numéros des joueurs après circuit et tours)
+            std::stringstream ss(ev.substr(5)); int skip; ss >> skip >> skip;
+            uint32_t id; gr.slot = 0;
+            for (int k = 0; ss >> id; k++) if (id == net.groupMe()) gr.slot = k;
+          }
           gr.track = t & 7; gr.laps = l; gr.active = true; gr.waitingGo = true; gr.racing = false; gr.finished = false;
           gr.lastRel = -1; gr.total = 0; gr.lapOffset = 0; gr.lastTick = 0;
           if (typing != Typing::None && typing != Typing::Chat) { typing = Typing::None; SDL_StopTextInput(); }
           if (!hd) { hd = true; applyMode(true); }   // les autres voitures ne sont visibles qu'en HD
           restartMachine(gr.track);
+          // grille : 3 rangées de 2 ; les rangées 2 et 3 reculent avant la descente de la grue
+          // (vérifié sur les 8 circuits : la voiture se pose sur la route), le côté est réglé à l'atterrissage
+          moveCar(-250.0 * (gr.slot / 2), 0);
+          gr.sideDone = false; gr.dropMode = m->w(0x109d4);
           net.groupCommand("LOADED");
           acc = 0;
         } else if (ev == "GO") {
@@ -826,6 +848,11 @@ int main(int argc, char **argv) {
         acc -= framePeriod; n++;
       }
 
+    // grille de départ : à l'atterrissage (fin de la descente de la grue), voiture à gauche ou à droite
+    if (gr.active && gr.racing && !gr.sideDone && m->w(0x109d4) != gr.dropMode) {
+      gr.sideDone = true;
+      moveCar(0, gr.slot % 2 ? 90 : -90);
+    }
     // course à plusieurs : progression sur le circuit (tours, arrivée) et position envoyée aux autres
     if (gr.active && gr.racing && m->ticks() != gr.lastTick && !trackList.empty()) {
       gr.lastTick = m->ticks();

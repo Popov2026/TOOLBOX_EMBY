@@ -34,7 +34,7 @@
 //                       GSTATE (18) état du groupe : "me N\nhost N\nphase lobby|loading|racing\n
 //                                   track T laps L\nm N état nom\n..." (état : lobby, loading, loaded,
 //                                   racing, finished:ms)
-//                       GEVENT (20) "START circuit tours" | "GO" | "END"
+//                       GEVENT (20) "START circuit tours n1 n2 ..." (ordre sur la grille) | "GO" | "END"
 //                       PARAMS (16) "gravity=1 thrust=1 ... cadence=400" (réglages imposés, après l'inscription)
 //   ensuite, les trames de chaque joueur sont retransmises telles quelles à l'autre.
 #include <algorithm>
@@ -314,7 +314,13 @@ void groupCmd(Client &c, const std::string &cmd) {
     g.track = std::max(0, std::min(7, t)); g.laps = std::max(1, std::min(9, l));
     g.phase = "loading"; g.deadline = now() + 30; g.firstFinish = 0;
     for (Sock f : g.members) clients[f].gstate = "loading";
-    groupSend(g, NF_GEVENT, "START " + std::to_string(g.track) + " " + std::to_string(g.laps));
+    // grille de départ (3 rangées de 2) : ordre tiré au sort à chaque course
+    std::vector<uint32_t> grid;
+    for (Sock f : g.members) grid.push_back(clients[f].id);
+    for (size_t i = grid.size(); i > 1; i--) std::swap(grid[i - 1], grid[size_t(std::rand()) % i]);
+    std::string startMsg = "START " + std::to_string(g.track) + " " + std::to_string(g.laps);
+    for (uint32_t id : grid) startMsg += " " + std::to_string(id);
+    groupSend(g, NF_GEVENT, startMsg);
     logf("salle %s : course à %zu joueurs lancée (circuit %d, %d tour(s))", c.room.c_str(), g.members.size(), g.track + 1, g.laps);
   } else if (cmd == "LOADED") {
     if (g.phase == "loading") c.gstate = "loaded";
@@ -624,6 +630,7 @@ int main(int argc, char **argv) {
   startedAt = now();
   machineAddresses = localAddresses();
   live = !journal && isConsole();
+  std::srand(unsigned(std::time(nullptr)));
   logf("relais Stunt Car Racer : écoute sur le port TCP %d", port);
   if (!machineAddresses.empty()) logf("adresse(s) de cette machine : %s", machineAddresses.c_str());
   logf("réglages imposés aux jeux%s : %s", haveConfig ? (" (" + config + ")").c_str() : " (par défaut, pas de scr_relay.ini)",
