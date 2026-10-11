@@ -53,6 +53,16 @@ ceux du serveur ; en réseau local, ceux du joueur qui a choisi l'adversaire.
          un, à donner à vos amis). Le menu affiche les joueurs présents dans la salle :
          « Affronter ... » pour en choisir un (celui qui choisit est le maître). Plusieurs joueurs
          peuvent attendre dans la même salle ; ceux qui sont déjà en partie n'y apparaissent plus.
+     Course à plusieurs (2 à 6 joueurs) : dans la salle privée, « Course à plusieurs (2 à 6
+     joueurs) ». Le premier entré est l'organisateur : il choisit le circuit et le nombre de tours
+     (flèches gauche / droite), puis « Lancer la course » dès que deux joueurs au moins sont là.
+     Chaque jeu se place sur le circuit et attend que tous soient prêts : le départ est donné en
+     même temps à tous. Les autres joueurs sont des voitures « fantômes » : on les voit rouler
+     (avec leur nom au-dessus) mais on passe à travers, sans collision. Le jeu passe en HD (F1)
+     au départ, car le rendu d'origine ne sait dessiner qu'une seule voiture adverse.
+     En haut à droite : tour, temps et classement en direct. À la fin (tous arrivés, ou deux
+     minutes après le premier), le menu du groupe affiche les temps et l'organisateur peut
+     relancer une course. « Quitter la course à plusieurs » (ou Échap) ramène au titre du jeu.
      Discussion : dans la salle privée, « Écrire un message (F9) » (ou la touche F9) : le message va
      à tous les joueurs présents dans la salle ; les derniers s'affichent dans le menu. Une fois la
      partie lancée, F9 écrit à l'adversaire (aussi en réseau local) ; ses messages apparaissent en

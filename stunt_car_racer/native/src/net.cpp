@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <sstream>
 
 #ifdef _WIN32
 #ifndef _WINSOCK_DEPRECATED_NO_WARNINGS
@@ -77,7 +78,8 @@ void NetLink::close(const std::string &why) {
   mode_ = Mode::Off; state_ = State::Off; connecting_ = false;
   in_.clear(); out_.clear(); rx_.clear(); dataOut_.clear(); peers_.clear();
   helloSent_ = helloOk_ = relayPaired_ = master_ = waitedFirst_ = false;
-  ping_ = -1; peerName_.clear(); peerTuning_.clear(); serverParams_.clear(); chat_.clear(); info_.clear(); error_.clear();
+  ping_ = -1; peerName_.clear(); peerTuning_.clear(); serverParams_.clear(); chat_.clear();
+  groupIn_ = false; groupMembers_.clear(); groupEvents_.clear(); ghosts_.clear(); groupPhase_.clear(); info_.clear(); error_.clear();
 }
 
 void NetLink::fail(const std::string &why) {
@@ -385,6 +387,50 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
       break;
     }
     case NF_PARAMS: serverParams_.assign(reinterpret_cast<const char *>(p), n); break;
+    case NF_GSTATE: {   // état du groupe (course à plusieurs)
+      std::string s(reinterpret_cast<const char *>(p), n);
+      std::stringstream ss(s); std::string line;
+      groupMembers_.clear();
+      while (std::getline(ss, line)) {
+        std::stringstream ls(line); std::string k; ls >> k;
+        if (k == "me") ls >> groupMe_;
+        else if (k == "host") ls >> groupHost_;
+        else if (k == "phase") ls >> groupPhase_;
+        else if (k == "track") { std::string l; ls >> groupTrack_ >> l >> groupLaps_; }
+        else if (k == "m") {
+          GroupMember gm; ls >> gm.id >> gm.state; std::getline(ls, gm.name);
+          if (!gm.name.empty() && gm.name[0] == ' ') gm.name.erase(0, 1);
+          groupMembers_.push_back(gm);
+        }
+      }
+      groupIn_ = false;
+      for (auto &gm : groupMembers_) groupIn_ = groupIn_ || gm.id == groupMe_;
+      // fantômes des joueurs partis : oubliés
+      for (auto it = ghosts_.begin(); it != ghosts_.end();) {
+        bool still = false;
+        for (auto &gm : groupMembers_) still = still || gm.id == it->first;
+        it = still ? std::next(it) : ghosts_.erase(it);
+      }
+      break;
+    }
+    case NF_GEVENT:
+      groupEvents_.emplace_back(reinterpret_cast<const char *>(p), n);
+      if (groupEvents_.back().rfind("START", 0) == 0) ghosts_.clear();
+      break;
+    case NF_GPOS:
+      if (n >= 4 + 30) {
+        uint32_t id = (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | p[3];
+        GhostSample g; g.t = now();
+        for (int k = 0; k < 7; k++) {
+          uint32_t u = (uint32_t(p[4 + 4 * k]) << 24) | (uint32_t(p[5 + 4 * k]) << 16) | (uint32_t(p[6 + 4 * k]) << 8) | p[7 + 4 * k];
+          std::memcpy(&g.v[k], &u, 4);
+        }
+        g.lap = p[32]; g.flags = p[33];
+        auto &q = ghosts_[id];
+        q.push_back(g);
+        while (q.size() > 40) q.pop_front();
+      }
+      break;
     case NF_CHAT: {   // « nom \t texte » (salle, par le serveur) ou « texte » (adversaire)
       std::string s(reinterpret_cast<const char *>(p), n), from = peerName_;
       size_t tab = s.find('\t');
@@ -417,6 +463,30 @@ void NetLink::flush() {
     if (r > 0) out_.erase(out_.begin(), out_.begin() + r);
     else { if (r < 0 && SCR_WOULDBLOCK(sockErr())) break; fail("connexion perdue"); break; }
   }
+}
+
+void NetLink::groupCommand(const std::string &cmd) {
+  if (mode_ != Mode::Relay || tcp_ == BAD) return;
+  frame(NF_GCMD, cmd);
+  flush();
+  if (cmd == "LEAVE") { groupIn_ = false; groupMembers_.clear(); ghosts_.clear(); groupEvents_.clear(); groupPhase_.clear(); }
+}
+
+bool NetLink::takeGroupEvent(std::string &ev) {
+  if (groupEvents_.empty()) return false;
+  ev = groupEvents_.front(); groupEvents_.pop_front();
+  return true;
+}
+
+void NetLink::sendGhost(const float v[7], uint8_t lap, uint8_t flags) {
+  if (!groupIn_ || tcp_ == BAD) return;
+  uint8_t b[30];
+  for (int k = 0; k < 7; k++) {
+    uint32_t u; std::memcpy(&u, &v[k], 4);
+    b[4 * k] = uint8_t(u >> 24); b[4 * k + 1] = uint8_t(u >> 16); b[4 * k + 2] = uint8_t(u >> 8); b[4 * k + 3] = uint8_t(u);
+  }
+  b[28] = lap; b[29] = flags;
+  frame(NF_GPOS, b, 30);
 }
 
 void NetLink::sendChat(const std::string &text) {
@@ -632,6 +702,8 @@ std::string NetLink::status() const {
       if (mode_ == Mode::LanHost) return "Réseau local : partie hébergée, en attente d'un joueur (port " + std::to_string(port_) + ")";
       if (mode_ == Mode::LanJoin) return "Réseau local : recherche d'une partie...";
       if (mode_ == Mode::Relay && room_.empty()) return "En ligne : recherche d'un adversaire (premier joueur disponible)";
+      if (mode_ == Mode::Relay && groupIn_)
+        return "Course à plusieurs : salle " + room_ + ", " + std::to_string(groupMembers_.size()) + " joueur(s)";
       if (mode_ == Mode::Relay)
         return "En ligne : salle " + room_ + (peers_.empty() ? ", personne d'autre pour l'instant" : "");
       return "Réseau : en attente";

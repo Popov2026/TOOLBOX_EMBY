@@ -14,6 +14,7 @@
 #pragma once
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -26,7 +27,8 @@ constexpr int NET_PORT = 27420;           // TCP : hébergement en réseau local
 constexpr int NET_DISCOVERY_PORT = 27421; // UDP : annonces de parties en réseau local
 
 enum NetFrame : uint8_t { NF_HELLO = 1, NF_DATA = 2, NF_PING = 3, NF_PONG = 4, NF_BYE = 5, NF_JOIN = 10, NF_INFO = 11,
-                          NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16, NF_CHAT = 17 };
+                          NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16, NF_CHAT = 17,
+                          NF_GSTATE = 18, NF_GCMD = 19, NF_GEVENT = 20, NF_GPOS = 21 };
 
 class NetLink {
  public:
@@ -68,6 +70,22 @@ class NetLink {
   void sendChat(const std::string &text);
   const std::deque<ChatLine> &chat() const { return chat_; }
   static double clock() { return now(); }
+
+  // course à plusieurs (2 à 6 joueurs d'une salle privée, voitures fantômes) : le serveur relaie les
+  // positions, donne le départ en même temps à tous et collecte les temps d'arrivée
+  struct GroupMember { uint32_t id; std::string name, state; };   // état : lobby, loading, loaded, racing, finished:ms
+  struct GhostSample { double t; float v[7]; uint8_t lap, flags; };   // x y z lacet tangage roulis progression
+  bool inGroup() const { return groupIn_; }
+  void groupCommand(const std::string &cmd);   // ENTER, LEAVE, START circuit tours, LOADED, FINISH ms
+  const std::vector<GroupMember> &groupMembers() const { return groupMembers_; }
+  uint32_t groupMe() const { return groupMe_; }
+  uint32_t groupHost() const { return groupHost_; }
+  const std::string &groupPhase() const { return groupPhase_; }
+  int groupTrack() const { return groupTrack_; }
+  int groupLaps() const { return groupLaps_; }
+  bool takeGroupEvent(std::string &ev);        // START / GO / END reçus (dans l'ordre)
+  void sendGhost(const float v[7], uint8_t lap, uint8_t flags);
+  const std::map<uint32_t, std::deque<GhostSample>> &ghosts() const { return ghosts_; }
   void close(const std::string &why = "");
 
   // à appeler souvent (plusieurs fois par trame) : connexions, lecture, écriture, annonces, ping
@@ -108,6 +126,13 @@ class NetLink {
   uint32_t id_ = 0;                  // identifiant de ce jeu dans les annonces
   std::vector<Peer> peers_;
   std::deque<ChatLine> chat_;
+  bool groupIn_ = false;
+  std::vector<GroupMember> groupMembers_;
+  uint32_t groupMe_ = 0, groupHost_ = 0;
+  std::string groupPhase_;
+  int groupTrack_ = 0, groupLaps_ = 3;
+  std::deque<std::string> groupEvents_;
+  std::map<uint32_t, std::deque<GhostSample>> ghosts_;
   bool openListener(int port);
   bool openDiscovery(bool broadcast);
   void announce(double t);

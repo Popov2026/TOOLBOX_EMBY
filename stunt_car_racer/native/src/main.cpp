@@ -29,12 +29,13 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v26"
+#define SCR_VERSION "v27"
 
 #include "banner.hpp"
 #include "hdview.hpp"
 #include "machine.hpp"
 #include "net.hpp"
+#include "track.hpp"
 #include <chrono>
 #include <random>
 #include <tuple>
@@ -446,6 +447,15 @@ int main(int argc, char **argv) {
     if (SDL_GetQueuedAudioSize(audio) > Uint32(AUDIO_RATE / 50 * 2 * 6)) return;
     if (!pcm.empty()) SDL_QueueAudio(audio, pcm.data(), Uint32(pcm.size() * 2));
   };
+  // relance la machine : -1 = jeu complet (titre), sinon entraînement sur ce circuit
+  auto restartMachine = [&](int trk) {
+    view.reset();
+    m.reset();
+    m = start(disk, o, trk);
+    newView();
+    setupAudio();
+    wireNet();
+  };
   uint64_t lastPresent = 0, fpsT0 = SDL_GetPerformanceCounter();
   int fpsN = 0;
   bool fpsLog = std::getenv("SCR_FPS") != nullptr;
@@ -465,14 +475,53 @@ int main(int argc, char **argv) {
   struct MenuItem { std::string label; int kind; NetLink::Peer peer; };
   RelayProbe probe;                 // « Online Multiplayer » : le serveur relais répond-il ?
   int netRate = o.netRate;          // cadence réseau en cours (scr.ini, ou imposée par le serveur relais)
-  auto online = [&] { return m->selectChoice() == 3; };   // 4. Online Multiplayer (sinon 3. Computer Link - Local LAN)
+  // 4. Online Multiplayer (sinon 3. Computer Link - Local LAN) ; retenu même si la machine est relancée
+  bool onlineSel = false;
+  // course à plusieurs (2 à 6 joueurs d'une salle privée) : chaque jeu roule en entraînement sur le même
+  // circuit ; les autres joueurs sont des voitures fantômes (sans collision), dessinées en HD
+  const std::vector<Track> trackList = decodeTracks(m->image());
+  struct GroupRace {
+    bool active = false;      // machine lancée pour une course du groupe (entraînement)
+    bool waitingGo = false;   // départ pas encore donné par le serveur
+    bool racing = false;      // entre le départ et la fin de la course
+    bool menu = false;        // menu du groupe ouvert hors du « Computer Link »
+    bool finished = false;
+    int track = 0, laps = 3;
+    double goAt = 0, finishSecs = 0, lapOffset = 0, lastRel = -1, total = 0;
+    uint32_t lastTick = 0;
+  } gr;
+  int gTrack = 0, gLaps = 3;      // choix de l'organisateur
+  auto trackName = [&](int t) {
+    t &= 7;
+    std::string nm = t < int(trackList.size()) ? trackList[size_t(t)].name : "";
+    return nm.empty() ? "Circuit " + std::to_string(t + 1) : nm;
+  };
+  auto online = [&] {
+    if (net.inGroup() || gr.active) return onlineSel = true;   // course à plusieurs : machine relancée en entraînement
+    if (m->selectChoice() == 3) onlineSel = true;
+    else if (m->selectChoice() >= 0 && m->selectChoice() != 3) onlineSel = false;
+    return onlineSel;
+  };
   auto menuItems = [&] {
     std::vector<MenuItem> it;
     bool idle = !net.active() || net.state() == NetLink::State::Failed;
     if (online()) {
       bool inRoom = net.relayRoom() && net.state() == NetLink::State::Waiting;   // salle privée du relais
+      if (net.inGroup()) {   // course à plusieurs : réglages de l'organisateur, départ
+        bool host = net.groupHost() == net.groupMe(), lobby = net.groupPhase() == "lobby";
+        if (host && lobby) {
+          it.push_back({"Circuit : " + trackName(gTrack) + "  < >", 10, {}});
+          it.push_back({"Tours : " + std::to_string(gLaps) + "  < >", 11, {}});
+          if (net.groupMembers().size() >= 2)
+            it.push_back({"Lancer la course (" + std::to_string(net.groupMembers().size()) + " joueurs)", 12, {}});
+        }
+        it.push_back({"Écrire un message (F9)", 8, {}});
+        it.push_back({"Quitter la course à plusieurs", 13, {}});
+        return it;
+      }
       if (inRoom)
         for (auto &p : net.peers()) it.push_back({"Affronter " + p.name.substr(0, 20), 0, p});
+      if (inRoom) it.push_back({"Course à plusieurs (2 à 6 joueurs)", 9, {}});
       if (inRoom) it.push_back({"Écrire un message (F9)", 8, {}});
       if (idle) {
         if (probe.ok()) {
@@ -494,6 +543,13 @@ int main(int argc, char **argv) {
     it.push_back({"Annuler", 3, {}});
     return it;
   };
+  std::function<void()> leaveGroup = [&] {   // quitter la course à plusieurs (retour au titre si une course a eu lieu)
+    net.groupCommand("LEAVE");
+    bool wasActive = gr.active;
+    gr = GroupRace();
+    menuSel = 0;
+    if (wasActive) restartMachine(-1);
+  };
   auto cancelLink = [&] {   // Échap transmis au jeu : « Link abandoned »
     net.close();
     typing = Typing::None; SDL_StopTextInput();
@@ -512,6 +568,11 @@ int main(int argc, char **argv) {
       case 6: probe.start(o.relay); menuSel = 0; break;
       case 7: typing = Typing::Server; typed = o.relay; SDL_StartTextInput(); break;
       case 8: if (net.canChat()) { typing = Typing::Chat; typed.clear(); SDL_StartTextInput(); } break;
+      case 9: net.groupCommand("ENTER"); menuSel = 0; break;
+      case 10: gTrack = (gTrack + 1) % 8; break;
+      case 11: gLaps = gLaps % 9 + 1; break;
+      case 12: net.groupCommand("START " + std::to_string(gTrack) + " " + std::to_string(gLaps)); break;
+      case 13: leaveGroup(); break;
     }
   };
   // aide aux tests automatiques (aucun effet sinon) : SCR_AUTOKEYS="trame:Touche,..." simule des appuis
@@ -542,8 +603,9 @@ int main(int argc, char **argv) {
     {
       double t = double(SDL_GetPerformanceCounter()) / double(SDL_GetPerformanceFrequency());
       if (cancelUntil > 0 && t > cancelUntil) { cancelUntil = -1; m->setKey(0x01, false); }
-      bool open = m->linkHeld() && cancelUntil < 0 && !net.connected();
-      if (open && !menuOpen) {   // le joueur vient de choisir « Computer Link » ou « Online Multiplayer »
+      gr.menu = net.inGroup() && !gr.racing && !gr.waitingGo;   // menu du groupe entre les courses
+      bool open = (m->linkHeld() && cancelUntil < 0 && !net.connected()) || gr.menu;
+      if (open && !menuOpen && !gr.menu) {   // le joueur vient de choisir « Computer Link » ou « Online Multiplayer »
         menuSel = 0;
         if (online()) { if (net.mode() == NetLink::Mode::Lobby) net.close(); if (!net.active()) probe.start(o.relay); }
         else if (!net.active() || net.mode() == NetLink::Mode::Relay) net.lobby();
@@ -598,7 +660,13 @@ int main(int argc, char **argv) {
         SDL_Scancode sc = ev.key.keysym.scancode;
         auto items = menuItems();
         int n = int(items.size());
-        if (sc == SDL_SCANCODE_UP) menuSel = (menuSel + n - 1) % n;
+        int kind = n ? items[size_t(std::min(menuSel, n - 1))].kind : -1;
+        if ((sc == SDL_SCANCODE_LEFT || sc == SDL_SCANCODE_RIGHT) && (kind == 10 || kind == 11)) {   // circuit, tours
+          int d = sc == SDL_SCANCODE_RIGHT ? 1 : -1;
+          if (kind == 10) gTrack = (gTrack + 8 + d) % 8; else gLaps = std::clamp(gLaps + d, 1, 9);
+        }
+        else if (sc == SDL_SCANCODE_ESCAPE && net.inGroup()) leaveGroup();
+        else if (sc == SDL_SCANCODE_UP) menuSel = (menuSel + n - 1) % n;
         else if (sc == SDL_SCANCODE_DOWN) menuSel = (menuSel + 1) % n;
         else if (sc == SDL_SCANCODE_ESCAPE || sc == SDL_SCANCODE_F10) cancelLink();
         else if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER || sc == SDL_SCANCODE_SPACE)
@@ -688,6 +756,27 @@ int main(int argc, char **argv) {
     }
     m->setJoystick(j);
     net.poll();   // aussi entre les trames (connexion, annonces), pas seulement pendant l'émulation
+    {   // course à plusieurs : départ (machine relancée sur le circuit), top départ, fin
+      std::string ev;
+      while (net.takeGroupEvent(ev)) {
+        if (ev.rfind("START", 0) == 0) {
+          int t = 0, l = 3;
+          std::sscanf(ev.c_str() + 5, "%d %d", &t, &l);
+          gr.track = t & 7; gr.laps = l; gr.active = true; gr.waitingGo = true; gr.racing = false; gr.finished = false;
+          gr.lastRel = -1; gr.total = 0; gr.lapOffset = 0; gr.lastTick = 0;
+          if (typing != Typing::None && typing != Typing::Chat) { typing = Typing::None; SDL_StopTextInput(); }
+          if (!hd) { hd = true; applyMode(true); }   // les autres voitures ne sont visibles qu'en HD
+          restartMachine(gr.track);
+          net.groupCommand("LOADED");
+          acc = 0;
+        } else if (ev == "GO") {
+          gr.waitingGo = false; gr.racing = true; gr.goAt = NetLink::clock(); acc = 0;
+        } else if (ev == "END") {
+          gr.racing = false; gr.waitingGo = false;
+        }
+      }
+      if (!net.inGroup() && (gr.racing || gr.waitingGo)) { gr.racing = false; gr.waitingGo = false; }   // groupe perdu
+    }
     {   // réglages de physique : l'esclave prend ceux du maître le temps de la partie (course équitable)
       static std::string adopted;
       static const Machine *adoptedOn = nullptr;
@@ -711,6 +800,7 @@ int main(int argc, char **argv) {
     acc += double(now - last) / double(freq);
     last = now;
     if (acc > 0.25) acc = 0.25;
+    if (gr.waitingGo) acc = 0;   // course à plusieurs : la voiture attend le départ commun
     int n = 0;
     // multijoueur : chaque trame est émulée en tranches réparties dans le temps réel, le câble est lu
     // et écrit à chaque tranche (reseau_cadence fois par seconde) ; sinon, trames entières
@@ -735,6 +825,34 @@ int main(int argc, char **argv) {
         queueAudio();
         acc -= framePeriod; n++;
       }
+
+    // course à plusieurs : progression sur le circuit (tours, arrivée) et position envoyée aux autres
+    if (gr.active && gr.racing && m->ticks() != gr.lastTick && !trackList.empty()) {
+      gr.lastTick = m->ticks();
+      const Track &T = trackList[size_t(m->b(0x1112d) & 7) % trackList.size()];
+      const int ns = int(T.secs.size());
+      int piece = m->b(0x10906), sec = m->b(0x108f4), first = -1;
+      for (int i = 0; i < ns; i++) if (T.secs[size_t(i)].piece == piece) { first = i; break; }
+      if (first >= 0 && ns > 0) {
+        int startSec = 0;   // ligne de départ : dernière frontière de la pièce de départ (comme le jeu)
+        while (startSec + 1 < ns && T.secs[size_t(startSec + 1)].piece == T.startPiece) startSec++;
+        int g = ((first - 1 + sec) % ns + ns) % ns;
+        double rel = std::fmod(double(g - startSec + ns), double(ns)) + m->b(0x108f5) / 256.0;
+        if (gr.lastRel < 0) gr.lapOffset = rel > ns / 2.0 ? -ns : 0;   // voiture placée derrière la ligne
+        else if (gr.lastRel > 0.75 * ns && rel < 0.25 * ns) gr.lapOffset += ns;   // ligne franchie
+        else if (gr.lastRel < 0.25 * ns && rel > 0.75 * ns) gr.lapOffset -= ns;   // marche arrière
+        gr.lastRel = rel;
+        gr.total = gr.lapOffset + rel;
+        if (!gr.finished && gr.total >= double(gr.laps) * ns) {
+          gr.finished = true;
+          gr.finishSecs = NetLink::clock() - gr.goAt;
+          net.groupCommand("FINISH " + std::to_string(long(gr.finishSecs * 1000)));
+        }
+        Pose p = HdView::poseFromState(m->displayedCarState());
+        float v[7] = {float(p.x), float(p.y), float(p.z), float(p.yaw), float(p.pitch), float(p.roll), float(gr.total / ns)};
+        net.sendGhost(v, uint8_t(std::clamp(int(gr.total / ns) + 1, 0, 255)), gr.finished ? 1 : 0);
+      }
+    }
 
     // bandeau du multijoueur (visible aussi en plein écran) : saisie du code, état de la connexion
     std::string bannerMsg;
@@ -763,6 +881,71 @@ int main(int argc, char **argv) {
       int rw = std::min(bw, logicalW), rh = bw > logicalW ? bh * logicalW / bw : bh;   // réduit sans déformer
       SDL_Rect r{(logicalW - rw) / 2, 0, rw, rh};
       SDL_RenderCopy(ren, btex, nullptr, &r);
+    };
+    // texte dessiné à une position (cache de textures) ; align : 0 gauche, 1 centre, 2 droite
+    auto drawText = [&](const std::string &txt, int x, int y, int scale, uint32_t fg, uint32_t bg, int align, int logicalW) {
+      static std::map<std::string, std::tuple<SDL_Texture *, int, int>> cache;
+      if (cache.size() > 120) { for (auto &kv : cache) SDL_DestroyTexture(std::get<0>(kv.second)); cache.clear(); }
+      std::string key = txt + "|" + std::to_string(fg) + "|" + std::to_string(bg) + "|" + std::to_string(scale);
+      auto it = cache.find(key);
+      if (it == cache.end()) {
+        int bw, bh;
+        auto img = renderBanner(txt, scale, bw, bh, fg, bg);
+        SDL_Texture *t = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, bw, bh);
+        SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
+        SDL_UpdateTexture(t, nullptr, img.data(), bw * 4);
+        it = cache.emplace(key, std::make_tuple(t, bw, bh)).first;
+      }
+      auto [t, bw, bh] = it->second;
+      int rw = std::min(bw, logicalW), rh = bw > logicalW ? bh * logicalW / bw : bh;
+      SDL_Rect r{align == 0 ? x : align == 1 ? x - rw / 2 : x - rw, y, rw, rh};
+      SDL_RenderCopy(ren, t, nullptr, &r);
+      return rh;
+    };
+    // course à plusieurs : départ, tour, temps, classement en direct, noms au-dessus des voitures
+    auto drawRaceHud = [&](int logicalW, int logicalH) {
+      if (!gr.active || !net.inGroup() || menuOpen) return;
+      int scale = std::max(1, logicalW / 640), big = std::max(2, logicalW / 240);
+      double now = NetLink::clock();
+      if (gr.waitingGo) {
+        drawText("Course à plusieurs : départ dès que tous les joueurs sont prêts...", logicalW / 2, logicalH / 3, scale,
+                 0xffffffffu, 0xc0000000u, 1, logicalW);
+        return;
+      }
+      for (auto &g : view->ghosts)   // noms au-dessus des voitures (HD)
+        if (hd && g.onScreen && g.dist < 20000)
+          drawText(g.name, int(g.sx), int(g.sy) - 10 * scale, scale, 0xffffff60u, 0x90000000u, 1, logicalW);
+      if (gr.racing && now - gr.goAt < 2) drawText("GO !", logicalW / 2, logicalH / 4, big, 0xff60ff60u, 0x80000000u, 1, logicalW);
+      // classement : arrivés (par temps), puis par distance parcourue
+      struct Row { std::string name; double total; long ms; bool me; };
+      std::vector<Row> rows;
+      const int ns = trackList.empty() ? 1 : int(trackList[size_t(gr.track) % trackList.size()].secs.size());
+      for (auto &gm : net.groupMembers()) {
+        Row r{gm.name, -1e9, -1, gm.id == net.groupMe()};
+        if (gm.state.rfind("finished:", 0) == 0) r.ms = std::atol(gm.state.c_str() + 9);
+        if (r.me) r.total = gr.total / std::max(1, ns);
+        else { auto it = net.ghosts().find(gm.id); if (it != net.ghosts().end() && !it->second.empty()) r.total = it->second.back().v[6]; }
+        if (r.me && gr.finished && r.ms < 0) r.ms = long(gr.finishSecs * 1000);
+        rows.push_back(r);
+      }
+      std::sort(rows.begin(), rows.end(), [](const Row &a, const Row &b) {
+        if ((a.ms >= 0) != (b.ms >= 0)) return a.ms >= 0;
+        if (a.ms >= 0) return a.ms < b.ms;
+        return a.total > b.total;
+      });
+      auto fmt = [](double secs) { char b[32]; int m = int(secs) / 60; std::snprintf(b, sizeof b, "%d:%04.1f", m, secs - m * 60); return std::string(b); };
+      int y = 2 * scale;
+      double el = gr.finished ? gr.finishSecs : now - gr.goAt;
+      int lap = std::clamp(int(std::floor(gr.total / std::max(1, ns))) + 1, 1, gr.laps);
+      y += drawText(gr.finished ? "Arrivé en " + fmt(gr.finishSecs) : "Tour " + std::to_string(lap) + "/" + std::to_string(gr.laps) + "   " + fmt(el),
+                    logicalW - 2 * scale, y, scale, 0xffffffffu, 0xc0000000u, 2, logicalW);
+      for (size_t k = 0; k < rows.size(); k++) {
+        const Row &r = rows[k];
+        std::string t = std::to_string(k + 1) + ". " + r.name.substr(0, 14);
+        if (r.ms >= 0) t += "  " + fmt(r.ms / 1000.0);
+        else if (r.total > -1e8) t += "  tour " + std::to_string(std::clamp(int(std::floor(r.total)) + 1, 1, gr.laps));
+        y += drawText(t, logicalW - 2 * scale, y, scale, r.me ? 0xffa0e0ffu : 0xffffffa0u, 0xa0000000u, 2, logicalW);
+      }
     };
     // discussion hors du menu (pendant le jeu) : derniers messages en bas de l'image, saisie (F9)
     auto drawChat = [&](int logicalW, int logicalH) {
@@ -807,8 +990,35 @@ int main(int argc, char **argv) {
       int scale = std::max(1, logicalW / 400);
       struct Line { std::string text; uint32_t fg, bg; };
       std::vector<Line> lines;
-      lines.push_back({online() ? "ONLINE MULTIPLAYER - SERVEUR RELAIS" : "COMPUTER LINK - RESEAU LOCAL (LAN)", 0xffffff00u, 0xe0202020u});
+      lines.push_back({net.inGroup() ? "COURSE A PLUSIEURS - SALLE " + net.room()
+                       : online() ? "ONLINE MULTIPLAYER - SERVEUR RELAIS" : "COMPUTER LINK - RESEAU LOCAL (LAN)", 0xffffff00u, 0xe0202020u});
       std::string st = net.status();
+      std::vector<Line> groupLines;
+      if (net.inGroup()) {   // joueurs du groupe (avec les temps de la dernière course)
+        std::string hostName;
+        for (auto &gm : net.groupMembers()) if (gm.id == net.groupHost()) hostName = gm.name;
+        bool host = net.groupHost() == net.groupMe();
+        st = net.groupPhase() != "lobby" ? "Course en cours..."
+             : host ? (net.groupMembers().size() < 2 ? "En attente d'autres joueurs (2 à 6)" : "Choisissez le circuit puis lancez")
+                    : "En attente du départ donné par " + hostName;
+        std::vector<NetLink::GroupMember> ms = net.groupMembers();
+        std::stable_sort(ms.begin(), ms.end(), [](const NetLink::GroupMember &a, const NetLink::GroupMember &b) {
+          bool fa = a.state.rfind("finished:", 0) == 0, fb = b.state.rfind("finished:", 0) == 0;
+          if (fa != fb) return fa;
+          return fa && std::atol(a.state.c_str() + 9) < std::atol(b.state.c_str() + 9);
+        });
+        int rank = 0;
+        for (auto &gm : ms) {
+          std::string t = gm.name.substr(0, 18);
+          if (gm.state.rfind("finished:", 0) == 0) {
+            long msv = std::atol(gm.state.c_str() + 9);
+            char b[48]; std::snprintf(b, sizeof b, "%d. ", ++rank); t = b + t;
+            std::snprintf(b, sizeof b, "  %ld:%04.1f", msv / 60000, (msv % 60000) / 1000.0); t += b;
+          } else t = "-  " + t;
+          if (gm.id == net.groupHost()) t += "  (organisateur)";
+          groupLines.push_back({t, gm.id == net.groupMe() ? 0xffa0e0ffu : 0xffffffffu, 0xe0202020u});
+        }
+      }
       uint32_t stCol = 0xffffffffu;
       if (online() && (!net.active() || net.state() == NetLink::State::Failed)) {
         if (net.state() == NetLink::State::Failed) lines.push_back({st, 0xffff8080u, 0xe0202020u});
@@ -824,10 +1034,11 @@ int main(int argc, char **argv) {
       }
       if (net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting)
         st = net.peers().empty() ? "Recherche de joueurs sur le réseau local..." : "Joueurs trouvés sur le réseau local :";
-      if (net.relayRoom() && net.state() == NetLink::State::Waiting)
+      if (net.relayRoom() && net.state() == NetLink::State::Waiting && !net.inGroup())
         st = net.peers().empty() ? "Salle " + net.room() + " : personne d'autre pour l'instant"
                                  : "Salle " + net.room() + " : joueurs présents";
       lines.push_back({st, stCol, 0xe0202020u});
+      lines.insert(lines.end(), groupLines.begin(), groupLines.end());
       bool lobbyWait = net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting;
       if (lobbyWait) {   // adresse de ce PC (pour « Par adresse IP » si la détection ne passe pas)
         static std::string addrs; static double addrsAt = -1e9;
@@ -913,13 +1124,41 @@ int main(int argc, char **argv) {
       uint64_t t = SDL_GetPerformanceCounter();
       if (lastPresent && double(t - lastPresent) / double(freq) < 0.9 / refresh) { SDL_Delay(1); continue; }
       lastPresent = t;
+      view->ghosts.clear();
+      if (gr.active && net.inGroup()) {   // autres joueurs : position interpolée 0,3 s en arrière
+        const double tt = NetLink::clock() - 0.3;
+        for (auto &kv : net.ghosts()) {
+          const auto &q = kv.second;
+          if (q.empty() || NetLink::clock() - q.back().t > 3) continue;
+          const NetLink::GhostSample *a = &q.front(), *b = &q.back();
+          for (size_t k = 0; k + 1 < q.size(); k++)
+            if (q[k].t <= tt && q[k + 1].t >= tt) { a = &q[k]; b = &q[k + 1]; break; }
+          double f = (b->t > a->t && tt > a->t) ? std::min(1.0, (tt - a->t) / (b->t - a->t)) : (tt >= b->t ? 1.0 : 0.0);
+          auto lerpA = [&](double x, double y) { double d = std::remainder(y - x, 2 * M_PI); return x + d * f; };
+          Pose ps{a->v[0] + (b->v[0] - a->v[0]) * f, a->v[1] + (b->v[1] - a->v[1]) * f, a->v[2] + (b->v[2] - a->v[2]) * f,
+                  lerpA(a->v[3], b->v[3]), lerpA(a->v[4], b->v[4]), lerpA(a->v[5], b->v[5])};
+          HdView::Ghost g;
+          g.pose = view->ghostFromPose(ps);
+          for (auto &gm : net.groupMembers()) if (gm.id == kv.first) g.name = gm.name;
+          view->ghosts.push_back(g);
+        }
+      }
       view->render(*m, view->now() + acc / framePeriod, hdPixels.data(), o.hdW, o.hdH);
       SDL_UpdateTexture(texHd, nullptr, hdPixels.data(), o.hdW * 4);
       SDL_RenderClear(ren);
       SDL_RenderCopy(ren, texHd, nullptr, nullptr);
       drawBanner(o.hdW);
       drawMenu(o.hdW, o.hdH);
+      drawRaceHud(o.hdW, o.hdH);
       drawChat(o.hdW, o.hdH);
+      for (size_t k = 0; k < autoShots.size();)   // captures de test (SCR_SHOT), aussi en HD
+        if (m->frames() >= autoShots[k].first) {
+          int w, h; SDL_GetRendererOutputSize(ren, &w, &h);
+          SDL_Surface *sf = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ARGB8888);
+          SDL_RenderReadPixels(ren, nullptr, SDL_PIXELFORMAT_ARGB8888, sf->pixels, sf->pitch);
+          SDL_SaveBMP(sf, autoShots[k].second.c_str()); SDL_FreeSurface(sf);
+          autoShots.erase(autoShots.begin() + long(k));
+        } else k++;
       SDL_RenderPresent(ren);
       // compteur d'images par seconde dans le titre
       fpsN++;
@@ -945,6 +1184,7 @@ int main(int argc, char **argv) {
       SDL_RenderCopy(ren, tex, nullptr, nullptr);
       drawBanner(320);
       drawMenu(320, 200);
+      drawRaceHud(320, 200);
       drawChat(320, 200);
       for (size_t k = 0; k < autoShots.size();)
         if (m->frames() >= autoShots[k].first) {

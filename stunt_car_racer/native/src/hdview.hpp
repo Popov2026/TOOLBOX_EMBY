@@ -6,6 +6,7 @@
 #include <deque>
 #include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "hdassets.hpp"
@@ -67,6 +68,13 @@ class HdView {
   void renderScene(const Pose &p, int track, uint32_t *out, int W, int H, double focal, double cx, double cy, const Machine &m,
                    const OppPose *opp = nullptr);
   OppPose opponentAt(double t) const;
+
+  // course à plusieurs : voitures des autres joueurs (fantômes : dessinées, sans collision),
+  // remplies par l'appelant avant render() ; render() calcule la place de leur nom à l'écran
+  struct Ghost { OppPose pose; std::string name; double sx = 0, sy = 0, dist = 0; bool onScreen = false; };
+  std::vector<Ghost> ghosts;
+  // voiture d'un joueur (état de la physique, comme poseFromState) -> repère de voiture affichable
+  OppPose ghostFromPose(const Pose &p) const;
 
  private:
   // hauteur brute de la route sous (x, z), la plus proche de yRef ; faux hors de la route

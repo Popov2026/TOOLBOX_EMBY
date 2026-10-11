@@ -316,6 +316,20 @@ OppPose HdView::opponentFromGame(const Machine &m, int track) {
   return o;
 }
 
+OppPose HdView::ghostFromPose(const Pose &p) const {
+  // même convention que la caméra : avant horizontal (sin lacet, cos lacet), droite (cos lacet, -sin lacet)
+  OppPose o;
+  double sy = std::sin(p.yaw), cy = std::cos(p.yaw);
+  double pitch = params.pitchSign * p.pitch, roll = params.rollSign * p.roll;
+  double cp = std::cos(pitch), sp = std::sin(pitch), cr = std::cos(roll), sr = std::sin(roll);
+  o.fwd = {sy * cp, sp, cy * cp};
+  o.right = {cy * cr, -sr, -sy * cr};
+  o.x = p.x; o.z = p.z;
+  o.yRaw = p.y * 2;   // la caméra utilise p.y × hScale / 0,5 : hauteur brute = 2 × p.y
+  o.valid = true;
+  return o;
+}
+
 OppPose HdView::opponentAt(double t) const {
   if (snaps_.empty()) return {};
   if (t <= snaps_.front().t) return snaps_.front().opp;
@@ -518,6 +532,18 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
     }
   }
   if (opp && opp->valid) addCar(*opp, HSCALE, m);
+  for (auto &g : ghosts) {   // autres joueurs (course à plusieurs) et place de leur nom au-dessus de la voiture
+    g.onScreen = false;
+    if (!g.pose.valid) continue;
+    addCar(g.pose, HSCALE, m);
+    Vec3 top{g.pose.x, g.pose.yRaw * HSCALE + 90, g.pose.z};
+    Vec3 q = r3d_.toCam(top);
+    g.dist = std::sqrt((g.pose.x - c.pos.x) * (g.pose.x - c.pos.x) + (g.pose.z - c.pos.z) * (g.pose.z - c.pos.z));
+    if (q.z > 20) {
+      g.sx = c.cx + c.focal * q.x / q.z; g.sy = c.cy - c.focalY * q.y / q.z;
+      g.onScreen = g.sx > -50 && g.sx < W + 50 && g.sy > -20 && g.sy < H;
+    }
+  }
   r3d_.finish(out);
 }
 
