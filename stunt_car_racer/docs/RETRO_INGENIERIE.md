@@ -293,3 +293,8 @@ code et bloquerait le jeu).
   « Computer Link - Local LAN » et « Online Multiplayer ». Le choix 4 (D0 = 3) suit le même chemin
   que le 3 (`$4BEAC`, D0 > 1) ; le choix est relevé au retour du menu (`$48ED0`). La police du jeu
   n'a pas de parenthèses.
+* **Tours de course** : compteur de tours `$1090A` (incrémenté en `$4B300` au passage de la ligne) ;
+  la course s'arrête quand il atteint `$10983` (4 en entraînement : arrêt après le 3e tour, puis
+  écran noir). La course à plusieurs met `$10983` à `$FF` et décide elle-même de l'arrivée.
+* **Grue de départ** : `$109D4` change de valeur à l'atterrissage (`$B000` -> `$6000`) ; un recul
+  de la voiture avant la descente est conservé, un décalage latéral est ramené au milieu par la grue.

@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v30"
+#define SCR_VERSION "v31"
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -373,6 +373,7 @@ int main(int argc, char **argv) {
   int menuSel = 0;
   double cancelUntil = -1;       // annulation : Échap transmis au jeu, qui abandonne le lien
   double fireUntil = 0;          // en multijoueur, un appui sur « feu » dure au moins 0,35 s
+  double menuOpenedAt = 0;      // un appui encore tenu (boost à l'arrivée...) ne doit rien choisir
   bool menuOpen = false, prevUp = false, prevDown = false, prevFire = false;
   auto wireNet = [&] {
     m->serialOut = [&](uint8_t v) { net.send(v); };
@@ -525,8 +526,10 @@ int main(int argc, char **argv) {
     double goAt = 0, finishSecs = 0, lapOffset = 0, lastRel = -1, total = 0;
     uint32_t lastTick = 0;
     int slot = 0;             // place sur la grille : rangée slot / 2 (0 devant), côté slot % 2
-    bool sideDone = false;    // décalage sur le côté appliqué (après l'atterrissage de la grue)
+    bool sideDone = false;    // atterrissage de la grue vu (le décalage sur le côté peut s'appliquer)
     uint16_t dropMode = 0;
+    double sideApplied = 0;   // part du décalage déjà appliquée à la voiture (le reste est ajouté à la position envoyée)
+    uint32_t sideFrame = 0;
   } gr;
   int gTrack = 0, gLaps = 3;      // choix de l'organisateur
   auto trackName = [&](int t) {
@@ -643,7 +646,9 @@ int main(int argc, char **argv) {
     {
       double t = double(SDL_GetPerformanceCounter()) / double(SDL_GetPerformanceFrequency());
       if (cancelUntil > 0 && t > cancelUntil) { cancelUntil = -1; m->setKey(0x01, false); }
-      gr.menu = net.inGroup() && !gr.racing && !gr.waitingGo;   // menu du groupe entre les courses
+      // menu du groupe : entre les courses, et dès que ce joueur a franchi l'arrivée (il attend les autres ;
+      // le jeu d'origine peut finir l'entraînement de son côté et laisser un écran noir derrière)
+      gr.menu = net.inGroup() && (!gr.racing || gr.finished) && !gr.waitingGo;
       bool open = (m->linkHeld() && cancelUntil < 0 && !net.connected()) || gr.menu;
       if (open && !menuOpen && !gr.menu) {   // le joueur vient de choisir « Computer Link » ou « Online Multiplayer »
         menuSel = 0;
@@ -652,6 +657,7 @@ int main(int argc, char **argv) {
       }
       if (!open && menuOpen && typing != Typing::None && typing != Typing::Chat) { typing = Typing::None; SDL_StopTextInput(); }
       if (typing == Typing::Chat && !net.canChat()) { typing = Typing::None; SDL_StopTextInput(); }
+      if (open && !menuOpen) { menuSel = 0; menuOpenedAt = NetLink::clock(); }   // à l'ouverture : en haut, touches tenues ignorées
       menuOpen = open;
     }
     SDL_Event ev;
@@ -714,7 +720,7 @@ int main(int argc, char **argv) {
         else if (sc == SDL_SCANCODE_DOWN) menuSel = (menuSel + 1) % n;
         else if (sc == SDL_SCANCODE_ESCAPE || sc == SDL_SCANCODE_F10) cancelLink();
         else if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER || sc == SDL_SCANCODE_SPACE)
-          chooseItem(items[size_t(std::min(menuSel, n - 1))]);
+          { if (NetLink::clock() - menuOpenedAt > 0.8) chooseItem(items[size_t(std::min(menuSel, n - 1))]); }
         else if (sc == SDL_SCANCODE_F12) running = false;
         else if (sc == SDL_SCANCODE_F11 || sc == SDL_SCANCODE_F4) {
           bool fs = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP;
@@ -790,7 +796,7 @@ int main(int argc, char **argv) {
       int n = int(items.size());
       if (j.up && !prevUp) menuSel = (menuSel + n - 1) % n;
       if (j.down && !prevDown) menuSel = (menuSel + 1) % n;
-      if (j.fire && !prevFire && pad) chooseItem(items[size_t(std::min(menuSel, n - 1))]);
+      if (j.fire && !prevFire && pad && NetLink::clock() - menuOpenedAt > 0.8) chooseItem(items[size_t(std::min(menuSel, n - 1))]);
     }
     prevUp = j.up; prevDown = j.down; prevFire = j.fire;
     if (menuOpen || typing != Typing::None) j = Joystick();
@@ -812,14 +818,17 @@ int main(int argc, char **argv) {
             for (int k = 0; ss >> id; k++) if (id == net.groupMe()) gr.slot = k;
           }
           gr.track = t & 7; gr.laps = l; gr.active = true; gr.waitingGo = true; gr.racing = false; gr.finished = false;
-          gr.lastRel = -1; gr.total = 0; gr.lapOffset = 0; gr.lastTick = 0;
+          gr.lastRel = -1; gr.total = 0; gr.lapOffset = 0; gr.lastTick = 0; gr.goAt = 0;
           if (typing != Typing::None && typing != Typing::Chat) { typing = Typing::None; SDL_StopTextInput(); }
           if (!hd) { hd = true; applyMode(true); }   // les autres voitures ne sont visibles qu'en HD
           restartMachine(gr.track);
+          // l'entraînement d'origine s'arrête après 3 tours ($10983 = 4 : fin quand le compteur $1090A
+          // l'atteint) : désactivé, c'est la course à plusieurs qui décide de l'arrivée
+          m->ram[0x10983] = 0xff;
           // grille : 3 rangées de 2 ; les rangées 2 et 3 reculent avant la descente de la grue
           // (vérifié sur les 8 circuits : la voiture se pose sur la route), le côté est réglé à l'atterrissage
           moveCar(-250.0 * (gr.slot / 2), 0);
-          gr.sideDone = false; gr.dropMode = m->w(0x109d4);
+          gr.sideDone = false; gr.dropMode = m->w(0x109d4); gr.sideApplied = 0; gr.sideFrame = 0;
           net.groupCommand("LOADED");
           acc = 0;
         } else if (ev == "GO") {
@@ -828,7 +837,10 @@ int main(int argc, char **argv) {
           gr.racing = false; gr.waitingGo = false;
         }
       }
-      if (!net.inGroup() && (gr.racing || gr.waitingGo)) { gr.racing = false; gr.waitingGo = false; }   // groupe perdu
+      if (!net.inGroup() && gr.active) {   // groupe perdu (connexion coupée...) : retour au titre, la raison reste affichée
+        gr = GroupRace();
+        restartMachine(-1);
+      }
     }
     {   // réglages de physique : l'esclave prend ceux du maître le temps de la partie (course équitable)
       static std::string adopted;
@@ -879,10 +891,19 @@ int main(int argc, char **argv) {
         acc -= framePeriod; n++;
       }
 
-    // grille de départ : à l'atterrissage (fin de la descente de la grue), voiture à gauche ou à droite
+    // grille de départ : la grue repose la voiture au milieu de la route ; le côté (gauche / droite) est
+    // donc appliqué après l'atterrissage, progressivement (15 unités par image) pour éviter un saut de
+    // la caméra. D'ici là, il est ajouté à la position envoyée : les autres voient la grille dès le départ.
+    const double gridSide = gr.slot % 2 ? 90.0 : -90.0;
     if (gr.active && gr.racing && !gr.sideDone && m->w(0x109d4) != gr.dropMode) {
       gr.sideDone = true;
-      moveCar(0, gr.slot % 2 ? 90 : -90);
+      if (std::getenv("SCR_GRIDLOG")) std::fprintf(stderr, "grille : place %d, atterrissage à %.1f s\n", gr.slot, NetLink::clock() - gr.goAt);
+    }
+    if (gr.active && gr.racing && gr.sideDone && std::fabs(gr.sideApplied) < std::fabs(gridSide) && m->frames() != gr.sideFrame) {
+      gr.sideFrame = m->frames();
+      double step = std::clamp(gridSide - gr.sideApplied, -15.0, 15.0);
+      moveCar(0, step);
+      gr.sideApplied += step;
     }
     // course à plusieurs : progression sur le circuit (tours, arrivée) et position envoyée aux autres
     if (gr.active && gr.racing && m->ticks() != gr.lastTick && !trackList.empty()) {
@@ -901,12 +922,20 @@ int main(int argc, char **argv) {
         else if (gr.lastRel < 0.25 * ns && rel > 0.75 * ns) gr.lapOffset -= ns;   // marche arrière
         gr.lastRel = rel;
         gr.total = gr.lapOffset + rel;
+        if (m->b(0x1090a) >= gr.laps && m->b(0x1090a) < 0x80)   // compteur de tours du jeu : ligne franchie gr.laps fois
+          gr.total = std::max(gr.total, double(gr.laps) * ns);
+        if (const char *ff = std::getenv("SCR_FAKEFINISH"))   // test : arrivée simulée après N secondes
+          if (NetLink::clock() - gr.goAt > std::atof(ff)) gr.total = double(gr.laps) * ns;
         if (!gr.finished && gr.total >= double(gr.laps) * ns) {
           gr.finished = true;
           gr.finishSecs = NetLink::clock() - gr.goAt;
           net.groupCommand("FINISH " + std::to_string(long(gr.finishSecs * 1000)));
         }
         Pose p = HdView::poseFromState(m->displayedCarState());
+        {   // part du décalage de grille pas encore appliquée à la voiture : ajoutée à la position envoyée
+          double rest = (gr.slot % 2 ? 90.0 : -90.0) - gr.sideApplied;
+          p.x += std::cos(p.yaw) * rest; p.z -= std::sin(p.yaw) * rest;
+        }
         float v[7] = {float(p.x), float(p.y), float(p.z), float(p.yaw), float(p.pitch), float(p.roll), float(gr.total / ns)};
         bool boost = false;   // boost : flammes d'origine présentes dans l'image (sprites 6/7/49 et 8/9/50)
         {
@@ -1063,7 +1092,7 @@ int main(int argc, char **argv) {
         std::string hostName;
         for (auto &gm : net.groupMembers()) if (gm.id == net.groupHost()) hostName = gm.name;
         bool host = net.groupHost() == net.groupMe();
-        st = net.groupPhase() != "lobby" ? "Course en cours..."
+        st = net.groupPhase() != "lobby" ? (gr.finished ? "Arrivé ! En attente des autres joueurs..." : "Course en cours...")
              : host ? (net.groupMembers().size() < 2 ? "En attente d'autres joueurs (2 à 6)" : "Choisissez le circuit puis lancez")
                     : "En attente du départ donné par " + hostName;
         std::vector<NetLink::GroupMember> ms = net.groupMembers();
@@ -1219,6 +1248,19 @@ int main(int argc, char **argv) {
       drawMenu(o.hdW, o.hdH);
       drawRaceHud(o.hdW, o.hdH);
       drawChat(o.hdW, o.hdH);
+      if (gr.active && gr.goAt > 0 && std::getenv("SCR_RACESHOT")) {   // test : captures « secondes:fichier » après le départ
+        static std::vector<std::pair<double, std::string>> rs;
+        static bool parsed = false;
+        if (!parsed) { parsed = true; parseAuto(std::getenv("SCR_RACESHOT"), [&](uint32_t f, const std::string &k) { rs.push_back({double(f), k}); }); }
+        for (size_t k = 0; k < rs.size();)
+          if (NetLink::clock() - gr.goAt >= rs[k].first) {
+            autoShots.push_back({0, rs[k].second}); rs.erase(rs.begin() + long(k));
+            Pose me = HdView::poseFromState(m->displayedCarState());
+            std::fprintf(stderr, "t=%.0f s  moi : x=%.0f z=%.0f", NetLink::clock() - gr.goAt, me.x, me.z);
+            for (auto &kv : net.ghosts()) if (!kv.second.empty()) std::fprintf(stderr, "  | autre : x=%.0f z=%.0f", kv.second.back().v[0], kv.second.back().v[2]);
+            std::fprintf(stderr, "\n");
+          } else k++;
+      }
       for (size_t k = 0; k < autoShots.size();)   // captures de test (SCR_SHOT), aussi en HD
         if (m->frames() >= autoShots[k].first) {
           int w, h; SDL_GetRendererOutputSize(ren, &w, &h);
