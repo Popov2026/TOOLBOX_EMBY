@@ -28,7 +28,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v23"
+#define SCR_VERSION "v24"
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -192,11 +192,41 @@ std::unique_ptr<Machine> start(const Bytes &disk, const Options &o, int track) {
   return m;
 }
 
+// enregistre « relais = valeur » dans scr.ini : remplace la ligne relais existante (même mise en
+// commentaire par un #), sinon l'ajoute à la fin
+void saveRelay(const std::string &path, const std::string &value) {
+  std::vector<std::string> lines;
+  { std::ifstream f(path); std::string l; while (std::getline(f, l)) { if (!l.empty() && l.back() == '\r') l.pop_back(); lines.push_back(l); } }
+  bool done = false;
+  for (auto &l : lines) {
+    size_t k = l.find_first_not_of(" \t#");
+    if (k == std::string::npos) continue;
+    std::string rest = l.substr(k);
+    if ((rest.rfind("relais", 0) == 0 || rest.rfind("relay", 0) == 0) && rest.find('=') != std::string::npos) {
+      std::string tail = rest.substr(rest.find('=') + 1);
+      size_t h = tail.find('#');
+      std::string comment = h == std::string::npos ? "" : "   " + tail.substr(h);
+      l = "relais = " + value + comment;
+      done = true;
+      break;
+    }
+  }
+  if (!done) lines.push_back("relais = " + value + "   # serveur relais (menu 4. Online Multiplayer)");
+  std::ofstream f(path, std::ios::trunc);
+  for (auto &l : lines) f << l << "\n";
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
   Options o;
+  // scr.ini : à côté de scr.exe (même si le jeu est lancé depuis un autre dossier), sinon dossier courant
   std::string ini = "scr.ini";
+  if (char *bp = SDL_GetBasePath()) {
+    std::string cand = std::string(bp) + "scr.ini";
+    SDL_free(bp);
+    if (std::ifstream(cand).good()) ini = cand;
+  }
   for (int i = 1; i < argc; i++)
     if (!std::strcmp(argv[i], "--ini") && i + 1 < argc) ini = argv[i + 1];
   readIni(o, ini);
@@ -245,7 +275,7 @@ int main(int argc, char **argv) {
   // menu « Computer Link » : quand le joueur choisit « 3. Computer Link », le jeu est retenu à l'entrée
   // du lien et ce menu propose les adversaires trouvés sur le réseau local, une salle du serveur
   // relais (code) ou une adresse IP. Celui qui choisit l'adversaire devient le maître (il mène les menus).
-  enum class Typing { None, Code, Ip };
+  enum class Typing { None, Code, Ip, Server };
   Typing typing = Typing::None;
   std::string typed;
   int menuSel = 0;
@@ -375,7 +405,8 @@ int main(int argc, char **argv) {
           it.push_back({"Premier joueur disponible", 5, {}});
           it.push_back({"Salle privée (code)", 1, {}});
         }
-        it.push_back({"Tester à nouveau le serveur", 6, {}});
+        if (!o.relay.empty()) it.push_back({"Tester à nouveau le serveur", 6, {}});
+        it.push_back({o.relay.empty() ? "Saisir l'adresse du serveur" : "Changer l'adresse du serveur", 7, {}});
       }
     } else {
       bool waiting = net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting;
@@ -405,6 +436,7 @@ int main(int argc, char **argv) {
       case 4: net.lobby(); break;
       case 5: if (!o.relay.empty()) net.joinRelay(o.relay, ""); menuSel = 0; break;
       case 6: probe.start(o.relay); menuSel = 0; break;
+      case 7: typing = Typing::Server; typed = o.relay; SDL_StartTextInput(); break;
     }
   };
   // aide aux tests automatiques (aucun effet sinon) : SCR_AUTOKEYS="trame:Touche,..." simule des appuis
@@ -452,7 +484,7 @@ int main(int argc, char **argv) {
         for (const char *c = ev.text.text; *c; c++) {
           unsigned char ch = static_cast<unsigned char>(*c);
           if (typing == Typing::Code && std::isalnum(ch) && typed.size() < 12) typed += char(std::toupper(ch));
-          if (typing == Typing::Ip && (std::isalnum(ch) || ch == '.' || ch == ':' || ch == '-') && typed.size() < 40) typed += char(ch);
+          if ((typing == Typing::Ip || typing == Typing::Server) && (std::isalnum(ch) || ch == '.' || ch == ':' || ch == '-') && typed.size() < 60) typed += char(ch);
         }
       }
       else if (ev.type == SDL_KEYDOWN && typing != Typing::None) {
@@ -466,6 +498,13 @@ int main(int argc, char **argv) {
               typed = std::to_string(1000 + rng() % 9000);
             }
             net.joinRelay(o.relay, typed);
+          } else if (typing == Typing::Server) {   // adresse du serveur relais : enregistrée dans scr.ini
+            if (!typed.empty()) {
+              if (typed.find(':') == std::string::npos) typed += ":" + std::to_string(NET_PORT);
+              o.relay = typed;
+              saveRelay(ini, typed);
+              probe.start(o.relay);
+            }
           } else if (!typed.empty()) net.joinDirect(typed);
           typing = Typing::None; SDL_StopTextInput(); menuSel = 0;
         }
@@ -637,7 +676,7 @@ int main(int argc, char **argv) {
         if (net.state() == NetLink::State::Failed) lines.push_back({st, 0xffff8080u, 0xe0202020u});
         st = probe.text();
         stCol = probe.state() == RelayProbe::State::Ok ? 0xff80ff80u : probe.state() == RelayProbe::State::Failed ? 0xffff8080u : 0xffffffffu;
-        lines.push_back({o.relay.empty() ? "scr.ini : relais = adresse:port" : "Serveur : " + o.relay,
+        lines.push_back({o.relay.empty() ? "Aucun serveur indiqué (scr.ini : relais =)" : "Serveur : " + o.relay,
                          0xffc0c0c0u, 0xe0202020u});
       }
       if (net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting)
@@ -666,12 +705,13 @@ int main(int argc, char **argv) {
       for (size_t k = 0; k < items.size(); k++) {
         std::string lab = items[k].label;
         if (typing != Typing::None && int(k) == menuSel)
-          lab = (typing == Typing::Code ? "Code de salle : " : "Adresse : ") + typed + "_";
+          lab = (typing == Typing::Code ? "Code de salle : " : typing == Typing::Server ? "Serveur : " : "Adresse : ") + typed + "_";
         bool sel = int(k) == menuSel;
         lines.push_back({lab, sel ? 0xff000000u : 0xff202020u, sel ? 0xffff9a00u : 0xffb6b6b6u});
       }
       lines.push_back({typing == Typing::Code ? "Entrée : valider (vide = code au hasard)"
                        : typing == Typing::Ip ? "Entrée : valider     Échap : retour"
+                       : typing == Typing::Server ? "Adresse[:port], Entrée : enregistrer"
                                               : "Flèches + Entrée : choisir  Échap : annuler", 0xffc0c0c0u, 0xe0202020u});
       int lineH = 15 * scale, total = int(lines.size()) * lineH;
       int y = std::max(0, (logicalH - total) / 2);

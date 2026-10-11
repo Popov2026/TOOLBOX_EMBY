@@ -36,7 +36,11 @@ réglages de physique dans scr.ini (c'est vérifié à la connexion).
          choisit « Par adresse IP » et tape l'adresse affichée chez l'autre.
 
   4. Online Multiplayer
-     Il faut l'adresse du serveur relais dans scr.ini :  relais = adresse:port
+     Il faut l'adresse du serveur relais, au choix :
+       * dans le menu : « Saisir l'adresse du serveur » (ou « Changer l'adresse... »), tapez par
+         exemple 192.168.1.110 puis Entrée (port 27420 par défaut) : elle est enregistrée dans scr.ini ;
+       * ou dans scr.ini, à côté de scr.exe :   relais = 192.168.1.110:27420
+         ATTENTION : pas de # au début de la ligne (une ligne qui commence par # est ignorée).
      En ouvrant ce menu, le jeu teste le serveur et affiche :
        « En ligne - ping 25 ms - 3 joueurs »   (vert)  : le serveur répond ;
        « Hors ligne : ... »                    (rouge) : raison (serveur arrêté, adresse
