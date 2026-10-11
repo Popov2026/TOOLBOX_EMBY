@@ -55,6 +55,9 @@ class Machine {
   // Échap dans les menus du jeu : revenir au menu précédent ; faux si le menu affiché n'a pas de retour
   bool menuBack();
   bool inMenu() const { return menuId_ >= 0; }
+  // menu de départ : dernier choix (0 Single Player League, 1 Multiplayer - Local,
+  // 2 Computer Link - Local LAN, 3 Online Multiplayer ; -1 aucun). 2 et 3 mènent au « Computer Link ».
+  int selectChoice() const { return selectChoice_; }
   void serialPush(uint8_t v) { serialIn_.push_back(v); }
   size_t serialPending() const { return serialIn_.size(); }
   uint64_t serialSent() const { return serialSent_; }
@@ -125,6 +128,9 @@ class Machine {
   std::deque<uint8_t> serialIn_;
   bool linkHeld_ = false;
   int menuId_ = -1, autoCancel_ = -1;
+  int selectChoice_ = -1;
+  bool selectMenu_ = false, customText_ = false;
+  uint8_t customStart_ = 0;
   int part_ = 0;                  // tranche en cours de la trame (runPart)
   uint64_t partDone_ = 0;
   bool menuBack_ = false, inName_ = false, nameBack_ = false;

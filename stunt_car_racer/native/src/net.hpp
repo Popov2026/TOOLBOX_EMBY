@@ -14,6 +14,9 @@
 #pragma once
 #include <cstdint>
 #include <deque>
+#include <memory>
+#include <mutex>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -23,7 +26,7 @@ constexpr int NET_PORT = 27420;           // TCP : hébergement en réseau local
 constexpr int NET_DISCOVERY_PORT = 27421; // UDP : annonces de parties en réseau local
 
 enum NetFrame : uint8_t { NF_HELLO = 1, NF_DATA = 2, NF_PING = 3, NF_PONG = 4, NF_BYE = 5, NF_JOIN = 10, NF_INFO = 11,
-                          NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14 };
+                          NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15 };
 
 class NetLink {
  public:
@@ -114,6 +117,28 @@ class NetLink {
   bool connectTo(const std::string &host, int port);
   void flush();
   void closeSock(Sock &s);
+};
+
+// test du serveur relais (menu « Online Multiplayer ») : connexion, question PROBE, réponse
+// « SERVER joueurs parties ». Dans un fil à part (la résolution du nom peut prendre du temps).
+class RelayProbe {
+ public:
+  enum class State { Off, Probing, Ok, Failed };
+  ~RelayProbe();
+  void start(const std::string &server);   // serveur[:port]
+  State state() const;
+  std::string text() const;                // texte pour le menu
+  bool ok() const { return state() == State::Ok; }
+
+ private:
+  struct Shared {
+    std::mutex mu;
+    State state = State::Off;
+    std::string server, error;
+    int players = -1, games = -1, pingMs = -1;
+  };
+  std::shared_ptr<Shared> sh_;
+  std::thread th_;
 };
 
 // empreinte FNV-1a (vérification que les deux joueurs ont le même jeu et les mêmes réglages)

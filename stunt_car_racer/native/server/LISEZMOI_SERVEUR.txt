@@ -34,6 +34,8 @@ données de l'un à l'autre. Deux façons de se trouver (menu « Computer Link �
       privée), salle, état (attend un adversaire / dans la salle, libre / en partie contre X avec
       la durée), temps de connexion et trafic (octets reçus par seconde : ~300 en course) ;
     - les derniers événements (arrivées, parties, départs).
+  Quand un joueur ouvre « 4. Online Multiplayer », son jeu teste le serveur (ligne « test du
+  serveur par un jeu », une fraction de seconde) et affiche « En ligne - ping ... » ou « Hors ligne ».
 
   Démarrage automatique avec Windows (en attendant une version « service Windows ») :
   Planificateur de tâches > Créer une tâche > Déclencheur « Au démarrage », Action « Démarrer un

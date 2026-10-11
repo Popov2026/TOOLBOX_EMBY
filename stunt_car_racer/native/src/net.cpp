@@ -505,6 +505,86 @@ void NetLink::poll() {
   flush();
 }
 
+// ------------------------------------------------------------------ test du serveur relais
+RelayProbe::~RelayProbe() {
+  if (th_.joinable()) th_.detach();   // le fil ne touche qu'à sh_ (partagé) : il peut finir seul
+}
+
+void RelayProbe::start(const std::string &server) {
+  if (th_.joinable()) th_.detach();
+  auto sh = std::make_shared<Shared>();
+  sh->server = server;
+  sh_ = sh;
+  if (server.empty()) { sh->state = State::Failed; sh->error = "aucun serveur dans scr.ini"; return; }
+  sh->state = State::Probing;
+  th_ = std::thread([sh] {
+    auto fin = [&](State st, const std::string &err) { std::lock_guard<std::mutex> l(sh->mu); sh->state = st; sh->error = err; };
+    std::string host = sh->server; int port = NET_PORT;
+    size_t c = host.rfind(':');
+    if (c != std::string::npos && host.find(':') == c) { port = std::atoi(host.c_str() + c + 1); host = host.substr(0, c); }
+    addrinfo hints{}, *res = nullptr;
+    hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM;
+    if (port <= 0 || getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &res) != 0 || !res) {
+      fin(State::Failed, "adresse du serveur introuvable"); return;
+    }
+    SockRaw s = SockRaw(socket(res->ai_family, res->ai_socktype, res->ai_protocol));
+    if (intptr_t(s) == -1) { freeaddrinfo(res); fin(State::Failed, "réseau indisponible"); return; }
+    nonBlock(intptr_t(s));
+    double t0 = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    ::connect(s, res->ai_addr, socklen_t(res->ai_addrlen));
+    freeaddrinfo(res);
+    auto waitFor = [&](bool write, double secs) {
+      fd_set f, e; FD_ZERO(&f); FD_ZERO(&e); FD_SET(s, &f); FD_SET(s, &e);
+      timeval tv{long(secs), long((secs - long(secs)) * 1e6)};
+      return select(int(s + 1), write ? nullptr : &f, write ? &f : nullptr, &e, &tv) > 0 && FD_ISSET(s, &f);
+    };
+    if (!waitFor(true, 5)) { closeRaw(intptr_t(s)); fin(State::Failed, "le serveur ne répond pas"); return; }
+    int err = 0; socklen_t l = sizeof err;
+    getsockopt(s, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&err), &l);
+    if (err != 0) { closeRaw(intptr_t(s)); fin(State::Failed, "connexion refusée (serveur arrêté ?)"); return; }
+    double t1 = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    const char q[3] = {char(NF_PROBE), 0, 0};
+    ::send(s, q, 3, 0);
+    std::string got;
+    while (got.size() < 3 || got.size() < 3 + ((size_t(uint8_t(got[1])) << 8) | uint8_t(got[2]))) {
+      if (!waitFor(false, 5)) break;
+      char b[512];
+      int r = int(::recv(s, b, sizeof b, 0));
+      if (r <= 0) break;
+      got.append(b, size_t(r));
+    }
+    closeRaw(intptr_t(s));
+    if (got.size() < 3) { fin(State::Failed, "pas de réponse (est-ce bien le relais ?)"); return; }
+    std::lock_guard<std::mutex> lk(sh->mu);
+    sh->pingMs = int((t1 - t0) * 1000 + 0.5);
+    std::string msg = got.substr(3);
+    if (uint8_t(got[0]) == NF_INFO && msg.compare(0, 7, "SERVER ") == 0) std::sscanf(msg.c_str() + 7, "%d %d", &sh->players, &sh->games);
+    sh->state = State::Ok;   // un ancien relais répond aussi (message d'erreur) : il est en service
+  });
+}
+
+RelayProbe::State RelayProbe::state() const {
+  if (!sh_) return State::Off;
+  std::lock_guard<std::mutex> l(sh_->mu);
+  return sh_->state;
+}
+
+std::string RelayProbe::text() const {
+  if (!sh_) return "";
+  std::lock_guard<std::mutex> l(sh_->mu);
+  switch (sh_->state) {
+    case State::Off: return "";
+    case State::Probing: return "Test du serveur en cours...";
+    case State::Failed: return "Hors ligne : " + sh_->error;
+    case State::Ok: {
+      std::string t = "En ligne - ping " + std::to_string(sh_->pingMs) + " ms";
+      if (sh_->players >= 0) t += " - " + std::to_string(sh_->players) + (sh_->players > 1 ? " joueurs" : " joueur");
+      return t;
+    }
+  }
+  return "";
+}
+
 std::string NetLink::status() const {
   switch (state_) {
     case State::Off: return "";

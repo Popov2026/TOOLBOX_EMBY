@@ -12,38 +12,44 @@ réglages de physique dans scr.ini (c'est vérifié à la connexion).
 1. Se relier et lancer la course
 --------------------------------
 
-  Les deux joueurs lancent scr.exe et choisissent « 3. Computer Link » dans le premier menu du
-  jeu. Un menu s'ouvre alors par-dessus le jeu :
+  Le premier menu du jeu propose :
 
-    COMPUTER LINK - CHOISISSEZ L'ADVERSAIRE
-      Affronter Pierre                          <- joueurs trouvés sur le réseau local
-      Par Internet : premier joueur disponible  <- serveur relais (relais = ... dans scr.ini)
-      Par Internet : salle privée (code)
-      Par adresse IP
-      Annuler
+    1. Single Player League
+    2. Multiplayer - Local            plusieurs pilotes à tour de rôle sur ce PC (jeu d'origine)
+    3. Computer Link - Local LAN      deux PC sur le même réseau (maison)
+    4. Online Multiplayer             deux PC par Internet, par le serveur relais
 
-  Flèches + Entrée pour choisir (ou la manette), Échap pour annuler.
+  Flèches + Entrée (ou la manette) dans les menus, Échap pour annuler.
 
-  - Même réseau (maison) : chaque jeu qui attend dans ce menu apparaît chez l'autre. L'un des deux
-    joueurs choisit « Affronter ... » : les deux jeux se relient et la mise en relation du jeu
-    d'origine démarre toute seule (« Link complete »). Au premier lancement, Windows demande
-    d'autoriser scr.exe sur les réseaux privés : acceptez.
-    Si l'autre joueur n'apparaît pas :
-      * les deux jeux doivent être dans ce menu en même temps (la recherche ne tourne que là) ;
-      * pare-feu Windows : autorisez scr.exe (Sécurité Windows > Pare-feu > Autoriser une
-        application) pour les réseaux privés ET publics, ou passez le réseau de la box en
-        « Privé » ; faites-le sur les DEUX PC ;
-      * les deux PC doivent être sur la même box (pas un réseau « invité » ni un Wi-Fi isolé) ;
-      * sinon : la ligne « Ce PC : 192.168.x.y » du menu donne l'adresse de chaque PC ; l'un choisit
-        « Par adresse IP » et tape l'adresse affichée chez l'autre.
-  - Par Internet (aucun port à ouvrir sur les box : les PC appellent le serveur relais) :
-      * « premier joueur disponible » : le serveur vous relie au premier joueur qui attend dans ce
-        mode (ou vous fait attendre le prochain). Le premier arrivé est le maître ;
-      * « salle privée (code) » : tapez un code (lettres ou chiffres ; vide = le jeu en invente un,
-        à donner à vos amis). Le menu affiche alors les joueurs présents dans la salle :
-        « Affronter ... » pour en choisir un (celui qui choisit est le maître). Plusieurs joueurs
-        peuvent attendre dans la même salle ; ceux qui sont déjà en partie n'apparaissent plus.
-  - Par adresse IP : pour un réseau qui bloque la détection automatique.
+  3. Computer Link - Local LAN
+     Chaque jeu qui attend dans ce menu apparaît chez l'autre : l'un des deux joueurs choisit
+     « Affronter ... » ; les deux jeux se relient et la mise en relation du jeu d'origine démarre
+     toute seule (« Link complete »). Au premier lancement, Windows demande d'autoriser scr.exe
+     sur le réseau : acceptez.
+     Si l'autre joueur n'apparaît pas :
+       * les deux jeux doivent être dans ce menu en même temps (la recherche ne tourne que là) ;
+       * pare-feu Windows : autorisez scr.exe (Sécurité Windows > Pare-feu > Autoriser une
+         application) pour les réseaux privés ET publics, ou passez le réseau de la box en
+         « Privé » ; faites-le sur les DEUX PC ;
+       * les deux PC doivent être sur la même box (pas un réseau « invité » ni un Wi-Fi isolé) ;
+       * sinon : la ligne « Ce PC : 192.168.x.y » du menu donne l'adresse de chaque PC ; l'un
+         choisit « Par adresse IP » et tape l'adresse affichée chez l'autre.
+
+  4. Online Multiplayer
+     Il faut l'adresse du serveur relais dans scr.ini :  relais = adresse:port
+     En ouvrant ce menu, le jeu teste le serveur et affiche :
+       « En ligne - ping 25 ms - 3 joueurs »   (vert)  : le serveur répond ;
+       « Hors ligne : ... »                    (rouge) : raison (serveur arrêté, adresse
+                                                          introuvable, pas de réponse...).
+     « Tester à nouveau le serveur » refait le test. Quand le serveur répond :
+       * « Premier joueur disponible » : le serveur vous relie au premier joueur qui attend dans
+         ce mode (ou vous fait attendre le suivant). Le premier arrivé est le maître ;
+       * « Salle privée (code) » : tapez un code (lettres ou chiffres ; vide = le jeu en invente
+         un, à donner à vos amis). Le menu affiche les joueurs présents dans la salle :
+         « Affronter ... » pour en choisir un (celui qui choisit est le maître). Plusieurs joueurs
+         peuvent attendre dans la même salle ; ceux qui sont déjà en partie n'y apparaissent plus.
+     Aucun port à ouvrir sur les box des joueurs : les PC appellent le serveur relais.
+     Par adresse IP (sans serveur) : menu 3, « Par adresse IP ».
 
   Celui qui a choisi l'adversaire (ou le premier arrivé en mode automatique) est le « maître » : il saisit
   les pilotes (au moins deux : les deux joueurs) avec « 1. Enter another driver », puis

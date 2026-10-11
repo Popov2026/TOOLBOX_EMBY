@@ -58,6 +58,14 @@ constexpr uint32_t A_SELECT = 0x4be28, A_DRIVERS = 0x4be62;   // menu « 1. Sing
 constexpr uint32_t RET_NAME_SINGLE = 0x4be5c, RET_NAME_MULTI = 0x4be88, DRIVER_COUNT = 0x4c0f2;
 constexpr uint32_t RET_DRIVERS_MENU = 0x4be74;   // retour du menu « Enter another driver / Continue » (multijoueur)
 constexpr int MENU_DRIVERS = 0x14;
+// menu de départ (1. Single Player League / 2. Multiplayer / 3. Computer Link) : 4e choix
+// « Online Multiplayer » et libellés précisés. Textes de ce menu : octets de $4C0FB + D1 terminés
+// par $FF, affichés par $47BA0 -> boucle $47BC6 (A1 = $4C0FB rechargé à chaque caractère).
+constexpr uint32_t RET_SELECT_MENU = 0x4be4a, MENU_TABLE_SELECT = 0x49218 + 0x10;
+constexpr uint32_t A_PRINT = 0x47ba0, A_PRINT_LOOP = 0x47bc6, A_PRINT_READ = 0x47bcc, A_PRINT_END = 0x47bd8;
+constexpr uint32_t TEXT_BUF = HLE + 0x100;   // texte de remplacement (RAM libre en fin de mémoire)
+constexpr uint8_t TXT_MULTI = 0x1f, TXT_LINK = 0x71, TXT_ONLINE = 0xf0;   // 0xF0 : 4e entrée ajoutée
+constexpr int MENU_SELECT = 0x10;
 constexpr int MENU_TRACKS = 0x18, MENU_PRACTISE = 0x1c;   // « Tracks in DIVISION n » puis « Practise The ... / Cancel »
 constexpr uint32_t SCREEN = 0xf8000;
 constexpr uint32_t CYCLES_PER_FRAME = 160256;     // 8 MHz, 50 Hz PAL
@@ -454,9 +462,40 @@ void Machine::hook(uint32_t pc) {
   // qui n'en a pas, est validé puis le menu suivant est annulé)
   if (pc == A_MENU) {
     menuId_ = int(m68k_get_reg(nullptr, M68K_REG_D1) & 0xff);
+    selectMenu_ = false;
+    if (menuId_ == MENU_SELECT) {   // menu de départ : 4 choix au lieu de 3
+      uint32_t sp = m68k_get_reg(nullptr, M68K_REG_A7);
+      uint32_t ret = (uint32_t(ram[sp]) << 24 | ram[sp + 1] << 16 | ram[sp + 2] << 8 | ram[sp + 3]) & 0xffffff;
+      if (ret == RET_SELECT_MENU) {
+        selectMenu_ = true;
+        ram[MENU_TABLE_SELECT + 3] = TXT_ONLINE;
+        m68k_set_reg(M68K_REG_D2, (m68k_get_reg(nullptr, M68K_REG_D2) & ~0xffu) | 3u);
+      }
+    }
     menuBack_ = autoCancel_ == menuId_;
     autoCancel_ = -1;
-  } else if (pc == A_MENU_END) menuId_ = -1;
+  } else if (pc == A_MENU_END) {
+    if (selectMenu_) { selectChoice_ = int(m68k_get_reg(nullptr, M68K_REG_D0) & 0xff); selectMenu_ = false; }
+    menuId_ = -1;
+  }
+  // textes du menu de départ remplacés : la boucle d'affichage lit notre tampon
+  if (pc == A_PRINT && selectMenu_ && (ram[0x4c0f1] & 0x80)) {
+    uint8_t id = uint8_t(m68k_get_reg(nullptr, M68K_REG_D1));
+    const char *t = id == TXT_MULTI ? "Multiplayer - Local" : id == TXT_LINK ? "Computer Link - Local LAN"
+                    : id == TXT_ONLINE ? "Online Multiplayer" : nullptr;
+    if (t) {
+      size_t n = std::strlen(t);
+      std::memcpy(ram + TEXT_BUF, t, n); ram[TEXT_BUF + n] = 0xff;
+      customText_ = true; customStart_ = id;
+    }
+  } else if (pc == A_PRINT_LOOP && customText_) {
+    uint32_t d1 = m68k_get_reg(nullptr, M68K_REG_D1);
+    uint8_t idx = uint8_t(uint8_t(d1) - customStart_);
+    int32_t d1w = int16_t(d1 & 0xffff);
+    m68k_set_reg(M68K_REG_A1, uint32_t(int32_t(TEXT_BUF + idx) - d1w));
+    m68k_set_reg(M68K_REG_PC, A_PRINT_READ);
+    return;
+  } else if (pc == A_PRINT_END) customText_ = false;
   else if (pc == A_MENU_WAIT && menuBack_) {
     menuBack_ = false;
     uint32_t sp = m68k_get_reg(nullptr, M68K_REG_A7);

@@ -286,3 +286,10 @@ code et bloquerait le jeu).
   (`$11116`) ; le drapeau est posé dans `$6EA7C` à la dernière frontière de section de la pièce,
   recopié dans la liste de polygones en `$53DCE`. Vérifié en le désactivant (pièce `$FE`) : le trait
   blanc disparaît. Le mode HD trace un trait blanc au même endroit.
+* **Menu de départ étendu** (version native) : à l'entrée de `$48D88` avec D1 = `$10` appelé
+  depuis `$4BE44`, D2 passe à 3 (4 entrées) et la table `$49218+$13` reçoit le texte `$F0`. Les textes
+  de ce menu sont lus par `$47BA0` → boucle `$47BC6` (A1 = `$4C0FB` rechargé à chaque caractère) :
+  le crochet de `$47BC6` fait pointer A1 sur un tampon (`$FFF00`) pour « Multiplayer - Local »,
+  « Computer Link - Local LAN » et « Online Multiplayer ». Le choix 4 (D0 = 3) suit le même chemin
+  que le 3 (`$4BEAC`, D0 > 1) ; le choix est relevé au retour du menu (`$48ED0`). La police du jeu
+  n'a pas de parenthèses.

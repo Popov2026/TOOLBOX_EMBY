@@ -28,7 +28,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v22"
+#define SCR_VERSION "v23"
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -358,23 +358,33 @@ int main(int argc, char **argv) {
   double acc = 0;
   bool running = true;
   // éléments du menu « Computer Link »
-  struct MenuItem { std::string label; int kind; NetLink::Peer peer; };   // 0 adversaire, 1 code, 2 adresse, 3 annuler, 4 réessayer
+  // 0 adversaire, 1 salle privée (code), 2 adresse IP, 3 annuler, 4 réseau local, 5 premier joueur disponible,
+  // 6 tester à nouveau le serveur
+  struct MenuItem { std::string label; int kind; NetLink::Peer peer; };
+  RelayProbe probe;                 // « Online Multiplayer » : le serveur relais répond-il ?
+  auto online = [&] { return m->selectChoice() == 3; };   // 4. Online Multiplayer (sinon 3. Computer Link - Local LAN)
   auto menuItems = [&] {
     std::vector<MenuItem> it;
-    bool waiting = net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting;
-    bool inRoom = net.relayRoom() && net.state() == NetLink::State::Waiting;   // salle privée du relais
-    if (waiting || inRoom)
-      for (auto &p : net.peers()) it.push_back({"Affronter " + p.name.substr(0, 20), 0, p});
-    if (net.mode() == NetLink::Mode::Relay && net.state() != NetLink::State::Failed)
-      it.push_back({"Revenir au réseau local", 4, {}});
-    else if (waiting || net.state() == NetLink::State::Failed || !net.active()) {
-      if (!waiting) it.push_back({"Chercher en réseau local", 4, {}});
-      if (o.relay.empty()) it.push_back({"Par Internet (relais absent de scr.ini)", 1, {}});
-      else {
-        it.push_back({"Par Internet : premier joueur disponible", 5, {}});
-        it.push_back({"Par Internet : salle privée (code)", 1, {}});
+    bool idle = !net.active() || net.state() == NetLink::State::Failed;
+    if (online()) {
+      bool inRoom = net.relayRoom() && net.state() == NetLink::State::Waiting;   // salle privée du relais
+      if (inRoom)
+        for (auto &p : net.peers()) it.push_back({"Affronter " + p.name.substr(0, 20), 0, p});
+      if (idle) {
+        if (probe.ok()) {
+          it.push_back({"Premier joueur disponible", 5, {}});
+          it.push_back({"Salle privée (code)", 1, {}});
+        }
+        it.push_back({"Tester à nouveau le serveur", 6, {}});
       }
-      it.push_back({"Par adresse IP", 2, {}});
+    } else {
+      bool waiting = net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting;
+      if (waiting)
+        for (auto &p : net.peers()) it.push_back({"Affronter " + p.name.substr(0, 20), 0, p});
+      if (waiting || idle) {
+        if (!waiting) it.push_back({"Chercher en réseau local", 4, {}});
+        it.push_back({"Par adresse IP", 2, {}});
+      }
     }
     it.push_back({"Annuler", 3, {}});
     return it;
@@ -394,6 +404,7 @@ int main(int argc, char **argv) {
       case 3: cancelLink(); break;
       case 4: net.lobby(); break;
       case 5: if (!o.relay.empty()) net.joinRelay(o.relay, ""); menuSel = 0; break;
+      case 6: probe.start(o.relay); menuSel = 0; break;
     }
   };
   // aide aux tests automatiques (aucun effet sinon) : SCR_AUTOKEYS="trame:Touche,..." simule des appuis
@@ -425,7 +436,11 @@ int main(int argc, char **argv) {
       double t = double(SDL_GetPerformanceCounter()) / double(SDL_GetPerformanceFrequency());
       if (cancelUntil > 0 && t > cancelUntil) { cancelUntil = -1; m->setKey(0x01, false); }
       bool open = m->linkHeld() && cancelUntil < 0 && !net.connected();
-      if (open && !menuOpen) { menuSel = 0; if (!net.active()) net.lobby(); }   // le joueur vient de choisir « Computer Link »
+      if (open && !menuOpen) {   // le joueur vient de choisir « Computer Link » ou « Online Multiplayer »
+        menuSel = 0;
+        if (online()) { if (net.mode() == NetLink::Mode::Lobby) net.close(); if (!net.active()) probe.start(o.relay); }
+        else if (!net.active() || net.mode() == NetLink::Mode::Relay) net.lobby();
+      }
       if (!open && menuOpen && typing != Typing::None) { typing = Typing::None; SDL_StopTextInput(); }
       menuOpen = open;
     }
@@ -615,14 +630,22 @@ int main(int argc, char **argv) {
       int scale = std::max(1, logicalW / 400);
       struct Line { std::string text; uint32_t fg, bg; };
       std::vector<Line> lines;
-      lines.push_back({"COMPUTER LINK - CHOISISSEZ L'ADVERSAIRE", 0xffffff00u, 0xe0202020u});
+      lines.push_back({online() ? "ONLINE MULTIPLAYER - SERVEUR RELAIS" : "COMPUTER LINK - RESEAU LOCAL (LAN)", 0xffffff00u, 0xe0202020u});
       std::string st = net.status();
+      uint32_t stCol = 0xffffffffu;
+      if (online() && (!net.active() || net.state() == NetLink::State::Failed)) {
+        if (net.state() == NetLink::State::Failed) lines.push_back({st, 0xffff8080u, 0xe0202020u});
+        st = probe.text();
+        stCol = probe.state() == RelayProbe::State::Ok ? 0xff80ff80u : probe.state() == RelayProbe::State::Failed ? 0xffff8080u : 0xffffffffu;
+        lines.push_back({o.relay.empty() ? "scr.ini : relais = adresse:port" : "Serveur : " + o.relay,
+                         0xffc0c0c0u, 0xe0202020u});
+      }
       if (net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting)
         st = net.peers().empty() ? "Recherche de joueurs sur le réseau local..." : "Joueurs trouvés sur le réseau local :";
       if (net.relayRoom() && net.state() == NetLink::State::Waiting)
         st = net.peers().empty() ? "Salle " + net.room() + " : personne d'autre pour l'instant"
                                  : "Salle " + net.room() + " : joueurs présents";
-      lines.push_back({st, 0xffffffffu, 0xe0202020u});
+      lines.push_back({st, stCol, 0xe0202020u});
       bool lobbyWait = net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting;
       if (lobbyWait) {   // adresse de ce PC (pour « Par adresse IP » si la détection ne passe pas)
         static std::string addrs; static double addrsAt = -1e9;

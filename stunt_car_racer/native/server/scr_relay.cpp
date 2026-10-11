@@ -17,6 +17,7 @@
 // Protocole (trames : type 1 octet, longueur 2 octets gros-boutiste, données) :
 //   client -> serveur : JOIN2 (12) "AUTO|SALLE \0 code \0 version \0 nom"
 //                       PICK (14) "numéro"  (salle privée : choix de l'adversaire)
+//                       PROBE (15) ""       (test du serveur par le jeu : réponse INFO "SERVER joueurs parties")
 //                       JOIN (10) "code\0version"  (ancienne version : appariement par code)
 //   serveur -> client : INFO (11) "WAIT" | "PAIRED 1" (maître) | "PAIRED 2" | "GONE" | "BUSY" | "ERR message"
 //                       LIST (13) "numéro\tnom\n..." (salle privée : joueurs présents et libres)
@@ -88,7 +89,7 @@ static const char *errText(int e) { return std::strerror(e); }
 
 namespace {
 
-constexpr uint8_t NF_JOIN = 10, NF_INFO = 11, NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14;
+constexpr uint8_t NF_JOIN = 10, NF_INFO = 11, NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15;
 constexpr size_t MAX_CLIENTS = 512, MAX_PER_IP = 16, MAX_BUFFER = 1 << 20;
 const Sock NONE = Sock(-1);
 constexpr double JOIN_TIMEOUT = 20, PAIR_TIMEOUT = 3600, IDLE_TIMEOUT = 90;
@@ -145,7 +146,7 @@ struct Client {
   Mode mode = Mode::None;
   std::vector<uint8_t> in, out;
   Sock peer = NONE;              // partenaire une fois apparié
-  bool joined = false, closing = false;
+  bool joined = false, closing = false, probe = false;
   double since = 0, lastRx = 0, pairedAt = 0;
   uint64_t rxBytes = 0, rxMark = 0;
   double rate = 0;               // octets reçus par seconde
@@ -200,7 +201,7 @@ void drop(Sock fd, const char *why) {
     auto p = clients.find(c.peer);
     if (p != clients.end()) { frame(p->second, NF_INFO, "GONE"); p->second.peer = NONE; p->second.closing = true; }
   }
-  logf("%s déconnecté (%s)", who(c).c_str(), why);
+  if (!c.probe) logf("%s déconnecté (%s)", who(c).c_str(), why);
   closeSock(fd);
   clients.erase(it);
   dirty = true;
@@ -272,6 +273,12 @@ void process(Client &c) {
       if (type == NF_JOIN2 && f.size() >= 3)
         onJoin(c, f[0] == "SALLE" ? Mode::Room : Mode::Auto, f[1], f[2], f.size() > 3 ? f[3] : "");
       else if (type == NF_JOIN) onJoin(c, Mode::Code, f[0], f.size() > 1 ? f[1] : "", "");
+      else if (type == NF_PROBE) {   // le jeu vérifie que le serveur répond
+        size_t players = 0, games = 0;
+        for (auto &kv : clients) { players += kv.second.joined; games += kv.second.peer != NONE; }
+        frame(c, NF_INFO, "SERVER " + std::to_string(players) + " " + std::to_string(games / 2));
+        c.probe = c.closing = true;
+      }
       else { frame(c, NF_INFO, "ERR inscription attendue"); c.closing = true; }
     } else if (c.peer != NONE) {
       Client &o = clients[c.peer];
@@ -285,6 +292,7 @@ void process(Client &c) {
 
 // ------------------------------------------------------------------ affichage en direct
 std::string stateOf(const Client &c, double t) {
+  if (c.probe) return "test du serveur par un jeu";
   if (c.closing) return "fermeture";
   if (!c.joined) return "connexion...";
   if (c.peer != NONE) {
