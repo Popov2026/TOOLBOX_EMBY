@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v32"
+#define SCR_VERSION "v33"
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -528,7 +528,7 @@ int main(int argc, char **argv) {
     int slot = 0;             // place sur la grille : rangée slot / 2 (0 devant), côté slot % 2
     bool sideDone = false;    // atterrissage de la grue vu (le décalage sur le côté peut s'appliquer)
     uint16_t dropMode = 0;
-    double sideApplied = 0;   // part du décalage déjà appliquée à la voiture (le reste est ajouté à la position envoyée)
+    double sideApplied = 0, sideTarget = 0;   // part du décalage déjà appliquée à la voiture (le reste est ajouté à la position envoyée)
     uint32_t sideFrame = 0;
   } gr;
   int gTrack = 0, gLaps = 3;      // choix de l'organisateur
@@ -832,7 +832,7 @@ int main(int argc, char **argv) {
           // grille : 3 rangées de 2 ; les rangées 2 et 3 reculent avant la descente de la grue
           // (vérifié sur les 8 circuits : la voiture se pose sur la route), le côté est réglé à l'atterrissage
           moveCar(-250.0 * (gr.slot / 2), 0);
-          gr.sideDone = false; gr.dropMode = m->w(0x109d4); gr.sideApplied = 0; gr.sideFrame = 0;
+          gr.sideDone = false; gr.dropMode = m->w(0x109d4); gr.sideApplied = 0; gr.sideTarget = 0; gr.sideFrame = 0;
           net.groupCommand("LOADED");
           acc = 0;
         } else if (ev == "GO") {
@@ -895,17 +895,36 @@ int main(int argc, char **argv) {
         acc -= framePeriod; n++;
       }
 
-    // grille de départ : la grue repose la voiture au milieu de la route ; le côté (gauche / droite) est
-    // donc appliqué après l'atterrissage, progressivement (15 unités par image) pour éviter un saut de
-    // la caméra. D'ici là, il est ajouté à la position envoyée : les autres voient la grille dès le départ.
-    const double gridSide = gr.slot % 2 ? 90.0 : -90.0;
+    // grille de départ : la grue repose la voiture près du milieu de la route ; après l'atterrissage, la
+    // voiture est placée au milieu de sa moitié de route (gauche ou droite), mesuré sur le tracé du circuit,
+    // progressivement (15 unités par image). D'ici là, le décalage restant est ajouté à la position envoyée :
+    // les autres voient la grille dès le départ.
+    auto gridShift = [&]() -> double {   // décalage latéral encore à faire pour être sur sa file
+      if (trackList.empty()) return 0;
+      const Track &T = trackList[size_t(m->b(0x1112d) & 7) % trackList.size()];
+      const int ns = int(T.secs.size());
+      int piece = m->b(0x10906), sec = m->b(0x108f4), first = -1;
+      for (int i = 0; i < ns; i++) if (T.secs[size_t(i)].piece == piece) { first = i; break; }
+      if (first < 0) return 0;
+      int g = ((first - 1 + sec) % ns + ns) % ns;
+      const Section &A = T.secs[size_t(g)], &B = T.secs[size_t((g + 1) % ns)];
+      double f = m->b(0x108f5) / 256.0;
+      double lx = A.lx + (B.lx - A.lx) * f, lz = A.lz + (B.lz - A.lz) * f, rx = A.rx + (B.rx - A.rx) * f, rz = A.rz + (B.rz - A.rz) * f;
+      double w = std::hypot(rx - lx, rz - lz);
+      if (w < 1) return 0;
+      Pose p = HdView::poseFromState(m->displayedCarState());
+      double lat = ((p.x - (lx + rx) / 2) * (rx - lx) + (p.z - (lz + rz) / 2) * (rz - lz)) / w;   // + : vers la droite
+      double target = (gr.slot % 2 ? 1 : -1) * w / 4;   // milieu de la moitié droite / gauche
+      return target - lat;
+    };
     if (gr.active && gr.racing && !gr.sideDone && m->w(0x109d4) != gr.dropMode) {
       gr.sideDone = true;
-      if (std::getenv("SCR_GRIDLOG")) std::fprintf(stderr, "grille : place %d, atterrissage à %.1f s\n", gr.slot, NetLink::clock() - gr.goAt);
+      gr.sideTarget = gridShift();
+      if (std::getenv("SCR_GRIDLOG")) std::fprintf(stderr, "grille : place %d, atterrissage à %.1f s, décalage %.0f\n", gr.slot, NetLink::clock() - gr.goAt, gr.sideTarget);
     }
-    if (gr.active && gr.racing && gr.sideDone && std::fabs(gr.sideApplied) < std::fabs(gridSide) && m->frames() != gr.sideFrame) {
+    if (gr.active && gr.racing && gr.sideDone && std::fabs(gr.sideTarget - gr.sideApplied) > 0.5 && m->frames() != gr.sideFrame) {
       gr.sideFrame = m->frames();
-      double step = std::clamp(gridSide - gr.sideApplied, -15.0, 15.0);
+      double step = std::clamp(gr.sideTarget - gr.sideApplied, -15.0, 15.0);
       moveCar(0, step);
       gr.sideApplied += step;
     }
@@ -937,7 +956,7 @@ int main(int argc, char **argv) {
         }
         Pose p = HdView::poseFromState(m->displayedCarState());
         {   // part du décalage de grille pas encore appliquée à la voiture : ajoutée à la position envoyée
-          double rest = (gr.slot % 2 ? 90.0 : -90.0) - gr.sideApplied;
+          double rest = gr.sideDone ? gr.sideTarget - gr.sideApplied : gridShift();
           p.x += std::cos(p.yaw) * rest; p.z -= std::sin(p.yaw) * rest;
         }
         float v[7] = {float(p.x), float(p.y), float(p.z), float(p.yaw), float(p.pitch), float(p.roll), float(gr.total / ns)};
@@ -1005,7 +1024,9 @@ int main(int argc, char **argv) {
       if (!gr.active || !net.inGroup() || menuOpen) return;
       int scale = std::max(1, logicalW / 640), big = std::max(2, logicalW / 240);
       double now = NetLink::clock();
-      const std::string place = "Grille : rangée " + std::to_string(gr.slot / 2 + 1) + (gr.slot % 2 ? ", à droite" : ", à gauche");
+      const bool placed = gr.sideDone && std::fabs(gr.sideTarget - gr.sideApplied) <= 0.5;
+      const std::string place = "Grille : rangée " + std::to_string(gr.slot / 2 + 1) + (gr.slot % 2 ? ", à droite" : ", à gauche") +
+                                (placed ? "" : " (placement à la fin de la descente de la grue)");
       if (gr.waitingGo) {
         int yy = logicalH / 3;
         yy += drawText("Course à plusieurs : départ dès que tous les joueurs sont prêts...", logicalW / 2, yy, scale,
