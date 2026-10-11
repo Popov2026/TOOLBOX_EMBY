@@ -39,6 +39,10 @@ class Machine {
   void startPractice(int track);
 
   void runFrame();                          // une trame vidéo (1/50 s)
+  // une tranche de 1/parts de trame (sliceHook ensuite) ; vrai quand la trame est terminée.
+  // En multijoueur, les tranches sont réparties dans le temps réel : le réseau est lu plus souvent.
+  bool runPart(int parts);
+  int part() const { return part_; }
 
   // --- port série de l'Atari (câble « Computer Link » entre deux machines) : le jeu y accède par
   // le BIOS (Bconstat / Bconin / Bconout sur le périphérique 1). serialOut reçoit chaque octet émis ;
@@ -121,6 +125,8 @@ class Machine {
   std::deque<uint8_t> serialIn_;
   bool linkHeld_ = false;
   int menuId_ = -1, autoCancel_ = -1;
+  int part_ = 0;                  // tranche en cours de la trame (runPart)
+  uint64_t partDone_ = 0;
   bool menuBack_ = false, inName_ = false, nameBack_ = false;
   int menuCancelIndex() const;
   uint64_t serialSent_ = 0, serialRecv_ = 0;

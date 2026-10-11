@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/scr_relay --port 27420
+ExecStart=/usr/local/bin/scr_relay --port 27420 --journal
 User=scrrelay
 Restart=always
 RestartSec=3

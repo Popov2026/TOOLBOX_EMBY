@@ -129,6 +129,12 @@ bool NetLink::lobby() {
 }
 
 bool NetLink::connectPeer(const Peer &p) {
+  if (relayRoom() && state_ == State::Waiting) {   // salle privée : le serveur relie les deux joueurs
+    peerName_ = p.name;
+    frame(NF_PICK, std::to_string(p.id));
+    flush();
+    return true;
+  }
   if (mode_ != Mode::Lobby || tcp_ != BAD) return false;
   peerName_ = p.name;
   master_ = true;                       // celui qui choisit l'adversaire mène la partie
@@ -293,7 +299,6 @@ bool NetLink::joinRelay(const std::string &server, const std::string &room) {
   std::string host; int port = NET_PORT;
   if (server.empty()) { fail("aucun serveur relais configuré (scr.ini : relais = adresse:port)"); return false; }
   if (!splitHostPort(server, host, port)) { fail("adresse du relais invalide : " + server); return false; }
-  if (room_.empty()) { fail("code de salle vide"); return false; }
   return connectTo(host, port);
 }
 
@@ -369,9 +374,23 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
         startSession();
       }
       else if (s == "WAIT") { info_ = "WAIT"; waitedFirst_ = true; }
+      else if (s == "BUSY") peerName_.clear();   // joueur choisi déjà parti : la liste se met à jour
       else if (s == "FULL") fail("salle " + room_ + " déjà complète (deux joueurs)");
       else if (s == "GONE") fail("l'autre joueur s'est déconnecté");
       else if (s.compare(0, 4, "ERR ") == 0) fail("relais : " + s.substr(4));
+      break;
+    }
+    case NF_LIST: {   // salle privée : joueurs présents et libres, « numéro \t nom \n »
+      std::string s(reinterpret_cast<const char *>(p), n);
+      peers_.clear();
+      size_t a = 0;
+      while (a < s.size()) {
+        size_t e = s.find('\n', a); if (e == std::string::npos) e = s.size();
+        std::string line = s.substr(a, e - a);
+        size_t tab = line.find('\t');
+        if (tab != std::string::npos) peers_.push_back({uint32_t(std::strtoul(line.c_str(), nullptr, 10)), line.substr(tab + 1), "", 0, now()});
+        a = e + 1;
+      }
       break;
     }
     default: break;
@@ -446,11 +465,12 @@ void NetLink::poll() {
       getsockopt(tcp_, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&err), &l);
       connecting_ = false;
       if (err != 0 || FD_ISSET(SockRaw(tcp_), &e)) { fail("connexion impossible à " + info_); return; }
-      if (mode_ == Mode::Relay) {   // demander la salle au relais : JOIN code \0 version
+      if (mode_ == Mode::Relay) {   // inscription au relais : JOIN2 AUTO|SALLE \0 code \0 version \0 nom
         int on = 1;
         setsockopt(tcp_, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char *>(&on), sizeof on);
-        std::string j = room_; j.push_back('\0'); j += version_;
-        frame(NF_JOIN, j);
+        std::string j = room_.empty() ? "AUTO" : "SALLE";
+        j.push_back('\0'); j += room_; j.push_back('\0'); j += version_; j.push_back('\0'); j += name_;
+        frame(NF_JOIN2, j);
         state_ = State::Waiting; info_ = "WAIT"; lastRx_ = t;
       } else startSession();
     } else if (t - started_ > 10) { fail("pas de réponse de " + info_); return; }
@@ -498,7 +518,9 @@ std::string NetLink::status() const {
       if (mode_ == Mode::Lobby) return "Réseau local : visible sous le nom " + name_ + (peers_.empty() ? ", aucun autre joueur pour l'instant" : "");
       if (mode_ == Mode::LanHost) return "Réseau local : partie hébergée, en attente d'un joueur (port " + std::to_string(port_) + ")";
       if (mode_ == Mode::LanJoin) return "Réseau local : recherche d'une partie...";
-      if (mode_ == Mode::Relay) return "En ligne : salle " + room_ + ", en attente de l'autre joueur";
+      if (mode_ == Mode::Relay && room_.empty()) return "En ligne : recherche d'un adversaire (premier joueur disponible)";
+      if (mode_ == Mode::Relay)
+        return "En ligne : salle " + room_ + (peers_.empty() ? ", personne d'autre pour l'instant" : "");
       return "Réseau : en attente";
   }
   return "";

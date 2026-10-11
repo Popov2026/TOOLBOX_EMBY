@@ -28,7 +28,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v21"
+#define SCR_VERSION "v22"
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -56,6 +56,7 @@ struct Options {
   std::string relay;       // serveur relais : adresse[:port]
   std::string playerName;  // nom montré à l'autre joueur
   std::string netMode, netArg;   // au démarrage : host | joinlan | join ADRESSE | online CODE
+  int netRate = 400;       // échanges réseau par seconde en multijoueur (lecture / envoi du câble)
   double speed = 1;
   Tuning tuning;
 };
@@ -72,6 +73,7 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "details" || key == "détails") o.highDetail = val != "0";
   else if (key == "relais" || key == "relay") o.relay = val;
   else if (key == "nom" || key == "name") o.playerName = val;
+  else if (key == "reseau_cadence" || key == "réseau_cadence" || key == "netrate") o.netRate = std::clamp(std::atoi(val.c_str()), 50, 2000);
   else if (key == "host" || key == "heberger") { if (val != "0") o.netMode = "host"; }
   else if (key == "joinlan") { if (val != "0") o.netMode = "joinlan"; }
   else if (key == "join" || key == "rejoindre") { o.netMode = "join"; o.netArg = val; }
@@ -260,7 +262,7 @@ int main(int argc, char **argv) {
   if (o.netMode == "host") net.hostLan();
   else if (o.netMode == "joinlan") net.joinLan();
   else if (o.netMode == "join") net.joinDirect(o.netArg);
-  else if (o.netMode == "online") net.joinRelay(o.relay, o.netArg);
+  else if (o.netMode == "online") net.joinRelay(o.relay, o.netArg == "auto" || o.netArg == "AUTO" ? "" : o.netArg);
 
   std::unique_ptr<HdView> view;
   bool hd = o.hd, highDetail = o.highDetail;
@@ -360,11 +362,18 @@ int main(int argc, char **argv) {
   auto menuItems = [&] {
     std::vector<MenuItem> it;
     bool waiting = net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting;
-    if (waiting)
+    bool inRoom = net.relayRoom() && net.state() == NetLink::State::Waiting;   // salle privée du relais
+    if (waiting || inRoom)
       for (auto &p : net.peers()) it.push_back({"Affronter " + p.name.substr(0, 20), 0, p});
-    if (waiting || net.state() == NetLink::State::Failed || !net.active()) {
+    if (net.mode() == NetLink::Mode::Relay && net.state() != NetLink::State::Failed)
+      it.push_back({"Revenir au réseau local", 4, {}});
+    else if (waiting || net.state() == NetLink::State::Failed || !net.active()) {
       if (!waiting) it.push_back({"Chercher en réseau local", 4, {}});
-      it.push_back({o.relay.empty() ? "Par Internet (relais absent de scr.ini)" : "Par Internet : code de salle", 1, {}});
+      if (o.relay.empty()) it.push_back({"Par Internet (relais absent de scr.ini)", 1, {}});
+      else {
+        it.push_back({"Par Internet : premier joueur disponible", 5, {}});
+        it.push_back({"Par Internet : salle privée (code)", 1, {}});
+      }
       it.push_back({"Par adresse IP", 2, {}});
     }
     it.push_back({"Annuler", 3, {}});
@@ -384,6 +393,7 @@ int main(int argc, char **argv) {
       case 2: typing = Typing::Ip; typed.clear(); SDL_StartTextInput(); break;
       case 3: cancelLink(); break;
       case 4: net.lobby(); break;
+      case 5: if (!o.relay.empty()) net.joinRelay(o.relay, ""); menuSel = 0; break;
     }
   };
   // aide aux tests automatiques (aucun effet sinon) : SCR_AUTOKEYS="trame:Touche,..." simule des appuis
@@ -436,7 +446,7 @@ int main(int argc, char **argv) {
         else if (sc == SDL_SCANCODE_BACKSPACE && !typed.empty()) typed.pop_back();
         else if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER) {
           if (typing == Typing::Code) {
-            if (typed.empty()) {   // pas de code : on en invente un à donner à l'autre joueur
+            if (typed.empty()) {   // pas de code : on en invente un à donner aux autres joueurs
               std::mt19937 rng(unsigned(std::chrono::steady_clock::now().time_since_epoch().count()));
               typed = std::to_string(1000 + rng() % 9000);
             }
@@ -545,12 +555,29 @@ int main(int argc, char **argv) {
     last = now;
     if (acc > 0.25) acc = 0.25;
     int n = 0;
-    while (acc >= framePeriod && n < 10) {
-      m->runFrame();
-      view->afterFrame(*m);
-      queueAudio();
-      acc -= framePeriod; n++;
+    // multijoueur : chaque trame est émulée en tranches réparties dans le temps réel, le câble est lu
+    // et écrit à chaque tranche (reseau_cadence fois par seconde) ; sinon, trames entières
+    const int parts = net.active() ? std::clamp((o.netRate + 25) / 50, 1, 40) : 0;
+    {
+      static bool vsyncOff = false;   // la synchro verticale bloquerait la boucle entre deux tranches
+      if (vsyncOff != (parts > 0)) { vsyncOff = parts > 0; SDL_RenderSetVSync(ren, vsyncOff ? 0 : 1); }
     }
+    if (parts) {
+      while (n < 10 * parts && acc >= (m->part() + 1) * framePeriod / parts) {
+        if (m->runPart(parts)) {
+          view->afterFrame(*m);
+          queueAudio();
+          acc -= framePeriod;
+        }
+        n++;
+      }
+    } else
+      while (acc >= framePeriod && n < 10) {
+        m->runFrame();
+        view->afterFrame(*m);
+        queueAudio();
+        acc -= framePeriod; n++;
+      }
 
     // bandeau du multijoueur (visible aussi en plein écran) : saisie du code, état de la connexion
     std::string bannerMsg;
@@ -592,6 +619,9 @@ int main(int argc, char **argv) {
       std::string st = net.status();
       if (net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting)
         st = net.peers().empty() ? "Recherche de joueurs sur le réseau local..." : "Joueurs trouvés sur le réseau local :";
+      if (net.relayRoom() && net.state() == NetLink::State::Waiting)
+        st = net.peers().empty() ? "Salle " + net.room() + " : personne d'autre pour l'instant"
+                                 : "Salle " + net.room() + " : joueurs présents";
       lines.push_back({st, 0xffffffffu, 0xe0202020u});
       bool lobbyWait = net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting;
       if (lobbyWait) {   // adresse de ce PC (pour « Par adresse IP » si la détection ne passe pas)
@@ -683,6 +713,11 @@ int main(int argc, char **argv) {
         fpsN = 0; fpsT0 = SDL_GetPerformanceCounter();
       }
     } else {
+      // sans synchro verticale (multijoueur) : une image par rafraîchissement de l'écran au plus
+      static uint64_t lastLow = 0;
+      uint64_t tl = SDL_GetPerformanceCounter();
+      if (parts && lastLow && double(tl - lastLow) / double(freq) < 0.9 / refresh) { SDL_Delay(1); continue; }
+      lastLow = tl;
       m->screenARGB(pixels);
       SDL_UpdateTexture(tex, nullptr, pixels, 320 * 4);
       SDL_RenderClear(ren);

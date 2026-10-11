@@ -1,8 +1,11 @@
 Serveur relais Stunt Car Racer (multijoueur par Internet)
 =========================================================
 
-Rôle : deux joueurs se connectent avec le même code de salle ; le serveur les apparie puis
-transmet leurs données de l'un à l'autre. Les joueurs n'ont aucun port à ouvrir : seul le serveur
+Rôle : les jeux se connectent au serveur, qui met deux joueurs en relation puis transmet leurs
+données de l'un à l'autre. Deux façons de se trouver (menu « Computer Link » du jeu) :
+  - « premier joueur disponible » : le serveur relie le joueur au premier qui attend ;
+  - « salle privée (code) » : les joueurs qui tapent le même code voient qui est présent et
+    choisissent leur adversaire. Les joueurs n'ont aucun port à ouvrir : seul le serveur
 écoute (port TCP 27420 par défaut). Trafic : environ 300 octets/s par joueur pendant une course.
 
 
@@ -23,6 +26,14 @@ transmet leurs données de l'un à l'autre. Les joueurs n'ont aucun port à ouvr
     (menu « NAT / redirection de ports » de la box), puis donnez aux joueurs l'adresse publique de
     la box (ou un nom de domaine, par exemple une adresse DynDNS / No-IP) : relais = ADRESSE:27420.
   - Options : scr_relay.exe --port 30000 --log journal.txt
+             --journal : simple journal au lieu de l'affichage en direct (service, redirection)
+
+  La fenêtre affiche en direct (mise à jour chaque seconde) :
+    - le port, les adresses de la machine, le nombre de joueurs et de parties en cours ;
+    - un tableau des joueurs connectés : numéro, nom, adresse IP, mode (automatique ou salle
+      privée), salle, état (attend un adversaire / dans la salle, libre / en partie contre X avec
+      la durée), temps de connexion et trafic (octets reçus par seconde : ~300 en course) ;
+    - les derniers événements (arrivées, parties, départs).
 
   Démarrage automatique avec Windows (en attendant une version « service Windows ») :
   Planificateur de tâches > Créer une tâche > Déclencheur « Au démarrage », Action « Démarrer un
@@ -58,6 +69,8 @@ transmet leurs données de l'un à l'autre. Les joueurs n'ont aucun port à ouvr
     ufw allow 27420/tcp
 
   Vérifier :  systemctl status scr-relay      journal :  journalctl -u scr-relay -f
+  Affichage en direct : lancez simplement ./scr_relay dans un terminal (ssh) ; en service, le
+  programme écrit un journal (les arrivées, les parties, et toutes les 5 min le nombre de joueurs).
 
   Autre processeur (ARM, Raspberry Pi...) ou recompilation :
     g++ -O2 -std=c++17 scr_relay.cpp -o scr_relay
@@ -79,8 +92,9 @@ transmet leurs données de l'un à l'autre. Les joueurs n'ont aucun port à ouvr
 4. Fonctionnement et limites
 ----------------------------
 
-  - Une salle accueille deux joueurs ; le premier attend (jusqu'à une heure), le second est
-    apparié avec lui. Un troisième joueur avec le même code attend un quatrième.
+  - Automatique : le premier joueur attend (jusqu'à une heure), le suivant est relié à lui.
+  - Salle privée : autant de joueurs que l'on veut ; chacun voit les joueurs libres de la salle
+    et en choisit un. Une fois en partie, les deux joueurs disparaissent de la liste.
   - Les deux joueurs doivent avoir la même version de scr.exe (le serveur refuse sinon).
   - Une connexion silencieuse plus de 90 s est fermée ; 16 connexions au plus par adresse IP,
     512 en tout.

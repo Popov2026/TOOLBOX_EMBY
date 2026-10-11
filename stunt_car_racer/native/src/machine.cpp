@@ -558,22 +558,30 @@ void Machine::vblTick() {
   m68k_set_irq(4);
 }
 
-void Machine::runFrame() {
+bool Machine::runPart(int parts) {
+  parts = std::clamp(parts, 1, 64);
   activate();
-  // écritures restées d'avant (démarrage) : appliquées en début de trame
-  for (auto &w : ymWrites_) ym2149_.write(w.reg, w.val);
-  ymWrites_.clear();
-  uint64_t done = 0;
-  frameCycleBase_ = 0;
-  // en quatre tranches : sliceHook (réseau du câble « Computer Link ») est appelé toutes les 5 ms
-  for (int q = 1; q <= 4; q++) {
-    uint64_t target = CYCLES_PER_FRAME * uint64_t(q) / 4;
-    while (done < target) { done += m68k_execute(int(target - done)); frameCycleBase_ = done; }
-    if (sliceHook) sliceHook();
+  if (part_ == 0) {
+    // écritures restées d'avant (démarrage) : appliquées en début de trame
+    for (auto &w : ymWrites_) ym2149_.write(w.reg, w.val);
+    ymWrites_.clear();
+    partDone_ = 0;
+    frameCycleBase_ = 0;
   }
+  part_ = std::min(part_ + 1, parts);
+  uint64_t target = CYCLES_PER_FRAME * uint64_t(part_) / uint64_t(parts);
+  while (partDone_ < target) { partDone_ += m68k_execute(int(target - partDone_)); frameCycleBase_ = partDone_; }
+  if (sliceHook) sliceHook();   // réseau du câble « Computer Link » : lu et écrit à chaque tranche
+  if (part_ < parts) return false;
+  part_ = 0;
   frameCycleBase_ = 0;
   renderAudio();
   vblTick();
+  return true;
+}
+
+void Machine::runFrame() {
+  while (!runPart(4)) {}
 }
 
 // son de la trame : les écritures dans la YM2149 sont appliquées à l'échantillon correspondant à leur cycle

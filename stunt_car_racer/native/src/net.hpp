@@ -22,7 +22,8 @@ namespace scr {
 constexpr int NET_PORT = 27420;           // TCP : hébergement en réseau local et serveur relais
 constexpr int NET_DISCOVERY_PORT = 27421; // UDP : annonces de parties en réseau local
 
-enum NetFrame : uint8_t { NF_HELLO = 1, NF_DATA = 2, NF_PING = 3, NF_PONG = 4, NF_BYE = 5, NF_JOIN = 10, NF_INFO = 11 };
+enum NetFrame : uint8_t { NF_HELLO = 1, NF_DATA = 2, NF_PING = 3, NF_PONG = 4, NF_BYE = 5, NF_JOIN = 10, NF_INFO = 11,
+                          NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14 };
 
 class NetLink {
  public:
@@ -39,14 +40,19 @@ class NetLink {
   void setIdentity(const std::string &version, uint32_t gameHash, const std::string &name);
 
   // salon du réseau local (menu « Computer Link ») : ce jeu s'annonce et liste les autres jeux qui
-  // attendent ; on en choisit un (connectPeer) ou un autre joueur nous choisit (connexion entrante)
+  // attendent ; on en choisit un (connectPeer) ou un autre joueur nous choisit (connexion entrante).
+  // Même liste et même choix pour une salle privée du serveur relais.
   bool lobby();
   const std::vector<Peer> &peers() const { return peers_; }
   bool connectPeer(const Peer &p);
   bool hostLan(int port = NET_PORT);                       // héberger en réseau local
   bool joinLan();                                          // rejoindre la première partie annoncée
   bool joinDirect(const std::string &hostPort);            // adresse[:port]
-  bool joinRelay(const std::string &server, const std::string &room);   // serveur[:port] + code
+  // serveur relais : code vide = automatique (premier joueur disponible) ; sinon salle privée,
+  // dont les joueurs présents arrivent dans peers() (choix par connectPeer)
+  bool joinRelay(const std::string &server, const std::string &room);
+  bool relayRoom() const { return mode_ == Mode::Relay && !room_.empty(); }
+  const std::string &room() const { return room_; }
   void close(const std::string &why = "");
 
   // à appeler souvent (plusieurs fois par trame) : connexions, lecture, écriture, annonces, ping
