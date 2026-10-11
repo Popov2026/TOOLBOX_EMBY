@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v34"
+#define SCR_VERSION "v35"
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -916,7 +916,7 @@ int main(int argc, char **argv) {
       if (w < 1) return 0;
       Pose p = HdView::poseFromState(m->displayedCarState());
       double lat = ((p.x - (lx + rx) / 2) * (rx - lx) + (p.z - (lz + rz) / 2) * (rz - lz)) / w;   // + : vers la droite
-      double target = (gr.slot % 2 ? 1 : -1) * w / 4;   // milieu de la moitié droite / gauche
+      double target = (gr.slot % 2 ? 1 : -1) * w * 0.35;   // bien à droite / à gauche (bord de la route à 0,5)
       return target - lat;
     };
     if (gr.active && gr.racing && !gr.sideDone && m->w(0x109d4) != gr.dropMode) {
@@ -1301,7 +1301,8 @@ int main(int argc, char **argv) {
           if (NetLink::clock() - gr.goAt >= rs[k].first) {
             autoShots.push_back({0, rs[k].second}); rs.erase(rs.begin() + long(k));
             Pose me = HdView::poseFromState(m->displayedCarState());
-            std::fprintf(stderr, "t=%.0f s  moi : x=%.0f z=%.0f", NetLink::clock() - gr.goAt, me.x, me.z);
+            std::fprintf(stderr, "t=%.0f s  moi : x=%.0f z=%.0f place %d appliqué %.0f/%.0f reste %.0f", NetLink::clock() - gr.goAt, me.x, me.z,
+                         gr.slot, gr.sideApplied, gr.sideTarget, gridShift());
             for (auto &kv : net.ghosts()) if (!kv.second.empty()) std::fprintf(stderr, "  | autre : x=%.0f z=%.0f", kv.second.back().v[0], kv.second.back().v[2]);
             std::fprintf(stderr, "\n");
           } else k++;
