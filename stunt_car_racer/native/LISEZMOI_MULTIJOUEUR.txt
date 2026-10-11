@@ -46,7 +46,12 @@ ceux du serveur ; en réseau local, ceux du joueur qui a choisi l'adversaire.
        « En ligne - ping 25 ms - 3 joueurs »   (vert)  : le serveur répond ;
        « Hors ligne : ... »                    (rouge) : raison (serveur arrêté, adresse
                                                           introuvable, pas de réponse...).
-     « Tester à nouveau le serveur » refait le test. Quand le serveur répond :
+     « Tester à nouveau le serveur » refait le test.
+     Pseudo : « Pseudo : ... (changer) » ; chaque joueur saisit le sien (12 caractères, enregistré
+     dans scr.ini, ligne nom =). En duel par Internet, le jeu qui mène remplit tout seul le nom des
+     deux pilotes avec les pseudos (le Computer Link en réseau local, menu 3, reste comme
+     l'original : le maître tape les noms).
+     Quand le serveur répond :
        * « Premier joueur disponible » : le serveur vous relie au premier joueur qui attend dans
          ce mode (ou vous fait attendre le suivant). Le premier arrivé est le maître ;
        * « Salle privée (code) » : tapez un code (lettres ou chiffres ; vide = le jeu en invente
@@ -60,7 +65,8 @@ ceux du serveur ; en réseau local, ceux du joueur qui a choisi l'adversaire.
      même temps à tous. Grille de départ : 3 rangées de 2 (gauche / droite), ordre tiré au sort
      à chaque course ; les rangées 2 et 3 partent un peu en arrière (le temps et le classement
      comptent depuis la ligne de départ). Les autres joueurs sont des voitures « fantômes » : on les voit rouler
-     (avec leur nom au-dessus) mais on passe à travers, sans collision. Le jeu passe en HD (F1)
+     (avec leur nom au-dessus, et les flammes quand ils utilisent le boost) mais on passe à
+     travers, sans collision. Le jeu passe en HD (F1)
      au départ, car le rendu d'origine ne sait dessiner qu'une seule voiture adverse.
      En haut à droite : tour, temps et classement en direct. À la fin (tous arrivés, ou deux
      minutes après le premier), le menu du groupe affiche les temps et l'organisateur peut

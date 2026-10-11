@@ -316,6 +316,38 @@ OppPose HdView::opponentFromGame(const Machine &m, int track) {
   return o;
 }
 
+// flammes du boost : deux jets à l'arrière de la voiture (repère et échelle de addCar), longueur et
+// couleurs qui vacillent d'une image à l'autre
+void HdView::addFlames(const OppPose &o, double hs, int seed) {
+  const Vec3 r = o.right, f = o.fwd;
+  Vec3 u{f.y * r.z - f.z * r.y, f.z * r.x - f.x * r.z, f.x * r.y - f.y * r.x};
+  if (u.y < 0) u = {-u.x, -u.y, -u.z};
+  const double base = o.yRaw * hs, K = 0.55;
+  auto W = [&](double x, double y, double z) {
+    x *= K; y *= K; z *= K;
+    return Vec3{o.x + r.x * x + u.x * y + f.x * z, base + r.y * x + u.y * y + f.y * z, o.z + r.z * x + u.z * y + f.z * z};
+  };
+  uint32_t h = (flameTick_++ + uint32_t(seed) * 7919u) * 2654435761u;
+  for (int side = -1; side <= 1; side += 2) {
+    h = h * 1103515245u + 12345u;
+    double len = 90 + double((h >> 16) % 70), w = 16 + double((h >> 8) % 6), rise = 40 + double((h >> 12) % 30);
+    const double x0 = side * 34, y0 = 36, z0 = -122;   // sortie d'échappement à l'arrière
+    // jet en forme de flamme : base carrée à l'échappement, pointe vers l'arrière, montante et écartée
+    auto jet = [&](double wd, double ln, double up, uint32_t col) {
+      Vec3 a = W(x0 - wd, y0 - wd * 0.6, z0), b = W(x0 + wd, y0 - wd * 0.6, z0), c = W(x0 + wd, y0 + wd, z0), d = W(x0 - wd, y0 + wd, z0);
+      Vec3 mid = W(x0 + side * wd * 0.8, y0 + up * 0.55, z0 - ln * 0.5);       // renflement
+      Vec3 tip = W(x0 + side * wd * 1.4, y0 + up, z0 - ln);
+      Vec3 q[][3] = {{a, b, mid}, {b, c, mid}, {c, d, mid}, {d, a, mid}, {a, mid, tip}, {b, mid, tip}, {c, mid, tip}, {d, mid, tip}};
+      for (auto &t : q) r3d_.poly(t, 3, col);
+      Vec3 back[4] = {a, b, c, d};
+      r3d_.poly(back, 4, col);
+    };
+    jet(w, len, rise, (h >> 4) & 1 ? 0xffe03a10u : 0xfff05018u);               // flamme rouge-orange
+    jet(w * 0.7, len * 0.75, rise * 0.8, (h >> 5) & 1 ? 0xffff9a20u : 0xffffb030u);   // orange
+    jet(w * 0.4, len * 0.45, rise * 0.5, (h >> 6) & 1 ? 0xffffe060u : 0xfffff4b0u);   // cœur jaune
+  }
+}
+
 OppPose HdView::ghostFromPose(const Pose &p) const {
   // même convention que la caméra : avant horizontal (sin lacet, cos lacet), droite (cos lacet, -sin lacet)
   OppPose o;
@@ -536,6 +568,7 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
     g.onScreen = false;
     if (!g.pose.valid) continue;
     addCar(g.pose, HSCALE, m);
+    if (g.boost) addFlames(g.pose, HSCALE, int(&g - ghosts.data()));
     Vec3 top{g.pose.x, g.pose.yRaw * HSCALE + 90, g.pose.z};
     Vec3 q = r3d_.toCam(top);
     g.dist = std::sqrt((g.pose.x - c.pos.x) * (g.pose.x - c.pos.x) + (g.pose.z - c.pos.z) * (g.pose.z - c.pos.z));

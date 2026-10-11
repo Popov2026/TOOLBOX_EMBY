@@ -52,6 +52,9 @@ class Machine {
   // choix de « 3. Computer Link » : la poignée de main ne démarre que lorsque linkGate renvoie vrai
   std::function<bool()> linkGate;
   bool linkHeld() const { return linkHeld_; }   // jeu en attente à l'entrée du lien
+  // « Computer Link » : nom du pilote n° k (0 = ce joueur, 1 = l'autre) rempli automatiquement
+  // chez le maître à la saisie « NAME? » ; vide = saisie normale au clavier
+  std::function<std::string(int)> linkName;
   // Échap dans les menus du jeu : revenir au menu précédent ; faux si le menu affiché n'a pas de retour
   bool menuBack();
   bool inMenu() const { return menuId_ >= 0; }
@@ -133,7 +136,7 @@ class Machine {
   uint8_t customStart_ = 0;
   int part_ = 0;                  // tranche en cours de la trame (runPart)
   uint64_t partDone_ = 0;
-  bool menuBack_ = false, inName_ = false, nameBack_ = false;
+  bool menuBack_ = false, inName_ = false, nameBack_ = false, nameAuto_ = false;
   int menuCancelIndex() const;
   uint64_t serialSent_ = 0, serialRecv_ = 0;
   std::vector<uint8_t> cpuCtx_;

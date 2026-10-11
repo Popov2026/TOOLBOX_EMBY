@@ -46,6 +46,8 @@ class NetLink {
   // (le jeu esclave adopte ceux du maître pendant la partie)
   void setIdentity(const std::string &version, uint32_t gameHash, const std::string &name, const std::string &tuning = "");
   const std::string &peerTuning() const { return peerTuning_; }
+  void setName(const std::string &name) { name_ = name.substr(0, 40); }   // pseudo (prochaines annonces / connexions)
+  const std::string &name() const { return name_; }
   // réglages imposés par le serveur relais (« gravity=1 thrust=1 ... cadence=400 »), vide sinon
   const std::string &serverParams() const { return serverParams_; }
 

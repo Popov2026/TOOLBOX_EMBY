@@ -15,7 +15,7 @@ hdres = 1920x1080             # définition du mode HD (16/9)
 #                              (par défaut : sprites d'origine agrandis, les images de flammes sont ignorées)
 
 # --- multijoueur (mode « Computer Link » par le réseau ; voir LISEZMOI_MULTIJOUEUR.txt)
-# nom = Pierre                # nom montré à l'autre joueur (défaut : nom de la session Windows)
+# nom = Pierre                # pseudo en multijoueur online, 12 caractères (aussi réglable dans le menu)
 # serveur relais pour jouer par Internet (menu « 4. Online Multiplayer »), par exemple
 #   relais = 192.168.1.110:27420     (attention : pas de # en début de ligne, sinon elle est ignorée)
 # L'adresse peut aussi être saisie dans le menu « 4. Online Multiplayer » : elle est enregistrée ici.

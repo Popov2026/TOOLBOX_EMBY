@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v28"
+#define SCR_VERSION "v29"
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -266,7 +266,7 @@ std::vector<std::string> wrapText(const std::string &s, size_t w) {
 
 // enregistre « relais = valeur » dans scr.ini : remplace la ligne relais existante (même mise en
 // commentaire par un #), sinon l'ajoute à la fin
-void saveRelay(const std::string &path, const std::string &value) {
+void saveIniValue(const std::string &path, const std::vector<std::string> &keys, const std::string &value, const std::string &comment0) {
   std::vector<std::string> lines;
   { std::ifstream f(path); std::string l; while (std::getline(f, l)) { if (!l.empty() && l.back() == '\r') l.pop_back(); lines.push_back(l); } }
   bool done = false;
@@ -274,18 +274,35 @@ void saveRelay(const std::string &path, const std::string &value) {
     size_t k = l.find_first_not_of(" \t#");
     if (k == std::string::npos) continue;
     std::string rest = l.substr(k);
-    if ((rest.rfind("relais", 0) == 0 || rest.rfind("relay", 0) == 0) && rest.find('=') != std::string::npos) {
-      std::string tail = rest.substr(rest.find('=') + 1);
+    size_t eq = rest.find('=');
+    if (eq == std::string::npos) continue;
+    std::string key = rest.substr(0, eq);
+    while (!key.empty() && std::isspace(static_cast<unsigned char>(key.back()))) key.pop_back();
+    if (std::find(keys.begin(), keys.end(), key) != keys.end()) {
+      std::string tail = rest.substr(eq + 1);
       size_t h = tail.find('#');
       std::string comment = h == std::string::npos ? "" : "   " + tail.substr(h);
-      l = "relais = " + value + comment;
+      l = keys[0] + " = " + value + comment;
       done = true;
       break;
     }
   }
-  if (!done) lines.push_back("relais = " + value + "   # serveur relais (menu 4. Online Multiplayer)");
+  if (!done) lines.push_back(keys[0] + " = " + value + "   # " + comment0);
   std::ofstream f(path, std::ios::trunc);
   for (auto &l : lines) f << l << "\n";
+}
+void saveRelay(const std::string &path, const std::string &value) {
+  saveIniValue(path, {"relais", "relay"}, value, "serveur relais (menu 4. Online Multiplayer)");
+}
+
+// pseudo du joueur : caractères acceptés par la saisie des noms du jeu, 12 au plus
+std::string cleanPseudo(const std::string &s) {
+  std::string r;
+  for (char ch : bannerText(s))
+    if (r.size() < 12 && (std::isalnum(static_cast<unsigned char>(ch)) || ch == ' ' || ch == '.' || ch == '-')) r += ch;
+  while (!r.empty() && r.front() == ' ') r.erase(r.begin());
+  while (!r.empty() && r.back() == ' ') r.pop_back();
+  return r;
 }
 
 }  // namespace
@@ -341,14 +358,16 @@ int main(int argc, char **argv) {
     // empreinte du programme du jeu seulement ; les réglages de physique (scr.ini) sont envoyés en
     // texte et l'esclave adopte ceux du maître pendant la partie
     uint32_t h = fnv1a(m->image().data(), m->image().size());
-    std::string nm = o.playerName;
-    if (nm.empty()) { const char *u = std::getenv("USERNAME"); if (!u) u = std::getenv("USER"); nm = u ? u : "Joueur"; }
+    std::string nm = cleanPseudo(o.playerName);
+    if (nm.empty()) { const char *u = std::getenv("USERNAME"); if (!u) u = std::getenv("USER"); nm = cleanPseudo(u ? u : ""); }
+    if (nm.empty()) nm = "Joueur";
+    o.playerName = nm;
     net.setIdentity(SCR_VERSION, h, nm, tuningText(o.tuning));
   }
   // menu « Computer Link » : quand le joueur choisit « 3. Computer Link », le jeu est retenu à l'entrée
   // du lien et ce menu propose les adversaires trouvés sur le réseau local, une salle du serveur
   // relais (code) ou une adresse IP. Celui qui choisit l'adversaire devient le maître (il mène les menus).
-  enum class Typing { None, Code, Ip, Server, Chat };
+  enum class Typing { None, Code, Ip, Server, Chat, Pseudo };
   Typing typing = Typing::None;
   std::string typed;
   int menuSel = 0;
@@ -359,6 +378,12 @@ int main(int argc, char **argv) {
     m->serialOut = [&](uint8_t v) { net.send(v); };
     m->sliceHook = [&] { net.poll(); uint8_t b; while (net.recv(b)) m->serialPush(b); };
     // le maître démarre la poignée de main dès la connexion ; l'esclave attend le premier octet du maître
+    // multijoueur online (duel par le serveur relais) : le maître remplit le nom des pilotes avec les
+    // pseudos (le sien, puis celui de l'autre joueur) ; le Computer Link en réseau local reste d'origine
+    m->linkName = [&](int k) -> std::string {
+      if (!net.connected() || net.mode() != NetLink::Mode::Relay) return "";
+      return k == 0 ? o.playerName : k == 1 ? cleanPseudo(net.peerName()) : "";
+    };
     m->linkGate = [&] { return cancelUntil > 0 || (net.connected() && (net.master() || m->serialPending() > 0)); };
   };
   wireNet();
@@ -542,6 +567,7 @@ int main(int argc, char **argv) {
           it.push_back({"Salle privée (code)", 1, {}});
         }
         if (!o.relay.empty()) it.push_back({"Tester à nouveau le serveur", 6, {}});
+        it.push_back({"Pseudo : " + o.playerName + "  (changer)", 14, {}});
         it.push_back({o.relay.empty() ? "Saisir l'adresse du serveur" : "Changer l'adresse du serveur", 7, {}});
       }
     } else {
@@ -582,6 +608,7 @@ int main(int argc, char **argv) {
       case 7: typing = Typing::Server; typed = o.relay; SDL_StartTextInput(); break;
       case 8: if (net.canChat()) { typing = Typing::Chat; typed.clear(); SDL_StartTextInput(); } break;
       case 9: net.groupCommand("ENTER"); menuSel = 0; break;
+      case 14: typing = Typing::Pseudo; typed = o.playerName; SDL_StartTextInput(); break;
       case 10: gTrack = (gTrack + 1) % 8; break;
       case 11: gLaps = gLaps % 9 + 1; break;
       case 12: net.groupCommand("START " + std::to_string(gTrack) + " " + std::to_string(gLaps)); break;
@@ -637,6 +664,7 @@ int main(int argc, char **argv) {
           if (typing == Typing::Code && std::isalnum(ch) && typed.size() < 12) typed += char(std::toupper(ch));
           if ((typing == Typing::Ip || typing == Typing::Server) && (std::isalnum(ch) || ch == '.' || ch == ':' || ch == '-') && typed.size() < 60) typed += char(ch);
           if (typing == Typing::Chat && ch >= 32 && typed.size() < 110) typed += char(ch);
+          if (typing == Typing::Pseudo && (std::isalnum(ch) || ch == ' ' || ch == '.' || ch == '-') && typed.size() < 12) typed += char(ch);
         }
       }
       else if (ev.type == SDL_KEYDOWN && typing == Typing::None && ev.key.keysym.scancode == SDL_SCANCODE_F9) {
@@ -656,6 +684,9 @@ int main(int argc, char **argv) {
               typed = std::to_string(1000 + rng() % 9000);
             }
             net.joinRelay(o.relay, typed);
+          } else if (typing == Typing::Pseudo) {   // pseudo : enregistré dans scr.ini, annoncé aux autres
+            std::string p = cleanPseudo(typed);
+            if (!p.empty()) { o.playerName = p; saveIniValue(ini, {"nom", "name"}, p, "pseudo (multijoueur)"); net.setName(p); }
           } else if (typing == Typing::Chat) {   // message envoyé ; F9 pour le suivant
             net.sendChat(typed);
           } else if (typing == Typing::Server) {   // adresse du serveur relais : enregistrée dans scr.ini
@@ -877,7 +908,14 @@ int main(int argc, char **argv) {
         }
         Pose p = HdView::poseFromState(m->displayedCarState());
         float v[7] = {float(p.x), float(p.y), float(p.z), float(p.yaw), float(p.pitch), float(p.roll), float(gr.total / ns)};
-        net.sendGhost(v, uint8_t(std::clamp(int(gr.total / ns) + 1, 0, 255)), gr.finished ? 1 : 0);
+        bool boost = false;   // boost : flammes d'origine présentes dans l'image (sprites 6/7/49 et 8/9/50)
+        {
+          static std::vector<uint32_t> ov(320 * 200);
+          std::vector<SpriteDraw> vis;
+          m->overlayARGB(ov.data(), &vis);
+          for (auto &sd : vis) boost = boost || sd.id == 6 || sd.id == 7 || sd.id == 49 || sd.id == 8 || sd.id == 9 || sd.id == 50;
+        }
+        net.sendGhost(v, uint8_t(std::clamp(int(gr.total / ns) + 1, 0, 255)), uint8_t((gr.finished ? 1 : 0) | (boost ? 2 : 0)));
       }
     }
 
@@ -1086,7 +1124,8 @@ int main(int argc, char **argv) {
       for (size_t k = 0; k < items.size(); k++) {
         std::string lab = items[k].label;
         if (typing != Typing::None && typing != Typing::Chat && int(k) == menuSel)
-          lab = (typing == Typing::Code ? "Code de salle : " : typing == Typing::Server ? "Serveur : " : "Adresse : ") + typed + "_";
+          lab = (typing == Typing::Code ? "Code de salle : " : typing == Typing::Server ? "Serveur : "
+                 : typing == Typing::Pseudo ? "Pseudo : " : "Adresse : ") + typed + "_";
         bool sel = int(k) == menuSel;
         lines.push_back({lab, sel ? 0xff000000u : 0xff202020u, sel ? 0xffff9a00u : 0xffb6b6b6u});
       }
@@ -1107,6 +1146,7 @@ int main(int argc, char **argv) {
                        : typing == Typing::Code ? "Entrée : valider (vide = code au hasard)"
                        : typing == Typing::Ip ? "Entrée : valider     Échap : retour"
                        : typing == Typing::Server ? "Adresse[:port], Entrée : enregistrer"
+                       : typing == Typing::Pseudo ? "12 caractères, Entrée : enregistrer"
                                               : "Flèches + Entrée : choisir  Échap : annuler", 0xffc0c0c0u, 0xe0202020u});
       int lineH = 15 * scale, total = int(lines.size()) * lineH;
       int y = std::max(0, (logicalH - total) / 2);
@@ -1166,6 +1206,7 @@ int main(int argc, char **argv) {
                   lerpA(a->v[3], b->v[3]), lerpA(a->v[4], b->v[4]), lerpA(a->v[5], b->v[5])};
           HdView::Ghost g;
           g.pose = view->ghostFromPose(ps);
+          g.boost = (b->flags & 2) != 0;
           for (auto &gm : net.groupMembers()) if (gm.id == kv.first) g.name = gm.name;
           view->ghosts.push_back(g);
         }

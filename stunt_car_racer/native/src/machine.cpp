@@ -56,6 +56,9 @@ constexpr uint8_t TXT_CANCEL = 0x55;        // « Cancel »
 constexpr uint32_t A_NAME_INPUT = 0x48c26, A_NAME_KEY = 0x48c94, A_NAME_DONE = 0x48c0e;
 constexpr uint32_t A_SELECT = 0x4be28, A_DRIVERS = 0x4be62;   // menu « 1. Single Player League... », « Enter another driver »
 constexpr uint32_t RET_NAME_SINGLE = 0x4be5c, RET_NAME_MULTI = 0x4be88, DRIVER_COUNT = 0x4c0f2;
+// « Computer Link » : le maître saisit les pilotes ($45612 -> $48B90, retour $45618) ; nom en cours :
+// $13399 + $109BF (12 caractères au plus, $48D84) ; $48D74 complète avec des espaces et termine
+constexpr uint32_t RET_NAME_LINK = 0x45618, NAME_BUF = 0x13399, NAME_OFS = 0x109bf, A_NAME_PAD = 0x48d74;
 constexpr uint32_t RET_DRIVERS_MENU = 0x4be74;   // retour du menu « Enter another driver / Continue » (multijoueur)
 constexpr int MENU_DRIVERS = 0x14;
 // menu de départ (1. Single Player League / 2. Multiplayer / 3. Computer Link) : 4e choix
@@ -514,9 +517,30 @@ void Machine::hook(uint32_t pc) {
     m68k_set_reg(M68K_REG_PC, A_MENU_SHOW);
     return;
   }
-  if (pc == A_NAME_INPUT) inName_ = true;
+  if (pc == A_NAME_INPUT) { inName_ = true; nameAuto_ = true; }
   else if (pc == A_NAME_DONE) inName_ = false;
-  else if (pc == A_NAME_KEY && nameBack_) {
+  else if (pc == A_NAME_KEY && nameAuto_) {
+    // multijoueur : chaque joueur a son pseudo ; le jeu maître remplit lui-même le nom des pilotes
+    // (1er : le sien, 2e : celui de l'autre joueur) au lieu de les faire taper
+    nameAuto_ = false;
+    uint32_t sp = m68k_get_reg(nullptr, M68K_REG_A7);
+    uint32_t ret = (uint32_t(ram[sp + 8]) << 24 | ram[sp + 9] << 16 | ram[sp + 10] << 8 | ram[sp + 11]) & 0xffffff;
+    std::string nm = (ret == RET_NAME_LINK && linkName) ? linkName(ram[DRIVER_COUNT]) : "";
+    std::string ok;
+    for (char ch : nm)   // caractères acceptés par la saisie du jeu
+      if (ok.size() < 12 && ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch == ' ' || ch == '.' || ch == '-'))
+        ok += ch;
+    while (!ok.empty() && ok.back() == ' ') ok.pop_back();
+    if (!ok.empty()) {
+      uint8_t base = ram[NAME_OFS];
+      for (size_t k = 0; k < ok.size(); k++) ram[NAME_BUF + uint8_t(base + k)] = uint8_t(ok[k]);
+      m68k_set_reg(M68K_REG_D1, uint32_t(ok.size()));
+      m68k_set_reg(M68K_REG_PC, A_NAME_PAD);
+      inName_ = false;
+      return;
+    }
+  }
+  if (pc == A_NAME_KEY && nameBack_) {
     // Échap pendant « NAME? » : retour au menu de départ (ou à « Enter another driver » en multijoueur) ;
     // on quitte par la fin normale de la saisie en remplaçant l'adresse de retour de $48B90
     nameBack_ = false;
