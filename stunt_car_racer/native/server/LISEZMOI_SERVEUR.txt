@@ -108,14 +108,34 @@ données de l'un à l'autre. Deux façons de se trouver (menu « Computer Link �
 4. Fonctionnement et limites
 ----------------------------
 
-  - Automatique : le premier joueur attend (jusqu'à une heure), le suivant est relié à lui.
+  - Automatique : le premier joueur attend (une heure au plus sans activité), le suivant est relié à lui.
   - Salle privée : autant de joueurs que l'on veut ; chacun voit les joueurs libres de la salle
     et en choisit un. Une fois en partie, les deux joueurs disparaissent de la liste.
   - Course à plusieurs : dans une salle privée, de 2 à 6 joueurs ; le serveur donne le départ
     quand tous sont prêts (30 s au plus), relaie les positions et collecte les temps ; la course
     se termine quand tous sont arrivés ou ont abandonné (voiture détruite), ou deux minutes
-    après le premier arrivé. Il faut ce serveur v34 pour que la casse termine la course.
+    après le premier arrivé. (Serveur v34 ou plus récent.)
   - Les deux joueurs doivent avoir la même version de scr.exe (le serveur refuse sinon).
   - Une connexion silencieuse plus de 90 s est fermée ; 16 connexions au plus par adresse IP,
     512 en tout.
   - Le serveur ne voit que des octets du jeu : aucun compte, aucune donnée personnelle.
+
+5. Sécurité (port ouvert sur la box)
+------------------------------------
+
+  Ouvrir un port n'est pas une faille en soi : le risque est dans le programme qui écoute. Ce
+  serveur ne fait que relayer des trames de jeu ; il n'exécute rien, n'ouvre aucun fichier à la
+  demande d'un joueur et ne donne aucun accès à la machine.
+  Protections : 16 connexions par adresse IP, 512 en tout ; 1 Mo au plus en attente par joueur
+  dans chaque sens (au-delà, le joueur est déconnecté : ni inondation, ni client qui ne lit plus
+  ne peuvent remplir la mémoire) ; inscription sous 20 s ; noms et messages réduits à de l'UTF-8
+  valide sans caractères de contrôle (pas de séquences d'échappement dans la console) ; valeurs
+  bornées (circuit, tours, temps, 6 joueurs par course). Testé avec des trames aléatoires, des
+  noms piégés et des inondations, sous AddressSanitizer : aucune erreur.
+  Ce qui reste : quelqu'un de malveillant peut saturer le serveur (gêne pour jouer, sans accès à
+  la machine), et les joueurs connaissent votre adresse IP publique.
+  Conseils :
+  - box : rediriger uniquement ce port, en TCP, vers la machine du serveur (jamais de « DMZ ») ;
+  - lancer le serveur sans droits d'administrateur (sous Linux, scr-relay.service le fait avec
+    un compte dédié et des protections systemd) ; pare-feu Windows : « réseaux privés » suffit ;
+  - fermer la redirection quand vous ne jouez pas, ou héberger le serveur sur un petit VPS.

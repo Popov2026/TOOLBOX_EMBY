@@ -775,7 +775,7 @@ void Machine::applyTuning() {
     origG_ = w(0x4e88c); origDamp_ = w(0x4ee64); origDt_ = ram[DT_SITES[0] + 3];
     haveOrig_ = true;
   }
-  auto clampi = [](double v, int lo, int hi) { return int(std::lround(v < lo ? lo : v > hi ? hi : v)); };
+  auto clampi = [](double v, int lo, int hi) { return int(std::lround(v >= lo ? (v <= hi ? v : hi) : lo)); };   // NaN -> lo
   int g = clampi(origG_ * tuning_.gravity, 1, 0x7fff);
   w16(0x4e884, uint32_t(-g) & 0xffff); w16(0x4e88c, uint32_t(g));
   int dt = clampi(origDt_ * tuning_.timeStep, 1, 255);
@@ -790,7 +790,7 @@ void Machine::applyTuning() {
     int thrust = clampi((b8[2] | (b8[3] << 8)) * tuning_.thrust, 0, 0x7fff);
     b8[2] = uint8_t(thrust); b8[3] = uint8_t(thrust >> 8);
     b8[6] = uint8_t(clampi(b8[6] / (tuning_.boostUse < 0.05 ? 0.05 : tuning_.boostUse), 1, 255));
-    b8[9] = uint8_t(clampi(b8[9] + tuning_.shockTolerance, 0, 255));
+    b8[9] = uint8_t(clampi(double(b8[9]) + tuning_.shockTolerance, 0, 255));
     std::memcpy(ram + CAR_TABLE + blk * 11, b8, 11);
     if ((ram[0x110ca] ? 1 : 0) == blk)
       for (int i : {2, 3, 6, 9}) ram[CAR_BLOCK + i] = b8[i];

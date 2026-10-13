@@ -2,6 +2,7 @@
 #include "net.hpp"
 
 #include <cctype>
+#include <cmath>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -341,6 +342,18 @@ void NetLink::startSession() {
   lastRx_ = now();
 }
 
+// texte venu du réseau : sans caractères de contrôle, au plus maxw caractères (UTF-8)
+static std::string cleanText(const std::string &s, size_t maxw) {
+  std::string r;
+  size_t count = 0;
+  for (unsigned char ch : s) {
+    if (ch < 32 || ch == 127) continue;
+    if ((ch & 0xc0) != 0x80 && count++ >= maxw) break;   // début de caractère au-delà de la limite
+    r += char(ch);
+  }
+  return r;
+}
+
 void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
   lastRx_ = now();
   switch (type) {
@@ -354,13 +367,15 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
       peerName_ = s.substr(z2 + 5);
       peerTuning_.clear();
       size_t z3 = peerName_.find('\0');
-      if (z3 != std::string::npos) { peerTuning_ = peerName_.substr(z3 + 1); peerName_ = peerName_.substr(0, z3); }
+      if (z3 != std::string::npos) { peerTuning_ = peerName_.substr(z3 + 1, 200); peerName_ = peerName_.substr(0, z3); }
+      peerName_ = cleanText(peerName_, 24);
       if (ver != version_) { fail("versions différentes (ici " + version_ + ", en face " + ver + ")"); return; }
       if (h != hash_) { fail("image disque du jeu différente de celle de l'autre joueur (même fichier .st requis)"); return; }
       helloOk_ = true; state_ = State::Connected;
       break;
     }
     case NF_DATA:
+      if (rx_.size() > (1u << 20)) { fail("trop de données reçues de l'autre joueur"); return; }
       rx_.insert(rx_.end(), p, p + n);
       received_ += n;
       break;
@@ -400,7 +415,8 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
         else if (k == "m") {
           GroupMember gm; ls >> gm.id >> gm.state; std::getline(ls, gm.name);
           if (!gm.name.empty() && gm.name[0] == ' ') gm.name.erase(0, 1);
-          groupMembers_.push_back(gm);
+          gm.name = cleanText(gm.name, 24); gm.state = gm.state.substr(0, 24);
+          if (groupMembers_.size() < 16) groupMembers_.push_back(gm);
         }
       }
       groupIn_ = false;
@@ -426,6 +442,9 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
           std::memcpy(&g.v[k], &u, 4);
         }
         g.lap = p[32]; g.flags = p[33];
+        bool sane = true;   // position venue d'un autre joueur : valeurs finies et raisonnables seulement
+        for (int k = 0; k < 7; k++) sane = sane && std::isfinite(g.v[k]) && std::fabs(g.v[k]) < 1e7f;
+        if (!sane || (ghosts_.size() >= 16 && !ghosts_.count(id))) break;
         auto &q = ghosts_[id];
         q.push_back(g);
         while (q.size() > 40) q.pop_front();
@@ -435,8 +454,9 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
       std::string s(reinterpret_cast<const char *>(p), n), from = peerName_;
       size_t tab = s.find('\t');
       if (tab != std::string::npos) { from = s.substr(0, tab); s = s.substr(tab + 1); }
+      from = cleanText(from, 24);
       if (from.empty()) from = "Adversaire";
-      chat_.push_back({from, s.substr(0, 120), now(), false});
+      chat_.push_back({from, cleanText(s, 120), now(), false});
       while (chat_.size() > 30) chat_.pop_front();
       break;
     }
@@ -448,7 +468,7 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
         size_t e = s.find('\n', a); if (e == std::string::npos) e = s.size();
         std::string line = s.substr(a, e - a);
         size_t tab = line.find('\t');
-        if (tab != std::string::npos) peers_.push_back({uint32_t(std::strtoul(line.c_str(), nullptr, 10)), line.substr(tab + 1), "", 0, now()});
+        if (tab != std::string::npos && peers_.size() < 64) peers_.push_back({uint32_t(std::strtoul(line.c_str(), nullptr, 10)), cleanText(line.substr(tab + 1), 24), "", 0, now()});
         a = e + 1;
       }
       break;

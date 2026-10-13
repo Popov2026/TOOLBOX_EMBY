@@ -164,6 +164,8 @@ struct Client {
   std::vector<uint8_t> in, out;
   Sock peer = NONE;              // partenaire une fois apparié
   bool joined = false, closing = false, probe = false;
+  bool overflow = false;         // ne lit plus ce qu'on lui envoie : déconnecté
+  double closingSince = 0;
   double since = 0, lastRx = 0, pairedAt = 0, lastChat = 0;
   bool inGroup = false;          // course à plusieurs
   std::string gstate = "lobby";  // lobby, loading, loaded, racing, finished:ms, out (voiture détruite)
@@ -240,6 +242,7 @@ std::string exeDir() {
 }
 
 void frame(Client &c, uint8_t type, const std::string &s) {
+  if (c.out.size() > MAX_BUFFER) { c.overflow = true; return; }   // client qui ne lit plus : mémoire bornée
   size_t n = std::min<size_t>(s.size(), 0xffff);
   c.out.push_back(type); c.out.push_back(uint8_t(n >> 8)); c.out.push_back(uint8_t(n));
   c.out.insert(c.out.end(), s.begin(), s.begin() + long(n));
@@ -326,7 +329,7 @@ void groupCmd(Client &c, const std::string &cmd) {
     if (g.phase == "loading") c.gstate = "loaded";
   } else if (cmd.rfind("FINISH", 0) == 0) {
     if (g.phase == "racing" && c.gstate == "racing") {
-      long ms = std::atol(cmd.c_str() + 6);
+      long ms = std::max(0L, std::min(86400000L, std::atol(cmd.c_str() + 6)));
       c.gstate = "finished:" + std::to_string(ms);
       if (!g.firstFinish) g.firstFinish = now();
       logf("salle %s : %s arrive en %ld,%03ld s", c.room.c_str(), c.name.c_str(), ms / 1000, ms % 1000);
@@ -413,11 +416,27 @@ bool validRoom(const std::string &r) {
   return true;
 }
 
+// texte venu du réseau : UTF-8 valide seulement, sans caractères de contrôle (C0, DEL, C1 :
+// pas de séquences d'échappement dans la console), au plus maxw caractères
 std::string cleanName(const std::string &s, size_t maxw = 24) {
   std::string r;
-  for (unsigned char ch : s) if (ch >= 32 && ch != 127) r += char(ch);
-  while (width(r) > maxw) r.pop_back();
-  while (!r.empty() && (static_cast<unsigned char>(r.back()) & 0xc0) == 0xc0) r.pop_back();   // UTF-8 coupé
+  size_t count = 0;
+  for (size_t i = 0; i < s.size() && count < maxw;) {
+    unsigned char c0 = static_cast<unsigned char>(s[i]);
+    size_t len = c0 < 0x80 ? 1 : (c0 & 0xe0) == 0xc0 ? 2 : (c0 & 0xf0) == 0xe0 ? 3 : (c0 & 0xf8) == 0xf0 ? 4 : 0;
+    if (len == 0 || i + len > s.size()) { i++; continue; }
+    uint32_t cp = len == 1 ? c0 : c0 & (0xff >> (len + 1));
+    bool ok = true;
+    for (size_t k = 1; k < len; k++) {
+      unsigned char ck = static_cast<unsigned char>(s[i + k]);
+      if ((ck & 0xc0) != 0x80) { ok = false; break; }
+      cp = (cp << 6) | (ck & 0x3f);
+    }
+    static const uint32_t minCp[5] = {0, 0, 0x80, 0x800, 0x10000};
+    if (!ok) { i++; continue; }
+    if (cp < minCp[len] || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) || cp < 32 || (cp >= 0x7f && cp < 0xa0)) { i += len; continue; }
+    r.append(s, i, len); count++; i += len;
+  }
   return r;
 }
 
@@ -428,7 +447,7 @@ std::vector<std::string> fields(const uint8_t *p, size_t n) {
 }
 
 void onJoin(Client &c, Mode mode, const std::string &room, const std::string &version, const std::string &name) {
-  c.mode = mode; c.version = version; c.name = cleanName(name);
+  c.mode = mode; c.version = version.substr(0, 32); c.name = cleanName(name);
   c.room = room;
   for (auto &ch : c.room) ch = char(std::toupper(static_cast<unsigned char>(ch)));
   if (mode != Mode::Auto && !validRoom(c.room)) { frame(c, NF_INFO, "ERR code de salle invalide"); c.closing = true; return; }
@@ -484,6 +503,7 @@ void process(Client &c) {
     } else if (c.peer != NONE) {
       Client &o = clients[c.peer];
       if (o.out.size() < MAX_BUFFER) o.out.insert(o.out.end(), c.in.begin() + long(pos), c.in.begin() + long(pos + 3 + n));
+      else o.overflow = true;
     } else if (type == NF_PICK) onPick(c, std::string(reinterpret_cast<const char *>(p), n));
     else if (type == NF_GCMD) groupCmd(c, std::string(reinterpret_cast<const char *>(p), std::min<size_t>(n, 64)));
     else if (type == NF_GPOS && c.inGroup && n <= 64) {   // position : aux autres membres, avec le numéro
@@ -701,9 +721,11 @@ int main(int argc, char **argv) {
         if (r > 0) c.out.erase(c.out.begin(), c.out.begin() + r);
         else { if (r < 0 && !wouldBlock(sockErr())) dead.push_back({fd, "envoi impossible"}); break; }
       }
-      if (c.closing && c.out.empty()) dead.push_back({fd, "terminé"});
+      if (c.closing && !c.closingSince) c.closingSince = t;
+      if (c.overflow) dead.push_back({fd, "trop de données en attente"});
+      else if (c.closing && (c.out.empty() || t - c.closingSince > 10)) dead.push_back({fd, "terminé"});
       else if (!c.joined && t - c.since > JOIN_TIMEOUT) dead.push_back({fd, "pas d'inscription"});
-      else if (c.joined && c.peer == NONE && t - c.since > PAIR_TIMEOUT) dead.push_back({fd, "attente trop longue"});
+      else if (c.joined && c.peer == NONE && t - c.lastRx > PAIR_TIMEOUT) dead.push_back({fd, "inactif trop longtemps"});
       else if (c.peer != NONE && t - c.lastRx > IDLE_TIMEOUT) dead.push_back({fd, "silence"});
     }
     for (auto &d : dead) drop(d.first, d.second);
