@@ -71,7 +71,7 @@ ceux du serveur ; en réseau local, ceux du joueur qui a choisi l'adversaire.
      comptent depuis la ligne de départ). La grue descend la voiture comme dans le jeu d'origine
      (même trajectoire qu'en championnat) ; chaque voiture glisse ensuite à sa place, à gauche
      ou à droite. Les autres joueurs sont des voitures « fantômes » : on les voit rouler
-     (avec leur nom au-dessus, et les 8 flammes du moteur V8 sur le capot quand ils utilisent le
+     (avec leur nom au-dessus, et les 8 flammes du moteur V8 sur le capot, en dégradé jaune, orange et rouge, quand ils utilisent le
      boost) mais on passe à
      travers, sans collision. Le jeu passe en HD (F1)
      au départ, car le rendu d'origine ne sait dessiner qu'une seule voiture adverse.

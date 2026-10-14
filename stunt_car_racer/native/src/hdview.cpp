@@ -333,14 +333,41 @@ void HdView::addFlames(const OppPose &o, double hs, int seed) {
       h = h * 1103515245u + 12345u;
       const double x0 = side * 40, y0 = 52, z0 = 128 - k * 22;   // échappements le long du moteur, sur le capot
       double up = 34 + double((h >> 16) % 26), back = 18 + double((h >> 10) % 16), w = 6 + double((h >> 8) % 3);
-      auto jet = [&](double wd, double sc, uint32_t col) {
-        Vec3 a = W(x0 - wd, y0, z0 - wd), b = W(x0 + wd, y0, z0 - wd), c = W(x0 + wd, y0, z0 + wd), d = W(x0 - wd, y0, z0 + wd);
-        Vec3 tip = W(x0 + side * wd * 1.5, y0 + up * sc, z0 - back * sc);   // vers le haut, vers l'arrière, vers l'extérieur
-        Vec3 q[][3] = {{a, b, tip}, {b, c, tip}, {c, d, tip}, {d, a, tip}};
-        for (auto &t : q) r3d_.poly(t, 3, col);
+      // jet en dégradé : jaune à la sortie de l'échappement, orange au milieu, rouge à la pointe
+      // (tranches successives d'une pyramide qui s'affine vers le haut, l'arrière et l'extérieur)
+      auto grad = [](double s, double flick) {
+        static const double C[3][3] = {{255, 230, 70}, {255, 140, 25}, {225, 35, 15}};   // jaune, orange, rouge
+        double t = std::min(std::max(s, 0.0), 1.0) * 2;
+        int i = t >= 1 ? 1 : 0; double k = t - i;
+        uint32_t col = 0xff000000u;
+        for (int c = 0; c < 3; c++) {
+          double v = (C[i][c] + (C[i + 1][c] - C[i][c]) * k) * flick;
+          col |= uint32_t(std::min(255.0, std::max(0.0, v))) << (16 - 8 * c);
+        }
+        return col;
       };
-      jet(w, 1.0, (h >> 4) & 1 ? 0xffe8401au : 0xfff05a18u);         // flamme rouge-orange
-      jet(w * 0.6, 0.65, (h >> 5) & 1 ? 0xffffb030u : 0xffffe060u);   // cœur jaune
+      const double flick = 0.88 + 0.12 * double((h >> 3) % 8) / 7;   // vacillement de la luminosité
+      const double tx = side * w * 1.5, ty = up, tz = -back;            // pointe, relative à la sortie
+      const int bands = 8;
+      auto ring = [&](double s, Vec3 out[4]) {
+        double wd = w * (1 - s), cx = x0 + tx * s, cy = y0 + ty * s, cz = z0 + tz * s;
+        out[0] = W(cx - wd, cy, cz - wd); out[1] = W(cx + wd, cy, cz - wd);
+        out[2] = W(cx + wd, cy, cz + wd); out[3] = W(cx - wd, cy, cz + wd);
+      };
+      Vec3 lo[4], hi[4];
+      ring(0, lo);
+      for (int bnd = 0; bnd < bands; bnd++) {
+        double s0 = double(bnd) / bands, s1 = double(bnd + 1) / bands;
+        uint32_t col = grad((s0 + s1) / 2, flick);
+        if (bnd == bands - 1) {   // dernière tranche : pointe
+          Vec3 tip = W(x0 + tx, y0 + ty, z0 + tz);
+          for (int e = 0; e < 4; e++) { Vec3 t[3] = {lo[e], lo[(e + 1) % 4], tip}; r3d_.poly(t, 3, col); }
+        } else {
+          ring(s1, hi);
+          for (int e = 0; e < 4; e++) { Vec3 q[4] = {lo[e], lo[(e + 1) % 4], hi[(e + 1) % 4], hi[e]}; r3d_.poly(q, 4, col); }
+          std::copy(hi, hi + 4, lo);
+        }
+      }
     }
 }
 
