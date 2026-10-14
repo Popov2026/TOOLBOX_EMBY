@@ -70,10 +70,13 @@ ceux du serveur ; en réseau local, ceux du joueur qui a choisi l'adversaire.
      à chaque course ; les rangées 2 et 3 partent un peu en arrière (le temps et le classement
      comptent depuis la ligne de départ). La grue amène chaque voiture de son côté : une place à
      gauche arrive par la gauche de la route, une place à droite par la droite (la trajectoire de
-     la grue d'origine, en miroir pour la gauche) ; aucune voiture ne traverse les autres. Les autres joueurs sont des voitures « fantômes » : on les voit rouler
-     (avec leur nom au-dessus, et les 8 flammes du moteur V8, en V et en dégradé jaune, orange et rouge, quand ils utilisent le
-     boost) mais on passe à
-     travers, sans collision. Le jeu passe en HD (F1)
+     la grue d'origine, en miroir pour la gauche) ; aucune voiture ne traverse les autres. On voit rouler les autres joueurs
+     (avec leur nom au-dessus, et les 8 flammes du moteur V8, en V et en dégradé jaune, orange et
+     rouge, quand ils utilisent le boost). Les voitures se heurtent : chacun est repoussé hors de
+     l'autre voiture, les vitesses se partagent au choc (on peut pousser une voiture ou être
+     poussé), et un choc violent abîme la voiture comme une mauvaise réception. Chaque jeu calcule
+     le choc pour sa voiture avec la position reçue des autres : avec du lag, le contact peut
+     paraître un peu décalé. Le jeu passe en HD (F1)
      au départ, car le rendu d'origine ne sait dessiner qu'une seule voiture adverse.
      En haut à droite : tour, temps et classement en direct. Le nombre de tours est celui de
      l'organisateur (1 à 9 ; l'arrêt de l'entraînement d'origine après 3 tours est désactivé).

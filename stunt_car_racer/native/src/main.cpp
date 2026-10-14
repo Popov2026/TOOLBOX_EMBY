@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v43"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v44"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -545,6 +545,9 @@ int main(int argc, char **argv) {
     double sideApplied = 0, sideTarget = 0;   // part du décalage déjà appliquée à la voiture (le reste est ajouté à la position envoyée)
     uint32_t sideFrame = 0;
     double viewSide = 0;      // décalage de la vue (et de la position envoyée) : la grue arrive du côté de sa place
+    uint32_t collTick = 0;    // collisions avec les autres voitures : une fois par cycle de la physique
+    double tickRate = 17, rateT0 = 0; uint32_t rateTicks0 = 0;
+    double lastHit = 0;
   } gr;
   int gTrack = 0, gLaps = 3;      // choix de l'organisateur
   auto trackName = [&](int t) {
@@ -997,6 +1000,65 @@ int main(int argc, char **argv) {
           for (auto &sd : vis) boost = boost || sd.id == 6 || sd.id == 7 || sd.id == 49 || sd.id == 8 || sd.id == 9 || sd.id == 50;
         }
         net.sendGhost(v, uint8_t(std::clamp(int(gr.total / ns) + 1, 0, 255)), uint8_t((gr.finished ? 1 : 0) | (boost ? 2 : 0)));
+      }
+    }
+    // collisions avec les autres voitures (course à plusieurs) : chaque jeu ne déplace que sa propre voiture.
+    // Voitures vues comme des rectangles orientés (≈ 148 × 100 unités, modèle 3D de la voiture) ; à
+    // chevauchement, la voiture est repoussée de la moitié de l'enfoncement (l'autre jeu fait l'autre
+    // moitié) sur l'axe le moins enfoncé, et les vitesses le long de cet axe sont mises en commun
+    // (choc mou, léger rebond). Vitesse du jeu ($10AD4 x, $10AD8 z) : déplacement par cycle = v × 0,0145.
+    if (gr.active && gr.racing && gr.sideDone && !gr.finished && m->ticks() != gr.collTick) {
+      gr.collTick = m->ticks();
+      const double now = NetLink::clock();
+      if (gr.rateT0 == 0 || now - gr.rateT0 > 2) {   // cycles de physique par seconde (vitesse des autres -> par cycle)
+        if (gr.rateT0 > 0 && m->ticks() > gr.rateTicks0) gr.tickRate = std::clamp((m->ticks() - gr.rateTicks0) / (now - gr.rateT0), 4.0, 60.0);
+        gr.rateT0 = now; gr.rateTicks0 = m->ticks();
+      }
+      const double K = 0.0145, LH = 74, WH = 50;
+      Pose me = HdView::poseFromState(m->ram + 0x10ac2);
+      const double fx = std::sin(me.yaw), fz = std::cos(me.yaw), rx = std::cos(me.yaw), rz = -std::sin(me.yaw);
+      auto addL = [&](uint32_t a, double geom) {
+        uint32_t v = m->l(a) + uint32_t(int32_t(geom / 16 * 65536));
+        m->ram[a] = uint8_t(v >> 24); m->ram[a + 1] = uint8_t(v >> 16); m->ram[a + 2] = uint8_t(v >> 8); m->ram[a + 3] = uint8_t(v);
+      };
+      auto addW = [&](uint32_t a, double dv) {
+        int v = std::clamp(int(std::lround(int16_t(m->w(a)) + dv)), -32000, 32000);
+        m->ram[a] = uint8_t(uint16_t(v) >> 8); m->ram[a + 1] = uint8_t(v);
+      };
+      for (auto &kv : net.ghosts()) {
+        const auto &q = kv.second;
+        if (q.empty() || now - q.back().t > 1) continue;
+        const NetLink::GhostSample &b = q.back(), &a = q.size() > 1 ? q[q.size() - 2] : q.back();
+        const double dt = b.t - a.t;
+        const double vgx = dt > 0.01 ? (b.v[0] - a.v[0]) / dt : 0, vgz = dt > 0.01 ? (b.v[2] - a.v[2]) / dt : 0;   // unités / s
+        const double ext = std::clamp(now - b.t + 0.03, 0.0, 0.25);   // position estimée maintenant (retard du réseau)
+        const double gx = b.v[0] + vgx * ext, gz = b.v[2] + vgz * ext;
+        if (std::fabs(b.v[1] - me.y) * 0.522 > 70) continue;   // pas à la même hauteur (saut, route au-dessus)
+        const double dx = gx - me.x, dz = gz - me.z;
+        if (dx * dx + dz * dz > 400 * 400) continue;
+        const double df = dx * fx + dz * fz, ds = dx * rx + dz * rz;
+        const double d = std::remainder(b.v[3] - me.yaw, 2 * M_PI);
+        const double ef = LH * std::fabs(std::cos(d)) + WH * std::fabs(std::sin(d)), es = LH * std::fabs(std::sin(d)) + WH * std::fabs(std::cos(d));
+        const double of = LH + ef - std::fabs(df), os = WH + es - std::fabs(ds);
+        if (of <= 0 || os <= 0) continue;
+        double nx, nz, pen;   // normale du choc, de ma voiture vers l'autre
+        if (of < os) { double sg = df > 0 ? 1 : -1; nx = fx * sg; nz = fz * sg; pen = of; }
+        else { double sg = ds > 0 ? 1 : -1; nx = rx * sg; nz = rz * sg; pen = os; }
+        const double push = std::min(pen * 0.5 + 1, 40.0);
+        addL(0x10ac2, -nx * push); addL(0x10aca, -nz * push);
+        const double vmx = int16_t(m->w(0x10ad4)) * K, vmz = int16_t(m->w(0x10ad8)) * K;   // unités / cycle
+        const double vn = vmx * nx + vmz * nz, vo = (vgx * nx + vgz * nz) / gr.tickRate;
+        if (vn > vo) {   // on se rapproche : vitesses mises en commun, petit rebond
+          const double target = (vn + vo) / 2 - 0.15 * (vn - vo), dv = target - vn;
+          addW(0x10ad4, dv * nx / K); addW(0x10ad8, dv * nz / K);
+          const double closing = (vn - vo) * gr.tickRate;   // unités / s
+          if (closing > 1200 && now - gr.lastHit > 0.5) {   // choc violent : dégâts, comme une mauvaise réception
+            gr.lastHit = now;
+            int dmg = std::clamp(int((closing - 1200) / 150), 1, 24);
+            for (uint32_t ad : {0x10939u, 0x1093au, 0x1093bu}) m->ram[ad] = uint8_t(std::min(255, m->b(ad) + dmg));
+          }
+        }
+        if (std::getenv("SCR_COLLLOG")) std::fprintf(stderr, "choc avec %u : enfoncement %.0f (%s), vitesse %.1f -> autre %.1f\n", kv.first, pen, of < os ? "avant/arrière" : "côté", vn, vo);
       }
     }
     // voiture détruite : le jeu lance le compte à rebours de fin ($10956) et arrête la physique ; le joueur abandonne
