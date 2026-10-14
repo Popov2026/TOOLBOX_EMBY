@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v37"
+#define SCR_VERSION "v37"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"

@@ -102,6 +102,9 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 #endif
 
+// version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
+#define SCR_RELAY_VERSION "v37"
+
 namespace {
 
 constexpr uint8_t NF_JOIN = 10, NF_INFO = 11, NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16, NF_CHAT = 17,
@@ -553,7 +556,7 @@ void draw(double t) {
   size_t games = 0;
   for (auto &kv : clients) games += kv.second.peer != NONE;
   char b[512];
-  std::snprintf(b, sizeof b, "\x1b[1mSERVEUR RELAIS STUNT CAR RACER\x1b[0m   port TCP %d   en service depuis %s   %s\n", listenPort,
+  std::snprintf(b, sizeof b, "\x1b[1mSERVEUR RELAIS STUNT CAR RACER " SCR_RELAY_VERSION "\x1b[0m   port TCP %d   en service depuis %s   %s\n", listenPort,
                 duration(t - startedAt).c_str(), stamp("%H:%M:%S").c_str());
   o += b;
   if (!machineAddresses.empty()) o += "Adresse(s) de cette machine : " + machineAddresses + "\n";
@@ -633,7 +636,7 @@ int main(int argc, char **argv) {
   WSADATA wsa;
   if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) { std::fprintf(stderr, "Winsock indisponible\n"); return 1; }
   SetConsoleOutputCP(CP_UTF8);   // accents
-  SetConsoleTitleA("Serveur relais Stunt Car Racer");
+  SetConsoleTitleA("Serveur relais Stunt Car Racer " SCR_RELAY_VERSION);
 #else
   std::signal(SIGPIPE, SIG_IGN);
 #endif
@@ -657,7 +660,7 @@ int main(int argc, char **argv) {
   machineAddresses = localAddresses();
   live = !journal && isConsole();
   std::srand(unsigned(std::time(nullptr)));
-  logf("relais Stunt Car Racer : écoute sur le port TCP %d", port);
+  logf("relais Stunt Car Racer " SCR_RELAY_VERSION " : écoute sur le port TCP %d", port);
   if (!machineAddresses.empty()) logf("adresse(s) de cette machine : %s", machineAddresses.c_str());
   logf("réglages imposés aux jeux%s : %s", haveConfig ? (" (" + config + ")").c_str() : " (par défaut, pas de scr_relay.ini)",
        paramsText().c_str());
