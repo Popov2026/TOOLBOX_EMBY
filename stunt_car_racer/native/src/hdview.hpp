@@ -29,9 +29,9 @@ struct OppPose {
 struct HdParams {
   double focal = 259, cx = 153.2, cy = 82.3;   // projection d'origine (calée sur le jeu)
   double aspect = 0.895;                       // focale verticale / horizontale
-  double eyeSide = -27, pitchOffset = -0.0056, yawOffset = 0;    // décalage latéral de l'œil, inclinaison de la caméra (rad)
+  double eyeSide = -4, pitchOffset = -0.0056, yawOffset = 0;     // décalage latéral de l'œil, inclinaison de la caméra (rad)
   double hScale = 0.261;                    // hauteur brute -> unités de géométrie
-  double eyeUp = 40, eyeFwd = -27;          // œil par rapport à la position de la voiture (unités de géométrie)
+  double eyeUp = 34, eyeFwd = -27;          // œil par rapport à la voiture (calé sur les bords de route d'origine, 4 circuits)
   int pitchSign = 1, rollSign = 1;
   bool cockpit = true;                     // incruster le cockpit d'origine
   double interpDelay = 1.0;                // retard d'affichage en ticks (interpolation)
