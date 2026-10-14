@@ -594,6 +594,14 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
   for (auto &g : ghosts) {   // autres joueurs (course à plusieurs) et place de leur nom au-dessus de la voiture
     g.onScreen = false;
     if (!g.pose.valid) continue;
+    // hauteur envoyée : point de référence de la physique, en général 40 à 220 unités sous la route
+    // dessinée ; voiture posée sur la route (sauf en l'air, ou tombée loin sous une route qui la survole)
+    {
+      const int keepHint = hint_;
+      double s;
+      if (surfaceRaw(tracks_[track & 7], g.pose.x, g.pose.z, g.pose.yRaw, s) && s > g.pose.yRaw && s - g.pose.yRaw < 260) g.pose.yRaw = s;
+      hint_ = keepHint;
+    }
     addCar(g.pose, HSCALE, m, true);
     if (g.boost) addFlames(g.pose, HSCALE, int(&g - ghosts.data()));
     Vec3 top{g.pose.x, g.pose.yRaw * HSCALE + 90, g.pose.z};
@@ -624,6 +632,7 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
   double T = playTime(t);
   wind_ += (windTarget_ - wind_) * 0.08;   // lissé (affichage à 60 i/s)
   Pose p = poseAt(T);
+  if (viewSide != 0) { p.x += std::cos(p.yaw) * viewSide; p.z -= std::sin(p.yaw) * viewSide; }   // vue décalée sur le côté
   int track = snaps_.back().track;
   OppPose opp = opponentAt(T);
   {   // roues de l'adversaire : distance parcourue depuis l'image précédente, dans le sens de la marche

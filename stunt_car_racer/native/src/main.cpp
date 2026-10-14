@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v39"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v40"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -544,6 +544,7 @@ int main(int argc, char **argv) {
     uint16_t dropMode = 0;
     double sideApplied = 0, sideTarget = 0;   // part du décalage déjà appliquée à la voiture (le reste est ajouté à la position envoyée)
     uint32_t sideFrame = 0;
+    double viewSide = 0;      // décalage de la vue (et de la position envoyée) : la grue arrive du côté de sa place
   } gr;
   int gTrack = 0, gLaps = 3;      // choix de l'organisateur
   auto trackName = [&](int t) {
@@ -913,23 +914,39 @@ int main(int argc, char **argv) {
     // voiture est placée au milieu de sa moitié de route (gauche ou droite), mesuré sur le tracé du circuit,
     // progressivement (15 unités par image). D'ici là, le décalage restant est ajouté à la position envoyée :
     // les autres voient la grille dès le départ.
-    auto gridShift = [&]() -> double {   // décalage latéral encore à faire pour être sur sa file
-      if (trackList.empty()) return 0;
+    // position en travers de la route (+ : à droite du milieu) et place visée sur la grille
+    auto gridLat = [&](double &lat, double &target) -> bool {
+      if (trackList.empty()) return false;
       const Track &T = trackList[size_t(m->b(0x1112d) & 7) % trackList.size()];
       const int ns = int(T.secs.size());
       int piece = m->b(0x10906), sec = m->b(0x108f4), first = -1;
       for (int i = 0; i < ns; i++) if (T.secs[size_t(i)].piece == piece) { first = i; break; }
-      if (first < 0) return 0;
+      if (first < 0) return false;
       int g = ((first - 1 + sec) % ns + ns) % ns;
       const Section &A = T.secs[size_t(g)], &B = T.secs[size_t((g + 1) % ns)];
       double f = m->b(0x108f5) / 256.0;
       double lx = A.lx + (B.lx - A.lx) * f, lz = A.lz + (B.lz - A.lz) * f, rx = A.rx + (B.rx - A.rx) * f, rz = A.rz + (B.rz - A.rz) * f;
       double w = std::hypot(rx - lx, rz - lz);
-      if (w < 1) return 0;
+      if (w < 1) return false;
       Pose p = HdView::poseFromState(m->displayedCarState());
-      double lat = ((p.x - (lx + rx) / 2) * (rx - lx) + (p.z - (lz + rz) / 2) * (rz - lz)) / w;   // + : vers la droite
-      double target = (gr.slot % 2 ? 1 : -1) * w * 0.35;   // bien à droite / à gauche (bord de la route à 0,5)
-      return target - lat;
+      lat = ((p.x - (lx + rx) / 2) * (rx - lx) + (p.z - (lz + rz) / 2) * (rz - lz)) / w;
+      target = (gr.slot % 2 ? 1 : -1) * w * 0.35;   // bien à droite / à gauche (bord de la route à 0,5)
+      return true;
+    };
+    auto gridShift = [&]() -> double {   // décalage latéral encore à faire pour être sur sa file
+      double lat, target;
+      return gridLat(lat, target) ? target - lat : 0;
+    };
+    // pendant la descente, la grue du jeu amène la voiture de la droite de la route vers le milieu (pose
+    // à ~40 à droite du milieu) ; on montre (et on envoie aux autres) cette trajectoire décalée sur sa
+    // place, en miroir pour une place à gauche : la voiture arrive de son côté sans traverser les autres.
+    // Après l'atterrissage : seulement la part du glissement vers sa place pas encore faite.
+    auto craneView = [&]() -> double {
+      if (gr.sideDone) return gr.sideTarget - gr.sideApplied;
+      double lat, target;
+      if (!gridLat(lat, target)) return 0;
+      const double LAND = 40, sign = gr.slot % 2 ? 1 : -1;
+      return target + sign * (lat - LAND) - lat;
     };
     if (gr.active && gr.racing && !gr.sideDone && m->w(0x109d4) != gr.dropMode) {
       gr.sideDone = true;
@@ -968,7 +985,7 @@ int main(int argc, char **argv) {
         }
         Pose p = HdView::poseFromState(m->displayedCarState());
         {   // part du décalage de grille pas encore appliquée à la voiture : ajoutée à la position envoyée
-          double rest = gr.sideDone ? gr.sideTarget - gr.sideApplied : gridShift();
+          double rest = craneView();
           p.x += std::cos(p.yaw) * rest; p.z -= std::sin(p.yaw) * rest;
         }
         float v[7] = {float(p.x), float(p.y), float(p.z), float(p.yaw), float(p.pitch), float(p.roll), float(gr.total / ns)};
@@ -1297,6 +1314,7 @@ int main(int argc, char **argv) {
           view->ghosts.push_back(g);
         }
       }
+      view->viewSide = gr.active ? craneView() : 0;   // course à plusieurs : grue du côté de sa place
       view->render(*m, view->now() + acc / framePeriod, hdPixels.data(), o.hdW, o.hdH);
       SDL_UpdateTexture(texHd, nullptr, hdPixels.data(), o.hdW * 4);
       SDL_RenderClear(ren);

@@ -73,6 +73,7 @@ class HdView {
   // remplies par l'appelant avant render() ; render() calcule la place de leur nom à l'écran
   struct Ghost { OppPose pose; std::string name; bool boost = false; double sx = 0, sy = 0, dist = 0; bool onScreen = false; };
   std::vector<Ghost> ghosts;
+  double viewSide = 0;   // décalage latéral de la vue (+ : à droite) : départ de la grue du côté de sa place
   // voiture d'un joueur (état de la physique, comme poseFromState) -> repère de voiture affichable
   OppPose ghostFromPose(const Pose &p) const;
 
