@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v42"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v43"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -1310,6 +1310,7 @@ int main(int argc, char **argv) {
           HdView::Ghost g;
           g.pose = view->ghostFromPose(ps);
           g.boost = (b->flags & 2) != 0;
+          g.id = kv.first;
           for (auto &gm : net.groupMembers()) if (gm.id == kv.first) g.name = gm.name;
           view->ghosts.push_back(g);
         }

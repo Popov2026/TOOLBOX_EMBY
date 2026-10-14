@@ -71,7 +71,7 @@ class HdView {
 
   // course à plusieurs : voitures des autres joueurs (fantômes : dessinées, sans collision),
   // remplies par l'appelant avant render() ; render() calcule la place de leur nom à l'écran
-  struct Ghost { OppPose pose; std::string name; bool boost = false; double sx = 0, sy = 0, dist = 0; bool onScreen = false; };
+  struct Ghost { OppPose pose; std::string name; bool boost = false; double sx = 0, sy = 0, dist = 0; bool onScreen = false; uint32_t id = 0; };
   std::vector<Ghost> ghosts;
   double viewSide = 0;   // décalage latéral de la vue (+ : à droite) : départ de la grue du côté de sa place
   // voiture d'un joueur (état de la physique, comme poseFromState) -> repère de voiture affichable
@@ -88,6 +88,8 @@ class HdView {
   // roues de l'adversaire : distance parcourue (unités du monde) -> angle de rotation
   double oppRoll_ = 0, oppRollStep_ = 0, oppRollContrast_ = 1;   // angle affiché, pas par image, netteté
   OppPose oppPrev_;
+  struct GhostWheels { OppPose prev; double roll = 0; };   // roues de chaque autre joueur (course à plusieurs)
+  std::map<uint32_t, GhostWheels> ghostWheels_;
   bool oppHave_ = false;
   void addCar(const OppPose &o, double hs, const Machine &m, bool closed = false);   // closed : flanc gauche dessiné aussi
   void addFlames(const OppPose &o, double hs, int seed);   // flammes du boost d'une voiture fantôme

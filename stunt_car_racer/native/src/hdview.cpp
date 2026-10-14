@@ -610,7 +610,24 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
       if (surfaceRaw(tracks_[track & 7], g.pose.x, g.pose.z, g.pose.yRaw, s) && s > g.pose.yRaw && s - g.pose.yRaw < 260) g.pose.yRaw = s;
       hint_ = keepHint;
     }
-    addCar(g.pose, HSCALE, m, true);
+    {   // roues : rotation propre à chaque joueur, selon la distance parcourue depuis l'image précédente
+      GhostWheels &gw = ghostWheels_[g.id];
+      double step = 0;
+      if (gw.prev.valid) {
+        double dx = g.pose.x - gw.prev.x, dy = (g.pose.yRaw - gw.prev.yRaw) * HSCALE, dz = g.pose.z - gw.prev.z;
+        step = dx * g.pose.fwd.x + dy * g.pose.fwd.y + dz * g.pose.fwd.z;
+        if (std::fabs(step) > 400) step = 0;   // saut (grue, nouveau départ)
+      }
+      gw.prev = g.pose;
+      const double CAP = 0.2, dphi = step / (25 * 0.55);
+      const double keepRoll = oppRoll_, keepStep = oppRollStep_, keepContrast = oppRollContrast_;
+      oppRollStep_ = std::clamp(dphi, -CAP, CAP);
+      oppRollContrast_ = std::clamp(1 - (std::fabs(dphi) - CAP) / 4, 0.6, 1.0);
+      gw.roll = std::fmod(gw.roll + oppRollStep_, 2 * 3.14159265358979 * 1000);
+      oppRoll_ = gw.roll;
+      addCar(g.pose, HSCALE, m, true);
+      oppRoll_ = keepRoll; oppRollStep_ = keepStep; oppRollContrast_ = keepContrast;
+    }
     if (g.boost) addFlames(g.pose, HSCALE, int(&g - ghosts.data()));
     Vec3 top{g.pose.x, g.pose.yRaw * HSCALE + 90, g.pose.z};
     Vec3 q = r3d_.toCam(top);
