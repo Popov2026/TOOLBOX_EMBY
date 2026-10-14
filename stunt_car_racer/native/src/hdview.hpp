@@ -88,7 +88,7 @@ class HdView {
   double oppRoll_ = 0, oppRollStep_ = 0, oppRollContrast_ = 1;   // angle affiché, pas par image, netteté
   OppPose oppPrev_;
   bool oppHave_ = false;
-  void addCar(const OppPose &o, double hs, const Machine &m);
+  void addCar(const OppPose &o, double hs, const Machine &m, bool closed = false);   // closed : flanc gauche dessiné aussi
   void addFlames(const OppPose &o, double hs, int seed);   // flammes du boost d'une voiture fantôme
   uint32_t flameTick_ = 0;
   std::vector<Track> tracks_;

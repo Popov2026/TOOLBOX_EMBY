@@ -331,8 +331,10 @@ void HdView::addFlames(const OppPose &o, double hs, int seed) {
   for (int side = -1; side <= 1; side += 2)
     for (int k = 0; k < 4; k++) {
       h = h * 1103515245u + 12345u;
-      const double x0 = side * 40, y0 = 52, z0 = 128 - k * 22;   // échappements le long du moteur, sur le capot
-      double up = 34 + double((h >> 16) % 26), back = 18 + double((h >> 10) % 16), w = 6 + double((h >> 8) % 3);
+      // échappements le long du moteur, sortant du toit de la cabine (pente : y 45 à l'avant z 150,
+      // 99 à l'arrière z -95, demi-largeur 37) ; pied légèrement enfoncé, caché par la carrosserie
+      const double z0 = 128 - k * 22, x0 = side * 24, y0 = 45 + 54 * (150 - z0) / 245 - 3;
+      double up = 34 + double((h >> 16) % 26), back = 14 + double((h >> 10) % 12), w = 6 + double((h >> 8) % 3);
       // jet en dégradé : jaune à la sortie de l'échappement, orange au milieu, rouge à la pointe
       // (tranches successives d'une pyramide qui s'affine vers le haut, l'arrière et l'extérieur)
       auto grad = [](double s, double flick) {
@@ -347,7 +349,7 @@ void HdView::addFlames(const OppPose &o, double hs, int seed) {
         return col;
       };
       const double flick = 0.88 + 0.12 * double((h >> 3) % 8) / 7;   // vacillement de la luminosité
-      const double tx = side * w * 1.5, ty = up, tz = -back;            // pointe, relative à la sortie
+      const double tx = side * up * 0.8, ty = up, tz = -back;           // pointe : inclinée vers l'extérieur (en V)
       const int bands = 8;
       auto ring = [&](double s, Vec3 out[4]) {
         double wd = w * (1 - s), cx = x0 + tx * s, cy = y0 + ty * s, cz = z0 + tz * s;
@@ -409,7 +411,7 @@ OppPose HdView::opponentAt(double t) const {
 }
 
 // voiture adverse en polygones : châssis, nez, arceau, moteur et 4 roues (couleurs de la palette du jeu)
-void HdView::addCar(const OppPose &o, double hs, const Machine &m) {
+void HdView::addCar(const OppPose &o, double hs, const Machine &m, bool closed) {
   const Vec3 r = o.right, f = o.fwd;
   Vec3 u{f.y * r.z - f.z * r.y, f.z * r.x - f.x * r.z, f.x * r.y - f.y * r.x};   // haut = avant × droite
   if (u.y < 0) u = {-u.x, -u.y, -u.z};
@@ -480,7 +482,9 @@ void HdView::addCar(const OppPose &o, double hs, const Machine &m) {
     Vec3 left[4] = {rb0, rt0, ft0, fb0}, right[4] = {rb1, fb1, ft1, rt1}, bottom[4] = {rb0, fb0, fb1, rb1};
     paint(rear, 4, red, r, u, x0, x1, yb, yr); r3d_.poly(front, 4, red); paint(top, 4, pink, r, f, x0, x1, zrt, zf);
     // comme l'original : seul le flanc droit (rose) est dessiné, jamais le gauche
-    paint(right, 4, pink, f, u, zr, zf, yb, yr); r3d_.poly(bottom, 4, black); (void)left;
+    // (voitures des autres joueurs : carrosserie fermée, on ne voit pas les flammes à travers)
+    paint(right, 4, pink, f, u, zr, zf, yb, yr); r3d_.poly(bottom, 4, black);
+    if (closed) paint(left, 4, pink, f, u, zr, zf, yb, yr);
   }
   (void)dark; (void)grey;
 }
@@ -590,7 +594,7 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
   for (auto &g : ghosts) {   // autres joueurs (course à plusieurs) et place de leur nom au-dessus de la voiture
     g.onScreen = false;
     if (!g.pose.valid) continue;
-    addCar(g.pose, HSCALE, m);
+    addCar(g.pose, HSCALE, m, true);
     if (g.boost) addFlames(g.pose, HSCALE, int(&g - ghosts.data()));
     Vec3 top{g.pose.x, g.pose.yRaw * HSCALE + 90, g.pose.z};
     Vec3 q = r3d_.toCam(top);
