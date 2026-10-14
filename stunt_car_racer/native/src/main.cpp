@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v40"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v41"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -930,7 +930,7 @@ int main(int argc, char **argv) {
       if (w < 1) return false;
       Pose p = HdView::poseFromState(m->displayedCarState());
       lat = ((p.x - (lx + rx) / 2) * (rx - lx) + (p.z - (lz + rz) / 2) * (rz - lz)) / w;
-      target = (gr.slot % 2 ? 1 : -1) * w * 0.35;   // bien à droite / à gauche (bord de la route à 0,5)
+      target = (gr.slot % 2 ? 1 : -1) * w * 0.28;   // à droite / à gauche, assez loin du bord (bord de la route à 0,5)
       return true;
     };
     auto gridShift = [&]() -> double {   // décalage latéral encore à faire pour être sur sa file
@@ -950,7 +950,7 @@ int main(int argc, char **argv) {
     };
     if (gr.active && gr.racing && !gr.sideDone && m->w(0x109d4) != gr.dropMode) {
       gr.sideDone = true;
-      gr.sideTarget = gridShift();
+      gr.sideTarget = gridShift() + 11;   // la voiture glisse encore de 9 à 13 vers la gauche en se posant (8 circuits)
       if (std::getenv("SCR_GRIDLOG")) std::fprintf(stderr, "grille : place %d, atterrissage à %.1f s, décalage %.0f\n", gr.slot, NetLink::clock() - gr.goAt, gr.sideTarget);
     }
     if (gr.active && gr.racing && gr.sideDone && std::fabs(gr.sideTarget - gr.sideApplied) > 0.5 && m->frames() != gr.sideFrame) {

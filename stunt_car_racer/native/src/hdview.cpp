@@ -557,6 +557,14 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
     // dessus de la route (pas pour les sections verticales des sauts), couleur alternée par pièce
     double horiz = std::hypot((B.lx + B.rx - A.lx - A.rx) * 0.5, (B.lz + B.rz - A.lz - A.rz) * 0.5);
     if (horiz < 1) continue;
+    // pan d'un saut (marche, face de la rampe, pont levé) : pente de plus de 50° -> noir, comme le
+    // rendu d'origine (les pentes où l'on roule restent sous 30° : Roller Coaster, Ski Jump)
+    if (std::fabs((B.ly + B.ry - A.ly - A.ry) * 0.5) * HSCALE > 1.2 * horiz) {
+      Vec3 f1[3] = {aL, aR, bR}, f2[3] = {aL, bR, bL};
+      r3d_.poly(f1, 3, pal(0));
+      r3d_.poly(f2, 3, pal(0));
+      continue;
+    }
     uint32_t rc = (A.piece & 1) ? road2 : road;
     auto lerp = [](const Vec3 &a, const Vec3 &b, double t) { return Vec3{a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t}; };
     Vec3 aL1 = lerp(aL, aR, lw), aR1 = lerp(aR, aL, lw), bL1 = lerp(bL, bR, lw), bR1 = lerp(bR, bL, lw);
