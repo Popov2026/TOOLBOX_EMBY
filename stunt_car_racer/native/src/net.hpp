@@ -62,7 +62,8 @@ class NetLink {
   bool joinDirect(const std::string &hostPort);            // adresse[:port]
   // serveur relais : code vide = automatique (premier joueur disponible) ; sinon salle privée,
   // dont les joueurs présents arrivent dans peers() (choix par connectPeer)
-  bool joinRelay(const std::string &server, const std::string &room);
+  // display : nom montré à la place de l'adresse dans les messages (vide : l'adresse)
+  bool joinRelay(const std::string &server, const std::string &room, const std::string &display = "");
   bool relayRoom() const { return mode_ == Mode::Relay && !room_.empty(); }
   const std::string &room() const { return room_; }
 
@@ -119,6 +120,7 @@ class NetLink {
   Sock listen_ = BAD, tcp_ = BAD, udp_ = BAD;
   bool connecting_ = false;
   std::string version_, name_, peerName_, room_, info_, error_, tuning_, peerTuning_, serverParams_;
+  std::string shown_;   // nom montré à la place de l'adresse du serveur
   uint32_t hash_ = 0;
   int port_ = NET_PORT;
   std::vector<uint8_t> in_, out_;    // tampons TCP (trames)

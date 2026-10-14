@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v36"
+#define SCR_VERSION "v37"
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -62,6 +62,18 @@ struct Options {
   double speed = 1;
   Tuning tuning;
 };
+
+// serveur relais par défaut, quand ni la ligne de commande ni scr.ini n'en donnent un ; adresse
+// stockée chiffrée (absente du texte du programme) et jamais affichée
+static std::string defaultRelay() {
+  static const uint8_t enc[] = {0x37, 0x06, 0x07, 0xe2, 0xef, 0xe9, 0xc9, 0xd1, 0xa7, 0xe1, 0xbf, 0x8a};
+  std::string r;
+  for (size_t i = 0; i < sizeof enc; i++) r += char(enc[i] ^ uint8_t(0x5a + 13 * i));
+  return r + ":" + std::to_string(NET_PORT);
+}
+static const char *const DEFAULT_RELAY_NAME = "serveur officiel";
+static std::string relayAddr(const std::string &configured) { return configured.empty() ? defaultRelay() : configured; }
+static std::string relayShown(const std::string &configured) { return configured.empty() ? DEFAULT_RELAY_NAME : ""; }
 
 void setOption(Options &o, const std::string &key, const std::string &val) {
   auto d = [&] { return std::atof(val.c_str()); };
@@ -391,7 +403,7 @@ int main(int argc, char **argv) {
   if (o.netMode == "host") net.hostLan();
   else if (o.netMode == "joinlan") net.joinLan();
   else if (o.netMode == "join") net.joinDirect(o.netArg);
-  else if (o.netMode == "online") net.joinRelay(o.relay, o.netArg == "auto" || o.netArg == "AUTO" ? "" : o.netArg);
+  else if (o.netMode == "online") net.joinRelay(relayAddr(o.relay), o.netArg == "auto" || o.netArg == "AUTO" ? "" : o.netArg, relayShown(o.relay));
 
   std::unique_ptr<HdView> view;
   bool hd = o.hd, highDetail = o.highDetail;
@@ -571,9 +583,9 @@ int main(int argc, char **argv) {
           it.push_back({"Premier joueur disponible", 5, {}});
           it.push_back({"Salle privée (code)", 1, {}});
         }
-        if (!o.relay.empty()) it.push_back({"Tester à nouveau le serveur", 6, {}});
+        it.push_back({"Tester à nouveau le serveur", 6, {}});
         it.push_back({"Pseudo : " + o.playerName + "  (changer)", 14, {}});
-        it.push_back({o.relay.empty() ? "Saisir l'adresse du serveur" : "Changer l'adresse du serveur", 7, {}});
+        it.push_back({"Changer l'adresse du serveur", 7, {}});
       }
     } else {
       bool waiting = net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting;
@@ -604,12 +616,12 @@ int main(int argc, char **argv) {
   auto chooseItem = [&](const MenuItem &mi) {
     switch (mi.kind) {
       case 0: net.connectPeer(mi.peer); break;
-      case 1: if (!o.relay.empty()) { typing = Typing::Code; typed.clear(); SDL_StartTextInput(); } break;
+      case 1: typing = Typing::Code; typed.clear(); SDL_StartTextInput(); break;
       case 2: typing = Typing::Ip; typed.clear(); SDL_StartTextInput(); break;
       case 3: cancelLink(); break;
       case 4: net.lobby(); break;
-      case 5: if (!o.relay.empty()) net.joinRelay(o.relay, ""); menuSel = 0; break;
-      case 6: probe.start(o.relay); menuSel = 0; break;
+      case 5: net.joinRelay(relayAddr(o.relay), "", relayShown(o.relay)); menuSel = 0; break;
+      case 6: probe.start(relayAddr(o.relay)); menuSel = 0; break;
       case 7: typing = Typing::Server; typed = o.relay; SDL_StartTextInput(); break;
       case 8: if (net.canChat()) { typing = Typing::Chat; typed.clear(); SDL_StartTextInput(); } break;
       case 9: net.groupCommand("ENTER"); menuSel = 0; break;
@@ -654,7 +666,7 @@ int main(int argc, char **argv) {
       bool open = (m->linkHeld() && cancelUntil < 0 && !net.connected()) || gr.menu;
       if (open && !menuOpen && !gr.menu) {   // le joueur vient de choisir « Computer Link » ou « Online Multiplayer »
         menuSel = 0;
-        if (online()) { if (net.mode() == NetLink::Mode::Lobby) net.close(); if (!net.active()) probe.start(o.relay); }
+        if (online()) { if (net.mode() == NetLink::Mode::Lobby) net.close(); if (!net.active()) probe.start(relayAddr(o.relay)); }
         else if (!net.active() || net.mode() == NetLink::Mode::Relay) net.lobby();
       }
       if (!open && menuOpen && typing != Typing::None && typing != Typing::Chat) { typing = Typing::None; SDL_StopTextInput(); }
@@ -691,19 +703,19 @@ int main(int argc, char **argv) {
               std::mt19937 rng(unsigned(std::chrono::steady_clock::now().time_since_epoch().count()));
               typed = std::to_string(1000 + rng() % 9000);
             }
-            net.joinRelay(o.relay, typed);
+            net.joinRelay(relayAddr(o.relay), typed, relayShown(o.relay));
           } else if (typing == Typing::Pseudo) {   // pseudo : enregistré dans scr.ini, annoncé aux autres
             std::string p = cleanPseudo(typed);
             if (!p.empty()) { o.playerName = p; saveIniValue(ini, {"nom", "name"}, p, "pseudo (multijoueur)"); net.setName(p); }
           } else if (typing == Typing::Chat) {   // message envoyé ; F9 pour le suivant
             net.sendChat(typed);
           } else if (typing == Typing::Server) {   // adresse du serveur relais : enregistrée dans scr.ini
-            if (!typed.empty()) {
-              if (typed.find(':') == std::string::npos) typed += ":" + std::to_string(NET_PORT);
+            if (!typed.empty() && typed.find(':') == std::string::npos) typed += ":" + std::to_string(NET_PORT);
+            if (typed != o.relay) {   // vide : retour au serveur par défaut
               o.relay = typed;
               saveRelay(ini, typed);
-              probe.start(o.relay);
             }
+            probe.start(relayAddr(o.relay));
           } else if (!typed.empty()) net.joinDirect(typed);
           typing = Typing::None; SDL_StopTextInput(); menuSel = 0;
         }
@@ -1168,7 +1180,7 @@ int main(int argc, char **argv) {
           st = "Réglages du serveur : " + paramsSummary(probe.params());
           stCol = 0xffc0c0c0u;
         }
-        lines.push_back({o.relay.empty() ? "Aucun serveur indiqué (scr.ini : relais =)" : "Serveur : " + o.relay,
+        lines.push_back({"Serveur : " + (o.relay.empty() ? std::string(DEFAULT_RELAY_NAME) : o.relay),
                          0xffc0c0c0u, 0xe0202020u});
       }
       if (net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting)

@@ -76,7 +76,7 @@ void NetLink::closeSock(Sock &s) {
 void NetLink::close(const std::string &why) {
   if (tcp_ != BAD && helloOk_) { frame(NF_BYE, why); flush(); }
   closeSock(tcp_); closeSock(listen_); closeSock(udp_);
-  mode_ = Mode::Off; state_ = State::Off; connecting_ = false;
+  mode_ = Mode::Off; state_ = State::Off; connecting_ = false; shown_.clear();
   in_.clear(); out_.clear(); rx_.clear(); dataOut_.clear(); peers_.clear();
   helloSent_ = helloOk_ = relayPaired_ = master_ = waitedFirst_ = false;
   ping_ = -1; peerName_.clear(); peerTuning_.clear(); serverParams_.clear(); chat_.clear();
@@ -295,28 +295,30 @@ bool NetLink::joinDirect(const std::string &hostPort) {
   return connectTo(host, port);
 }
 
-bool NetLink::joinRelay(const std::string &server, const std::string &room) {
+bool NetLink::joinRelay(const std::string &server, const std::string &room, const std::string &display) {
   close();
+  shown_ = display;
   mode_ = Mode::Relay; room_ = room; started_ = now();
   for (auto &ch : room_) ch = char(std::toupper(static_cast<unsigned char>(ch)));
   std::string host; int port = NET_PORT;
   if (server.empty()) { fail("aucun serveur relais configuré (scr.ini : relais = adresse:port)"); return false; }
-  if (!splitHostPort(server, host, port)) { fail("adresse du relais invalide : " + server); return false; }
+  if (!splitHostPort(server, host, port)) { fail("adresse du relais invalide : " + (shown_.empty() ? server : shown_)); return false; }
   return connectTo(host, port);
 }
 
 bool NetLink::connectTo(const std::string &host, int port) {
   addrinfo hints{}, *res = nullptr;
   hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM;
-  if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &res) != 0 || !res) { fail("adresse introuvable : " + host); return false; }
+  const std::string nm = shown_.empty() ? host : shown_;
+  if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &res) != 0 || !res) { fail("adresse introuvable : " + nm); return false; }
   tcp_ = Sock(socket(res->ai_family, res->ai_socktype, res->ai_protocol));
   if (tcp_ == BAD) { freeaddrinfo(res); fail("création de la connexion impossible"); return false; }
   nonBlock(tcp_);
   int r = ::connect(tcp_, res->ai_addr, socklen_t(res->ai_addrlen));
   freeaddrinfo(res);
-  if (r != 0 && !SCR_WOULDBLOCK(sockErr())) { fail("connexion refusée par " + host); return false; }
+  if (r != 0 && !SCR_WOULDBLOCK(sockErr())) { fail("connexion refusée par " + nm); return false; }
   connecting_ = true; state_ = State::Connecting; started_ = now();
-  info_ = host + ":" + std::to_string(port);
+  info_ = shown_.empty() ? host + ":" + std::to_string(port) : shown_;
   return true;
 }
 
