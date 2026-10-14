@@ -34,7 +34,7 @@ struct HdParams {
   double eyeUp = 34, eyeFwd = -27;          // œil par rapport à la voiture (calé sur les bords de route d'origine, 4 circuits)
   int pitchSign = 1, rollSign = 1;
   bool cockpit = true;                     // incruster le cockpit d'origine
-  double interpDelay = 1.0;                // retard d'affichage en ticks (interpolation)
+  double interpDelay = 0.5;                // retard d'affichage en ticks (interpolation ; 0,5 : bords de route au même endroit que l'original en roulant)
   double minClearance = 18;                // l'œil reste au moins à cette hauteur au-dessus de la route
   bool builtinFlames = true;               // flammes du boost : sprites d'origine agrandis en HD
   bool flameImages = false;                // utiliser les images de flammes du dossier hd/ (sinon ignorées)

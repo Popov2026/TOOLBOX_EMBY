@@ -231,8 +231,10 @@ Pose HdView::poseAt(double t) const {
   if (t <= snaps_.front().t) return snaps_.front().p;
   for (size_t i = 0; i + 1 < snaps_.size(); i++) {
     const Snap &a = snaps_[i], &b = snaps_[i + 1];
-    if (t < b.t) {
-      double k = (t - a.t) / (b.t - a.t);
+    // au-delà du dernier état connu (retard court) : trajectoire prolongée d'au plus 0,6 intervalle
+    const bool last = i + 2 == snaps_.size();
+    if (t < b.t || last) {
+      double k = std::min((t - a.t) / (b.t - a.t), 1.6);
       double d = std::fabs(b.p.x - a.p.x) + std::fabs(b.p.y - a.p.y) + std::fabs(b.p.z - a.p.z);
       if (d > 3000 || a.track != b.track) return k < 0.5 ? a.p : b.p;   // grue / changement de circuit
       Pose p;
