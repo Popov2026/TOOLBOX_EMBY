@@ -58,6 +58,7 @@ class Machine {
   // Échap dans les menus du jeu : revenir au menu précédent ; faux si le menu affiché n'a pas de retour
   bool menuBack();
   bool inMenu() const { return menuId_ >= 0; }
+  int menuId() const { return menuId_; }   // menu du jeu affiché ($10 : départ, 0 : saison...), -1 : aucun
   // menu de départ : dernier choix (0 Single Player League, 1 Multiplayer - Local,
   // 2 Computer Link - Local LAN, 3 Online Multiplayer ; -1 aucun). 2 et 3 mènent au « Computer Link ».
   int selectChoice() const { return selectChoice_; }

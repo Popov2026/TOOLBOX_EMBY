@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v47"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v48"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -399,6 +399,9 @@ int main(int argc, char **argv) {
   uint32_t gameHash = 0;
   std::string note;          // message bref du jeu dans le bandeau (circuits changés...)
   double noteUntil = 0;
+  double quitAsk = 0;        // Échap au titre : quitter si on rappuie avant cette heure
+  bool seenMenu = false;     // un menu du jeu a été affiché depuis le démarrage de la machine (sinon : titre)
+  const Machine *seenFor = nullptr;
   try {
     disk = readFile(o.disk);
     m = start(disk, o, track, soloSet);
@@ -862,9 +865,32 @@ int main(int argc, char **argv) {
         // Échap dans un menu du jeu : retour au menu précédent (la touche n'est alors pas transmise au jeu)
         // (pendant « NAME? », elle l'est : elle réveille la lecture du clavier qui attend une touche)
         bool back = down && sc == SDL_SCANCODE_ESCAPE && !menuOpen && (ev.key.repeat || m->menuBack()) && m->inMenu();
+        // Échap là où le jeu d'origine n'a pas de retour : titre et menu de départ -> quitter (après
+        // confirmation) ; menu de saison -> retour au titre ; entraînement direct -> titre ; course à
+        // plusieurs -> abandon (menu du groupe). En course normale, Échap garde son effet d'origine.
+        if (down && !ev.key.repeat && sc == SDL_SCANCODE_ESCAPE && !menuOpen && !back && m->ram[0x4537a] == 0 && !net.connected()) {
+          const double now = NetLink::clock();
+          const int id = m->menuId();
+          const bool racingNow = view && view->racing();
+          bool handled = true;
+          if (gr.active) {
+            if (gr.racing && !gr.finished) { gr.finished = gr.out = true; gr.finishSecs = now - gr.goAt; net.groupCommand("OUT"); }
+            else handled = false;
+          } else if (id == 0) {   // « Hall of Fame / Practise / Start the Racing Season / Load-Save »
+            restartMachine(-1); track = -1;
+          } else if (track >= 0 && racingNow) {   // entraînement lancé directement (--track, Page préc./suiv.)
+            track = -1; restartMachine(-1);
+          } else if (id == 0x10 || (id < 0 && !seenMenu && !racingNow)) {   // titre, menu de départ
+            if (now < quitAsk) running = false;
+            else { quitAsk = now + 3; note = "Échap encore une fois pour quitter le jeu"; noteUntil = quitAsk; }
+          } else handled = false;
+          if (handled) continue;
+        }
         if (int st = stScancode(sc)) if ((!menuOpen || !down) && !back) m->setKey(st, down);
       }
     }
+    if (m.get() != seenFor) { seenFor = m.get(); seenMenu = false; }
+    if (m->inMenu()) seenMenu = true;
     Joystick j;
     j.up = keys[SDL_SCANCODE_UP]; j.down = keys[SDL_SCANCODE_DOWN];
     j.left = keys[SDL_SCANCODE_LEFT]; j.right = keys[SDL_SCANCODE_RIGHT];
