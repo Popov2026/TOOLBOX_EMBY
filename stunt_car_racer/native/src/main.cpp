@@ -12,7 +12,8 @@
 //
 // Touches : flèches = joystick (haut accélère), Espace/Ctrl/Maj/Alt = bouton (boost),
 //           clavier ST pour les menus, F4/F11/Alt+Entrée plein écran, F12 quitter, PageUp/PageDown
-//           circuit précédent/suivant (entraînement), F5 détails élevés, F6 recommencer.
+//           circuit précédent/suivant (entraînement), F5 détails élevés, F6 recommencer,
+//           F7 circuits d'origine / circuits TNT.
 #include <SDL.h>
 
 #include <algorithm>
@@ -29,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v46"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v47"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -394,7 +395,10 @@ int main(int argc, char **argv) {
     }
     if (o.tnt && !haveTnt) std::fprintf(stderr, "circuits = tnt demandé, mais fichier SCR-TNT introuvable : circuits d'origine\n");
   }
-  const TrackSet *soloSet = o.tnt && haveTnt ? &tntSet : nullptr;   // jeu complet et entraînement
+  const TrackSet *soloSet = o.tnt && haveTnt ? &tntSet : nullptr;   // jeu complet et entraînement (F7 : changer)
+  uint32_t gameHash = 0;
+  std::string note;          // message bref du jeu dans le bandeau (circuits changés...)
+  double noteUntil = 0;
   try {
     disk = readFile(o.disk);
     m = start(disk, o, track, soloSet);
@@ -410,6 +414,7 @@ int main(int argc, char **argv) {
     // texte et l'esclave adopte ceux du maître pendant la partie
     uint32_t h = fnv1a(m->image().data(), m->image().size());
     if (soloSet) h = fnv1a(tntSet.data.data(), tntSet.data.size(), h);   // duel : les deux avec les mêmes circuits
+    gameHash = h;
     std::string nm = cleanPseudo(o.playerName);
     if (nm.empty()) { const char *u = std::getenv("USERNAME"); if (!u) u = std::getenv("USER"); nm = cleanPseudo(u ? u : ""); }
     if (nm.empty()) nm = "Joueur";
@@ -822,12 +827,33 @@ int main(int argc, char **argv) {
             highDetail = !highDetail;
             view->params.highDetail = highDetail;
             if (highDetail && !hd) { hd = true; applyMode(true); }
-          } else if (sc == SDL_SCANCODE_F6 || ((sc == SDL_SCANCODE_PAGEUP || sc == SDL_SCANCODE_PAGEDOWN) && track >= 0)) {
-            if (sc == SDL_SCANCODE_PAGEUP) track = (track + 7) % 8;
-            if (sc == SDL_SCANCODE_PAGEDOWN) track = (track + 1) % 8;
+          } else if (sc == SDL_SCANCODE_F7 && !haveTnt) {
+            note = "Circuits TNT : fichier SCR-TNT introuvable (dossier TNT à côté de scr.exe)"; noteUntil = NetLink::clock() + 5;
+          } else if (sc == SDL_SCANCODE_F6 || (sc == SDL_SCANCODE_F7 && !net.inGroup() && !gr.active) ||
+                     ((sc == SDL_SCANCODE_PAGEUP || sc == SDL_SCANCODE_PAGEDOWN) && track >= 0)) {
+            // F7 : circuits d'origine <-> circuits TNT (enregistré dans scr.ini) ; entraînement : les
+            // touches Page préc./suiv. passent par les 16 circuits (8 d'origine puis 8 TNT)
+            const int n = haveTnt ? 16 : 8;
+            int cur = track + (soloSet ? 8 : 0);
+            if (sc == SDL_SCANCODE_PAGEUP) cur = (cur + n - 1) % n;
+            if (sc == SDL_SCANCODE_PAGEDOWN) cur = (cur + 1) % n;
+            if (sc == SDL_SCANCODE_F7) cur = track < 0 ? (soloSet ? -1 : 8) : (cur + 8) % 16;
+            bool tntNow = sc == SDL_SCANCODE_F7 ? !soloSet : cur >= 8;
+            if (track >= 0) track = cur & 7;
+            if (tntNow != (soloSet != nullptr)) {
+              soloSet = tntNow ? &tntSet : nullptr;
+              o.tnt = tntNow;
+              saveIniValue(ini, {"circuits", "tracks"}, tntNow ? "tnt" : "original", "circuits : original ou tnt (touche F7)");
+              note = tntNow ? "Circuits TNT (F7 : circuits d'origine)" : "Circuits d'origine (F7 : circuits TNT)"; noteUntil = NetLink::clock() + 4;
+              uint32_t h = fnv1a(m->image().data(), m->image().size());
+              if (soloSet) h = fnv1a(tntSet.data.data(), tntSet.data.size(), h);
+              gameHash = h;
+              net.setIdentity(SCR_VERSION, gameHash, o.playerName, tuningText(o.tuning));
+            }
             view.reset();
             m.reset();
-            m = start(disk, o, track);
+            m = start(disk, o, track, soloSet);
+            trackList = decodeTracks(m->image(), m->trackSet());
             newView();
             setupAudio();
             wireNet();
@@ -1138,6 +1164,7 @@ int main(int argc, char **argv) {
       std::string st = net.status();
       if (st != lastStatus) { lastStatus = st; statusSince = tNow; }
       if (menuOpen) bannerMsg.clear();   // le menu affiche lui-même l'état
+      else if (NetLink::clock() < noteUntil) bannerMsg = note;
       else if (!st.empty() && (net.state() != NetLink::State::Connected || tNow - statusSince < 6))
         bannerMsg = st + (net.state() == NetLink::State::Failed ? "   (F10 : effacer)" : "");
     }

@@ -15,7 +15,8 @@ Manette XInput reconnue. F1 mode HD (1920x1080, 16/9, image fluide à la
 fréquence de l'écran), F2 recharger les images HD, F3 couper le son,
 F4, F11 ou Alt+Entrée plein écran, F5 détails élevés (sols, route et voiture
 adverse texturés, roues rondes ; active le mode HD), F6 recommencer,
-Page préc./suiv. circuit précédent/suivant (mode entraînement), F12 quitter.
+Page préc./suiv. circuit précédent/suivant (mode entraînement), F7 circuits d'origine / TNT,
+F12 quitter.
 
 Multijoueur (à deux, en réseau) : premier menu du jeu, « 3. Computer Link - Local LAN » (même
 réseau : les adversaires trouvés sont proposés, ou une adresse IP) ou « 4. Online Multiplayer »
@@ -28,8 +29,11 @@ DIZZY DESCENT, WITTY WAY, CRAZY CAPER, AMAZING ADEPT, JERKILY JUMP, EVILLY EPISO
 TEMPER, RAT RACE). Aucune donnée n'est fournie : placez votre fichier SCR-TNT, ou directement
 l'archive WHDLoad StuntCarRacerTNT_v1.4.lha qui le contient, dans le dossier TNT à côté de
 scr.exe (ou indiquez-le dans scr.ini : tnt = chemin). Ensuite :
-  - circuits = tnt dans scr.ini (ou scr.exe --circuits tnt) : tout le jeu (championnat,
-    entraînement, duel) se joue sur les circuits TNT, à la place des circuits d'origine ;
+  - touche F7 (à tout moment hors course à plusieurs) : circuits d'origine <-> circuits TNT ; le
+    jeu repart du titre avec l'autre série, et le choix est enregistré dans scr.ini
+    (circuits = tnt ; aussi scr.exe --circuits tnt). Avec les circuits TNT, tout le jeu
+    (championnat, entraînement, duel) se joue sur eux, à la place des circuits d'origine ;
+  - en entraînement, Page préc./suiv. passent par les 16 circuits (8 d'origine puis 8 TNT) ;
   - en course à plusieurs, l'organisateur choisit parmi 16 circuits : les 8 d'origine puis les
     8 TNT (marqués « (TNT) »). Un joueur qui n'a pas le fichier est prévenu et ne court pas.
 

@@ -394,9 +394,12 @@ OppPose HdView::opponentAt(double t) const {
   if (t <= snaps_.front().t) return snaps_.front().opp;
   for (size_t i = 0; i + 1 < snaps_.size(); i++) {
     const OppPose &a = snaps_[i].opp, &b = snaps_[i + 1].opp;
-    if (t >= snaps_[i + 1].t) continue;
+    // au-delà du dernier état : trajectoire prolongée comme celle de la voiture du joueur (poseAt),
+    // sinon l'adversaire s'arrête un instant pendant que la caméra avance (tremblement avant-arrière)
+    const bool last = i + 2 == snaps_.size();
+    if (t >= snaps_[i + 1].t && !last) continue;
     if (!a.valid || !b.valid) return b.valid ? b : a;
-    double k = (t - snaps_[i].t) / (snaps_[i + 1].t - snaps_[i].t);
+    double k = std::min((t - snaps_[i].t) / (snaps_[i + 1].t - snaps_[i].t), 1.6);
     if (std::fabs(b.x - a.x) + std::fabs(b.z - a.z) > 3000) return k < 0.5 ? a : b;
     auto lv = [&](const Vec3 &p, const Vec3 &q) {
       Vec3 v{p.x + (q.x - p.x) * k, p.y + (q.y - p.y) * k, p.z + (q.z - p.z) * k};
