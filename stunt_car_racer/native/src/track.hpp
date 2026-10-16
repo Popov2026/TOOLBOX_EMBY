@@ -26,7 +26,8 @@ struct Track {
 
 static constexpr int CELL = 0x800;
 
-// image = TEXT+DATA du jeu relogés à $10100
-std::vector<Track> decodeTracks(const Bytes &image);
+struct TrackSet;
+// image = TEXT+DATA du jeu relogés à $10100 ; ts : circuits TNT à la place des circuits d'origine
+std::vector<Track> decodeTracks(const Bytes &image, const TrackSet *ts = nullptr);
 
 }  // namespace scr

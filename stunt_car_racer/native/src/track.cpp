@@ -1,5 +1,6 @@
 // track.cpp — décodage des circuits (port fidèle de $48390, vérifié octet par octet en JS)
 #include "track.hpp"
+#include "tnt.hpp"
 
 #include <cmath>
 #include <stdexcept>
@@ -14,7 +15,11 @@ const char *const TRACK_NAMES[8] = {"LITTLE RAMP", "STEPPING STONES", "HUMP BACK
 
 struct Mem {
   const Bytes &img;
+  const Bytes *extra = nullptr;   // circuits TNT : table + tracés, à TNT_TABLE / TNT_DATA
+  Bytes tntTable;
   uint8_t b(uint32_t a) const {
+    if (extra && a >= TNT_DATA && a - TNT_DATA < extra->size()) return (*extra)[a - TNT_DATA];
+    if (extra && a >= TNT_TABLE && a - TNT_TABLE < tntTable.size()) return tntTable[a - TNT_TABLE];
     if (a < BASE || a - BASE >= img.size()) throw std::runtime_error("circuits : adresse hors programme");
     return img[a - BASE];
   }
@@ -33,8 +38,8 @@ bool profileFlag(const Mem &m, uint32_t ptr, bool neg, int i) { return m.b(p6502
 
 struct Piece { int x, z, type; uint32_t hL, hR, profL, profR; bool neg; };
 
-Track buildTrack(const Mem &m, int track) {
-  uint32_t ptr = p6502(m.le(TRACK_TABLE + 2 * track)), pos = 0;
+Track buildTrack(const Mem &m, int track, uint32_t table, uint32_t base, const std::string &name) {
+  uint32_t ptr = base + (m.le(table + 2 * track) - 0xb100), pos = 0;
   auto fetch = [&] { return m.b(ptr + pos++); };
   int hdr[4];
   for (int &h : hdr) h = fetch();
@@ -73,7 +78,7 @@ Track buildTrack(const Mem &m, int track) {
   }
 
   Track tr;
-  tr.name = TRACK_NAMES[track];
+  tr.name = name;
   tr.pieces = (int)pieces.size();
   tr.startPiece = hdr[2];
   std::vector<Section> all;
@@ -128,12 +133,22 @@ Track buildTrack(const Mem &m, int track) {
 
 }  // namespace
 
-std::vector<Track> decodeTracks(const Bytes &image) {
+std::vector<Track> decodeTracks(const Bytes &image, const TrackSet *ts) {
   Mem m{image};
   for (int k = 0; k < 11; k++)
     if (m.b(NAMES + k) != (uint8_t)"LITTLE RAMP"[k]) throw std::runtime_error("version du jeu non reconnue");
   std::vector<Track> out;
-  for (int n = 0; n < 8; n++) out.push_back(buildTrack(m, n));
+  if (ts) {   // circuits TNT : même routine, autre table et autre base (comme le chargeur de la version TNT)
+    m.extra = &ts->data;
+    for (uint16_t o : ts->offsets) { uint16_t p = uint16_t(0xb100 + o); m.tntTable.push_back(uint8_t(p)); m.tntTable.push_back(uint8_t(p >> 8)); }
+    for (int n = 0; n < 8; n++) {
+      std::string nm = ts->names[n];
+      while (!nm.empty() && nm.back() == ' ') nm.pop_back();
+      out.push_back(buildTrack(m, n, TNT_TABLE, TNT_DATA, nm));
+    }
+    return out;
+  }
+  for (int n = 0; n < 8; n++) out.push_back(buildTrack(m, n, TRACK_TABLE, BLOB, TRACK_NAMES[n]));
   return out;
 }
 

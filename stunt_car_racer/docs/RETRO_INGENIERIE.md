@@ -308,3 +308,26 @@ code et bloquerait le jeu).
   rebours de fin `$10956` (`$3C`) puis la physique s'arrête. `$10956` ne passe à une valeur non
   nulle qu'à ce moment (8 circuits vérifiés, arrêt de fin de course désactivé) : la course à
   plusieurs s'en sert pour déclarer l'abandon (commande `OUT` au serveur relais).
+
+## 12. Circuits de Stunt Car Racer TNT (« The New Tracks », Amiga)
+
+Version Amiga (AmiGer) avec 8 nouveaux circuits, diffusée avec le chargeur WHDLoad (fichier
+`SCR-TNT` de l'archive `StuntCarRacerTNT_v1.4.lha`, compression `-lh5-`). `SCR-TNT` est un
+exécutable Amiga : premier hunk = chargeur « CARE », deuxième hunk = le jeu (copié en `$E700`,
+données du jeu = celles de la version ST à `adresse ST + $B912` près, ex. bloc des circuits ST
+`$13670` = Amiga `$1EF82`). Le chargeur (positions depuis le début de son code, fichier + `$28`) :
+
+| Position | Contenu | Version ST |
+|---|---|---|
+| `$2EE` | initiales des circuits, 16 octets (« DDCCWWAATTRRJJEE ») | `$4D35C` (« LRHBSSBR… ») |
+| `$2FE` | noms, 8 × 16 caractères | `$13498` |
+| `$37E` | une valeur par circuit, 8 octets | `$4E7E4` |
+| `$386` | début de chaque tracé (mots, gros-boutiste ; le chargeur ajoute `$B100`) | table `$13790` |
+| `$396` | tracés, même format que l'original (mêmes pièces, mêmes profils) | données à `$13670` + (pointeur − `$B100`) |
+| `$ABA` | réglages par circuit, 64 octets | `$1451A` |
+
+Le chargeur remplace dans la routine de décodage l'adresse de la table (`movea.l #table,A2`) et la
+base des données (`addi.l #base,D0`) ; la version ST fait de même en `$48398` / `$483B8` (tracés
+en RAM libre à `$E0000`, table à `$DFF00` : la zone `$80000`-`$F8000` n'est jamais écrite par le
+jeu). Le reste des retouches du chargeur est cosmétique (couleurs, texte « Player »). Le jeu
+d'origine roule tel quel sur ces circuits (championnat, entraînement, vue d'ensemble, HD).

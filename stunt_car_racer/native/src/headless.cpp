@@ -1,7 +1,7 @@
 // headless.cpp — exécute le jeu sans fenêtre (tests, captures, calage du mode HD).
 // usage : scr_headless DISQUE.st [--track N] [--frames N] [--up] [--shot f.ppm]
 //         [--hd f.ppm] [--cmp f.ppm] [--focal F] [--cx X] [--cy Y] [--eyeup H] [--eyefwd D] [--psign ±1] [--rsign ±1]
-//         [--bench-hd N] [--fire] [--hddir DOSSIER] [--wav son.wav]
+//         [--bench-hd N] [--fire] [--hddir DOSSIER] [--wav son.wav] [--tnt SCR-TNT|archive.lha]
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "hdview.hpp"
+#include "tnt.hpp"
 #include "machine.hpp"
 
 static void savePPM(const std::string &path, const uint32_t *px, int W, int H) {
@@ -26,7 +27,7 @@ int main(int argc, char **argv) {
   std::string disk, shot, hd, cmp;
   int track = -1, frames = 500, benchHd = 0;
   bool up = false, fire = false;
-  std::string hdDir, wav;
+  std::string hdDir, wav, tntPath;
   scr::HdParams hp;  // valeurs par défaut calées
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
@@ -50,12 +51,19 @@ int main(int argc, char **argv) {
     else if (a == "--details") hp.highDetail = true;
     else if (a == "--wav" && i + 1 < argc) wav = argv[++i];
     else if (a == "--hddir" && i + 1 < argc) hdDir = argv[++i];
+    else if (a == "--tnt" && i + 1 < argc) tntPath = argv[++i];
     else disk = a;
   }
   try {
     auto bytes = scr::readFile(disk);
     auto t0 = std::chrono::steady_clock::now();
     scr::Machine m(bytes);
+    static scr::TrackSet tnt;
+    if (!tntPath.empty()) {   // circuits TNT à la place des circuits d'origine
+      std::string err;
+      if (!scr::loadTrackSet(tntPath, tnt, err)) throw std::runtime_error("circuits TNT : " + err);
+      m.useTrackSet(&tnt);
+    }
     if (track < 0) m.coldStart(); else m.startPractice(track);
     bool wantHd = !hd.empty() || !cmp.empty() || benchHd;
     std::unique_ptr<scr::HdView> view;

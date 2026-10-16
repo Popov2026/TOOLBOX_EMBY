@@ -1,5 +1,6 @@
 // machine.cpp — voir machine.hpp.  Adresses : jeu chargé à $10100 (docs/RETRO_INGENIERIE.md).
 #include "machine.hpp"
+#include "tnt.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -277,6 +278,24 @@ Machine::Machine(const Bytes &file) {
   m68k_set_cpu_type(M68K_CPU_TYPE_68000);
   setupLowMem();
   m68k_pulse_reset();
+}
+
+void Machine::useTrackSet(const TrackSet *ts) {
+  trackSet_ = ts;
+  if (!ts) return;
+  // comme le chargeur de la version TNT : nouvelle table des circuits et nouvelle base de leurs
+  // données dans la routine de décodage $48390 (movea.l #$13790,A2 / addi.l #$13670,D0)
+  auto put32 = [&](uint32_t a, uint32_t v) { ram[a] = uint8_t(v >> 24); ram[a + 1] = uint8_t(v >> 16); ram[a + 2] = uint8_t(v >> 8); ram[a + 3] = uint8_t(v); };
+  if (w(0x48396) != 0x247c || l(0x48398) != 0x13790 || w(0x483b6) != 0x0680 || l(0x483b8) != 0x13670)
+    throw std::runtime_error("circuits TNT : routine des circuits non reconnue");
+  std::memcpy(ram + TNT_DATA, ts->data.data(), ts->data.size());
+  for (int k = 0; k < 8; k++) { uint16_t p = uint16_t(0xb100 + ts->offsets[k]); ram[TNT_TABLE + 2 * k] = uint8_t(p); ram[TNT_TABLE + 2 * k + 1] = uint8_t(p >> 8); }
+  put32(0x48398, TNT_TABLE);
+  put32(0x483b8, TNT_DATA);
+  for (int k = 0; k < 8; k++) std::memcpy(ram + 0x13498 + 16 * k, ts->names[k].data(), 16);   // noms
+  std::memcpy(ram + 0x4d35c, ts->initials, 16);   // initiales des circuits
+  std::memcpy(ram + 0x4e7e4, ts->counts, 8);      // une valeur par circuit
+  std::memcpy(ram + 0x1451a, ts->params, 64);     // réglages par circuit
 }
 
 void Machine::activate() {

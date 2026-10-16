@@ -103,7 +103,7 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v45"
+#define SCR_RELAY_VERSION "v46"
 
 namespace {
 
@@ -317,7 +317,7 @@ void groupCmd(Client &c, const std::string &cmd) {
     if (g.members.empty() || g.members[0] != c.fd || g.phase != "lobby" || g.members.size() < 2) return;
     int t = 0, l = 3;
     std::sscanf(cmd.c_str() + 5, "%d %d", &t, &l);
-    g.track = std::max(0, std::min(7, t)); g.laps = std::max(1, std::min(9, l));
+    g.track = std::max(0, std::min(15, t)); g.laps = std::max(1, std::min(9, l));   // 8-15 : circuits TNT
     g.phase = "loading"; g.deadline = now() + 30; g.firstFinish = 0;
     for (Sock f : g.members) clients[f].gstate = "loading";
     // grille de départ (3 rangées de 2) : ordre tiré au sort à chaque course

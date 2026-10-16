@@ -71,6 +71,7 @@ class NetLink {
   struct ChatLine { std::string from, text; double t; bool mine; };
   bool canChat() const { return (relayRoom() && state_ == State::Waiting) || state_ == State::Connected; }
   void sendChat(const std::string &text);
+  void localNote(const std::string &text);   // message du jeu lui-même dans la discussion
   const std::deque<ChatLine> &chat() const { return chat_; }
   static double clock() { return now(); }
 

@@ -29,13 +29,14 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v45"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v46"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
 #include "machine.hpp"
 #include "net.hpp"
 #include "track.hpp"
+#include "tnt.hpp"
 #include <chrono>
 #include <random>
 #include <tuple>
@@ -56,6 +57,8 @@ struct Options {
   bool highDetail = false; // détails élevés au démarrage (touche F5)
   // multijoueur (câble « Computer Link » par le réseau)
   std::string relay;       // serveur relais : adresse[:port]
+  std::string tntPath;     // circuits TNT : fichier SCR-TNT ou archive .lha (sinon cherché à côté du jeu)
+  bool tnt = false;        // circuits = tnt : tout le jeu avec les circuits TNT
   std::string playerName;  // nom montré à l'autre joueur
   std::string netMode, netArg;   // au démarrage : host | joinlan | join ADRESSE | online CODE
   int netRate = 400;       // échanges réseau par seconde en multijoueur (lecture / envoi du câble)
@@ -86,6 +89,8 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "hdflammes" || key == "hdflames") o.hdFlames = val != "0";
   else if (key == "details" || key == "détails") o.highDetail = val != "0";
   else if (key == "relais" || key == "relay") o.relay = val;
+  else if (key == "tnt") o.tntPath = val;
+  else if (key == "circuits" || key == "tracks") o.tnt = val == "tnt" || val == "TNT";
   else if (key == "nom" || key == "name") o.playerName = val;
   else if (key == "reseau_cadence" || key == "réseau_cadence" || key == "netrate") o.netRate = std::clamp(std::atoi(val.c_str()), 50, 2000);
   else if (key == "host" || key == "heberger") { if (val != "0") o.netMode = "host"; }
@@ -188,6 +193,27 @@ std::string findDisk() {
   return {};
 }
 
+// circuits TNT : option tnt, sinon SCR-TNT ou une archive .lha de Stunt Car Racer TNT (dossier TNT ou
+// DISK à côté de l'exécutable, ou à côté de lui)
+std::string findTnt(const std::string &opt) {
+  if (!opt.empty()) return opt;
+  namespace fs = std::filesystem;
+  std::vector<fs::path> dirs;
+  for (auto &d : baseDirs()) { dirs.push_back(d / "TNT"); dirs.push_back(d / "tnt"); dirs.push_back(d / "DISK"); dirs.push_back(d / "disk"); dirs.push_back(d); }
+  for (auto &d : dirs) {
+    std::error_code ec;
+    std::vector<fs::path> found;
+    for (auto &e : fs::directory_iterator(d, ec)) {
+      std::string ext = e.path().extension().u8string(), name = e.path().filename().u8string();
+      for (auto &c : ext) c = (char)tolower((unsigned char)c);
+      for (auto &c : name) c = (char)toupper((unsigned char)c);
+      if (name == "SCR-TNT" || (ext == ".lha" && name.find("TNT") != std::string::npos)) found.push_back(e.path());
+    }
+    if (!found.empty()) { std::sort(found.begin(), found.end()); return found[0].u8string(); }
+  }
+  return {};
+}
+
 // dossier des images HD : option hddir, sinon hd/ à côté de l'exécutable ou dans le dossier courant
 std::string findHdDir(const std::string &opt) {
   namespace fs = std::filesystem;
@@ -198,8 +224,9 @@ std::string findHdDir(const std::string &opt) {
   return {};
 }
 
-std::unique_ptr<Machine> start(const Bytes &disk, const Options &o, int track) {
+std::unique_ptr<Machine> start(const Bytes &disk, const Options &o, int track, const TrackSet *ts = nullptr) {
   auto m = std::make_unique<Machine>(disk);
+  m->useTrackSet(ts);
   m->setTuning(o.tuning);
   if (track < 0) m->coldStart();
   else m->startPractice(track);
@@ -340,6 +367,7 @@ int main(int argc, char **argv) {
                 "            [--gravity X] [--thrust X] [--brake X] [--timestep X] [--damping X]\n"
                 "            [--boostuse X] [--shock N] [--ini FICHIER]\n"
                 "            [--host | --joinlan | --join ADRESSE[:PORT] | --online CODE] [--relais SERVEUR[:PORT]] [--nom NOM]\n"
+                "            [--tnt SCR-TNT|archive.lha] [--circuits tnt]\n"
                 "            DISQUE.st|GAME.PUT");
       return 0;
     }
@@ -356,9 +384,20 @@ int main(int argc, char **argv) {
   Bytes disk;
   std::unique_ptr<Machine> m;
   int track = o.track;
+  static TrackSet tntSet;   // circuits TNT (si le fichier de l'utilisateur est trouvé)
+  bool haveTnt = false;
+  {
+    std::string tp = findTnt(o.tntPath), err;
+    if (!tp.empty()) {
+      haveTnt = loadTrackSet(tp, tntSet, err);
+      if (!haveTnt) std::fprintf(stderr, "circuits TNT ignorés (%s) : %s\n", tp.c_str(), err.c_str());
+    }
+    if (o.tnt && !haveTnt) std::fprintf(stderr, "circuits = tnt demandé, mais fichier SCR-TNT introuvable : circuits d'origine\n");
+  }
+  const TrackSet *soloSet = o.tnt && haveTnt ? &tntSet : nullptr;   // jeu complet et entraînement
   try {
     disk = readFile(o.disk);
-    m = start(disk, o, track);
+    m = start(disk, o, track, soloSet);
   } catch (std::exception &e) {
     fail(std::string("Erreur : ") + e.what());
     return 1;
@@ -370,6 +409,7 @@ int main(int argc, char **argv) {
     // empreinte du programme du jeu seulement ; les réglages de physique (scr.ini) sont envoyés en
     // texte et l'esclave adopte ceux du maître pendant la partie
     uint32_t h = fnv1a(m->image().data(), m->image().size());
+    if (soloSet) h = fnv1a(tntSet.data.data(), tntSet.data.size(), h);   // duel : les deux avec les mêmes circuits
     std::string nm = cleanPseudo(o.playerName);
     if (nm.empty()) { const char *u = std::getenv("USERNAME"); if (!u) u = std::getenv("USER"); nm = cleanPseudo(u ? u : ""); }
     if (nm.empty()) nm = "Joueur";
@@ -485,11 +525,18 @@ int main(int argc, char **argv) {
     if (SDL_GetQueuedAudioSize(audio) > Uint32(AUDIO_RATE / 50 * 2 * 6)) return;
     if (!pcm.empty()) SDL_QueueAudio(audio, pcm.data(), Uint32(pcm.size() * 2));
   };
-  // relance la machine : -1 = jeu complet (titre), sinon entraînement sur ce circuit
+  // circuits du jeu en cours (d'origine ou TNT), pour la course à plusieurs et la grille
+  std::vector<Track> trackList = decodeTracks(m->image(), m->trackSet());
+  const std::vector<Track> tracksOrig = decodeTracks(m->image());
+  const std::vector<Track> tracksTnt = haveTnt ? decodeTracks(m->image(), &tntSet) : std::vector<Track>();
+  // relance la machine : -1 = jeu complet (titre), sinon entraînement sur ce circuit ;
+  // course à plusieurs : 0-7 circuits d'origine, 8-15 circuits TNT
   auto restartMachine = [&](int trk) {
     view.reset();
     m.reset();
-    m = start(disk, o, trk);
+    const TrackSet *ts = trk < 0 ? soloSet : trk >= 8 && haveTnt ? &tntSet : nullptr;
+    m = start(disk, o, trk < 0 ? -1 : trk & 7, ts);
+    trackList = decodeTracks(m->image(), m->trackSet());
     newView();
     setupAudio();
     wireNet();
@@ -527,7 +574,6 @@ int main(int argc, char **argv) {
   bool onlineSel = false;
   // course à plusieurs (2 à 6 joueurs d'une salle privée) : chaque jeu roule en entraînement sur le même
   // circuit ; les autres joueurs sont des voitures fantômes (sans collision), dessinées en HD
-  const std::vector<Track> trackList = decodeTracks(m->image());
   struct GroupRace {
     bool active = false;      // machine lancée pour une course du groupe (entraînement)
     bool waitingGo = false;   // départ pas encore donné par le serveur
@@ -548,12 +594,15 @@ int main(int argc, char **argv) {
     uint32_t collTick = 0;    // collisions avec les autres voitures : une fois par cycle de la physique
     double tickRate = 17, rateT0 = 0; uint32_t rateTicks0 = 0;
     double lastHit = 0;
+    bool skip = false;        // circuit TNT choisi mais fichier SCR-TNT absent : ne participe pas
   } gr;
   int gTrack = 0, gLaps = 3;      // choix de l'organisateur
+  const int nTracks = haveTnt ? 16 : 8;   // choix de l'organisateur : 8 d'origine, puis 8 TNT
   auto trackName = [&](int t) {
-    t &= 7;
-    std::string nm = t < int(trackList.size()) ? trackList[size_t(t)].name : "";
-    return nm.empty() ? "Circuit " + std::to_string(t + 1) : nm;
+    const std::vector<Track> &L = t >= 8 ? tracksTnt : tracksOrig;
+    std::string nm = (t & 7) < int(L.size()) ? L[size_t(t & 7)].name : "";
+    if (nm.empty()) return "Circuit " + std::to_string(t + 1);
+    return t >= 8 ? nm + " (TNT)" : nm;
   };
   auto online = [&] {
     if (net.inGroup() || gr.active) return onlineSel = true;   // course à plusieurs : machine relancée en entraînement
@@ -630,7 +679,7 @@ int main(int argc, char **argv) {
       case 8: if (net.canChat()) { typing = Typing::Chat; typed.clear(); SDL_StartTextInput(); } break;
       case 9: net.groupCommand("ENTER"); menuSel = 0; break;
       case 14: typing = Typing::Pseudo; typed = o.playerName; SDL_StartTextInput(); break;
-      case 10: gTrack = (gTrack + 1) % 8; break;
+      case 10: gTrack = (gTrack + 1) % nTracks; break;
       case 11: gLaps = gLaps % 9 + 1; break;
       case 12: net.groupCommand("START " + std::to_string(gTrack) + " " + std::to_string(gLaps)); break;
       case 13: leaveGroup(); break;
@@ -731,7 +780,7 @@ int main(int argc, char **argv) {
         int kind = n ? items[size_t(std::min(menuSel, n - 1))].kind : -1;
         if ((sc == SDL_SCANCODE_LEFT || sc == SDL_SCANCODE_RIGHT) && (kind == 10 || kind == 11)) {   // circuit, tours
           int d = sc == SDL_SCANCODE_RIGHT ? 1 : -1;
-          if (kind == 10) gTrack = (gTrack + 8 + d) % 8; else gLaps = std::clamp(gLaps + d, 1, 9);
+          if (kind == 10) gTrack = (gTrack + nTracks + d) % nTracks; else gLaps = std::clamp(gLaps + d, 1, 9);
         }
         else if (sc == SDL_SCANCODE_ESCAPE && net.inGroup()) leaveGroup();
         else if (sc == SDL_SCANCODE_UP) menuSel = (menuSel + n - 1) % n;
@@ -839,7 +888,13 @@ int main(int argc, char **argv) {
             gr.slot = 0;
             for (size_t k = 0; k < order.size(); k++) if (order[k] == net.groupMe()) gr.slot = int(k);
           }
-          gr.track = t & 7; gr.laps = l; gr.active = true; gr.waitingGo = true; gr.racing = false; gr.finished = false; gr.out = false; gr.wreckFrames = 0;
+          if ((t & 15) >= 8 && !haveTnt) {   // circuit TNT sans le fichier SCR-TNT : on ne peut pas rouler dessus
+            net.localNote("Circuit TNT choisi : fichier SCR-TNT absent (dossier TNT à côté de scr.exe), course ignorée");
+            gr = GroupRace(); gr.skip = true;
+            net.groupCommand("LOADED");
+            continue;
+          }
+          gr.track = t & 15; gr.laps = l; gr.active = true; gr.waitingGo = true; gr.racing = false; gr.finished = false; gr.out = false; gr.wreckFrames = 0;
           gr.lastRel = -1; gr.total = 0; gr.lapOffset = 0; gr.lastTick = 0; gr.goAt = 0;
           if (typing != Typing::None && typing != Typing::Chat) { typing = Typing::None; SDL_StopTextInput(); }
           if (!hd) { hd = true; applyMode(true); }   // les autres voitures ne sont visibles qu'en HD
@@ -853,6 +908,8 @@ int main(int argc, char **argv) {
           gr.sideDone = false; gr.dropMode = m->w(0x109d4); gr.sideApplied = 0; gr.sideTarget = 0; gr.sideFrame = 0;
           net.groupCommand("LOADED");
           acc = 0;
+        } else if (ev == "GO" && gr.skip) {
+          net.groupCommand("OUT"); gr.skip = false;
         } else if (ev == "GO") {
           gr.waitingGo = false; gr.racing = true; gr.goAt = NetLink::clock(); acc = 0;
         } else if (ev == "END") {

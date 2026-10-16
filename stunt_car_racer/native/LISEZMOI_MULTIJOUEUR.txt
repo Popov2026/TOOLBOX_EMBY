@@ -64,7 +64,8 @@ ceux du serveur ; en réseau local, ceux du joueur qui a choisi l'adversaire.
          peuvent attendre dans la même salle ; ceux qui sont déjà en partie n'y apparaissent plus.
      Course à plusieurs (2 à 6 joueurs) : dans la salle privée, « Course à plusieurs (2 à 6
      joueurs) ». Le premier entré est l'organisateur : il choisit le circuit et le nombre de tours
-     (flèches gauche / droite), puis « Lancer la course » dès que deux joueurs au moins sont là.
+     (flèches gauche / droite ; avec les circuits TNT, 16 au choix : les 8 d'origine puis les 8 TNT,
+     que chaque joueur doit avoir, cf. LISEZMOI.txt), puis « Lancer la course » dès que deux joueurs au moins sont là.
      Chaque jeu se place sur le circuit et attend que tous soient prêts : le départ est donné en
      même temps à tous. Grille de départ : 3 rangées de 2 (gauche / droite), ordre tiré au sort
      à chaque course ; les rangées 2 et 3 partent un peu en arrière (le temps et le classement

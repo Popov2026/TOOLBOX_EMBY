@@ -115,6 +115,7 @@ données de l'un à l'autre. Deux façons de se trouver (menu « Computer Link �
     quand tous sont prêts (30 s au plus), relaie les positions et collecte les temps ; la course
     se termine quand tous sont arrivés ou ont abandonné (voiture détruite), ou deux minutes
     après le premier arrivé. (Serveur v34 ou plus récent.)
+    Circuits TNT (8 à 15) proposés par l'organisateur : serveur v46 ou plus récent.
   - Les deux joueurs doivent avoir la même version de scr.exe (le serveur refuse sinon).
   - Une connexion silencieuse plus de 90 s est fermée ; 16 connexions au plus par adresse IP,
     512 en tout.

@@ -511,6 +511,11 @@ void NetLink::sendGhost(const float v[7], uint8_t lap, uint8_t flags) {
   frame(NF_GPOS, b, 30);
 }
 
+void NetLink::localNote(const std::string &text) {
+  chat_.push_back({"Jeu", text.substr(0, 120), now(), false});
+  while (chat_.size() > 30) chat_.pop_front();
+}
+
 void NetLink::sendChat(const std::string &text) {
   if (!canChat() || text.empty()) return;
   std::string t = text.substr(0, 120);

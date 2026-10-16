@@ -48,7 +48,7 @@ const Hills HILLS;
 
 }  // namespace
 
-HdView::HdView(const Machine &m) : tracks_(decodeTracks(m.image())) { Renderer3D::warmTextures(); }
+HdView::HdView(const Machine &m) : tracks_(decodeTracks(m.image(), m.trackSet())) { Renderer3D::warmTextures(); }
 
 // flamme du boost en haute définition, tirée pixel pour pixel du sprite d'origine : même silhouette
 // (les 4 flammes de chaque côté), même place, mêmes couleurs (bord jaune, cœur blanc) ; les contours
