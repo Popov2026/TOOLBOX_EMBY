@@ -193,6 +193,7 @@ void HdView::afterFrame(const Machine &m) {
     s.p.roll = int16_t(m.w(A_ROLL)) * ANG;
     s.track = m.b(A_TRACK) & 7;
     s.opp = opponentFromGame(m, s.track);
+    s.oppImpact = oppImpact_;
     snaps_.push_back(s);
     while (snaps_.size() > 32) snaps_.pop_front();
   }
@@ -310,14 +311,36 @@ OppPose HdView::opponentFromGame(const Machine &m, int track) {
   o.fwd = {fx / fl, fy / fl, fz / fl};
   double ry = (hr - hl) * hs, rl = std::sqrt((rx - lx) * (rx - lx) + ry * ry + (rz - lz) * (rz - lz));
   o.right = {(rx - lx) / rl, ry / rl, (rz - lz) / rl};
-  // hauteur : au sol, ou en vol si la route descend plus vite que la chute libre
-  const double G = 16;   // gravité, en hauteur brute par tick² (mesurée sur la voiture du joueur)
-  if (!oppHave_ || std::fabs(surf - oppY_) > 3000) { oppY_ = surf; oppVy_ = 0; oppHave_ = true; }
-  else {
-    double pred = oppY_ + oppVy_ - G / 2;
-    if (surf >= pred - 2) { oppVy_ = std::clamp(surf - oppY_, -400.0, 400.0); oppY_ = surf; }
-    else { oppY_ = pred; oppVy_ -= G; }
+  // hauteur : celle que le jeu calcule pour l'adversaire, au sol comme en vol ($10B50 gauche,
+  // $10B52 droite, $10B54 milieu ; même échelle que la route) — trajectoire en cloche pendant les sauts
+  double y = int16_t(m.w(0x10b54));
+  if (std::fabs(y - surf) > 20000) y = surf;   // valeur absente : sur la route
+  {   // valeur figée alors que l'adversaire roule (non calculée par le jeu) : sur la route
+    const bool moved = std::hypot(o.x - oppPx_, o.z - oppPz_) > 1;
+    oppStale_ = oppHave_ && moved && y == oppRaw_ ? oppStale_ + 1 : 0;
+    oppRaw_ = y;
+    if (oppStale_ > 8 && std::fabs(y - surf) > 100) y = surf;
   }
+  oppImpact_ = 0;
+  const double air = y - surf;
+  if (!oppHave_ || std::fabs(y - oppY_) > 3000) { oppVy_ = 0; oppAir_ = air; oppHave_ = true; oppPx_ = o.x; oppPz_ = o.z; }
+  else {
+    const double vy = y - oppY_;
+    // atterrissage : en l'air au dernier état, sur la route maintenant, en descendant vite
+    if (oppAir_ > 40 && air < 40 && oppVy_ < -30) oppImpact_ = std::clamp(int(-oppVy_ / 5), 4, 50);
+    // en vol : la voiture suit sa trajectoire (nez vers le haut à la montée, vers le bas à la descente)
+    const double step = std::hypot(o.x - oppPx_, o.z - oppPz_);
+    if (air > 40 && step > 1) {
+      const double hx = o.fwd.x, hz = o.fwd.z, hl = std::hypot(hx, hz);
+      if (hl > 1e-6) {
+        const double slope = std::clamp(vy * hs / step, -1.5, 1.5);
+        const double l = std::sqrt(1 + slope * slope);
+        o.fwd = {hx / hl / l, slope / l, hz / hl / l};
+      }
+    }
+    oppVy_ = vy; oppAir_ = air; oppPx_ = o.x; oppPz_ = o.z;
+  }
+  oppY_ = y;
   o.yRaw = oppY_;
   o.valid = true;
   return o;
@@ -776,6 +799,12 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
     double dt = partT_ < 0 ? 0 : std::clamp(T - partT_, 0.0, 4.0);
     partT_ = T;
     stepParticles(dt);
+    for (const Snap &sn : snaps_)   // l'adversaire retombe brutalement : étincelles quand on le voit toucher la route
+      if (sn.oppImpact > 0 && sn.t <= T && sn.t > oppImpactT_) {
+        oppImpactT_ = sn.t;
+        if (params.particles && opp.valid && T - sn.t < 30)
+          spawnImpact({opp.x, opp.yRaw * params.hScale + 8, opp.z}, sn.oppImpact, opp.fwd);
+      }
     if (ownImpact_ > 0) {   // choc de notre voiture : gerbe devant le capot
       const double sy = std::sin(p.yaw), cy = std::cos(p.yaw);
       if (params.particles)

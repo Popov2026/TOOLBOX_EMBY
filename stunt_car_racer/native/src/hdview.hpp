@@ -91,9 +91,12 @@ class HdView {
   bool surfaceRaw(const Track &t, double x, double z, double yRef, double &y);
   int hint_ = -1;
   double eyeLift_ = 0;   // remontée de l'œil au-dessus de la route (lissée)
-  struct Snap { double t; Pose p; int track; OppPose opp; };
+  struct Snap { double t; Pose p; int track; OppPose opp; int oppImpact = 0; };   // oppImpact : l'adversaire retombe (force)
   OppPose opponentFromGame(const Machine &m, int track);
-  double oppY_ = 0, oppVy_ = 0;
+  double oppY_ = 0, oppVy_ = 0, oppAir_ = 0, oppPx_ = 0, oppPz_ = 0;   // hauteur, vitesse verticale, hauteur au-dessus de la route
+  double oppRaw_ = 0; int oppStale_ = 0;   // hauteur lue dans le jeu, nombre d'états où elle n'a pas bougé
+  int oppImpact_ = 0;                // atterrissage brutal vu au dernier état
+  double oppImpactT_ = -1;           // dernier atterrissage déjà montré (étincelles)
   // roues de l'adversaire : distance parcourue (unités du monde) -> angle de rotation
   double oppRoll_ = 0, oppRollStep_ = 0, oppRollContrast_ = 1;   // angle affiché, pas par image, netteté
   OppPose oppPrev_;

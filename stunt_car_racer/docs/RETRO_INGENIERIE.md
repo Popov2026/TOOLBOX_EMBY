@@ -222,6 +222,10 @@ code et bloquerait le jeu).
   `$53C84` lorsque le rendu atteint la section de l'adversaire, `$10966`). Position en travers de
   la route : mot `$109D6`, de 0 (bord gauche) à 255 (bord droit) — vérifié en mesurant sur
   l'image d'origine la position des roues entre les bords de la route à la même hauteur.
+  Hauteur de l'adversaire calculée par le jeu, au sol comme en vol (trajectoire en cloche des
+  sauts) : mots signés `$10B50` (côté gauche), `$10B52` (droit), `$10B54` (milieu), même échelle
+  que les hauteurs de la route ; recopiés (+`$50`) en `$6EC10`/`$6EC14`/`$6EC12` pour le dessin
+  (`$50F98`). Ceux de la voiture du joueur : `$10B70`/`$10B72`/`$10B74`.
 * **Projection** (calée par optimisation sur ~80 % de pixels identiques) : focale ≈ 259 px,
   centre ≈ (153, 82), focale verticale ≈ 0,9 × horizontale, hauteurs ≈ 0,26 × brutes, œil
   ≈ 40 unités au-dessus de la position de la voiture. Ciel 7, sol 13, collines 5, route 1/2

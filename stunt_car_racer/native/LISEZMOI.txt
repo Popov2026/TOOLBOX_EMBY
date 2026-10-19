@@ -30,7 +30,9 @@ Chaque changement est enregistré aussitôt dans scr.ini. Le jeu est en pause pe
 
 Mode HD : ombres sous les voitures, gerbes d'étincelles et fumée lors des chocs et des
 réceptions brutales (les vôtres et celles des autres joueurs en course à plusieurs), bords
-lissés (anticrénelage). Chaque effet se coupe dans le menu d'options.
+lissés (anticrénelage). Chaque effet se coupe dans le menu d'options. La voiture adverse suit
+pendant les sauts la trajectoire calculée par le jeu d'origine (elle reste en l'air jusqu'à
+l'atterrissage) et fait des étincelles quand elle retombe brutalement.
 
 Mises à jour : au démarrage, le jeu interroge le serveur online ; si une version plus récente
 est sortie, un bandeau le signale (« Nouvelle version vXX disponible »), ainsi que le menu
