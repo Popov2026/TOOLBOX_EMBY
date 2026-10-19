@@ -21,7 +21,8 @@ Cockpit fixe (cadre, montants, tableau de bord)
                                et le compteur de vitesse SANS chiffres ni repère : les chiffres du
                                jeu (tour, boost, dégâts, temps) et la barre de vitesse sont posés
                                dessus. La fissure des dégâts et tout ce qui change en course restent
-                               visibles par-dessus l'image.
+                               visibles par-dessus l'image. Le bas du moteur (sous le sprite 10) fait
+                               partie du cockpit fixe : dessinez-le dans cockpit.png.
 
 Règles pour les sprites
   - même proportions que le sprite d'origine (planche complète) ;
@@ -49,6 +50,11 @@ hd.ini (facultatif)
   fps = 20          ; cadence de l'animation
   wind = 1          ; effet du vent de la course : l'image se couche vers l'extérieur et s'aplatit
                     ; avec la vitesse (1 par défaut pour les flammes, 0 = sans)
+  pad_top = 0.4     ; l'image déborde de l'emplacement du sprite (fraction de sa hauteur ou
+  pad_bottom = 0    ; largeur) : pad_top, pad_bottom, pad_left, pad_right — par exemple des
+                    ; flammes recalées plus haut que l'emplacement d'origine
+  layer = 1         ; ordre de dessin : plus grand = par-dessus. Par défaut : flammes 2,
+                    ; moteur (sprite 10) 1, le reste 0 (le moteur passe devant les roues)
 
 Les flammes du boost sont les sprites d'origine agrandis en haute définition : même forme,
 même place, mêmes couleurs, même animation, contours lissés et léger halo. Les images de
