@@ -14,6 +14,7 @@ ombres = 1                    # HD : ombres sous les voitures
 particules = 1                # HD : étincelles et fumée lors des chocs et des réceptions brutales
 lissage = 1                   # HD : lissage des bords (anticrénelage)
 ciel = 1                      # HD : ciel dégradé avec nuages qui dérivent et soleil (0 : ciel uni d'origine)
+decor = 1                     # HD : tribunes avec public, panneaux publicitaires et arbres autour des circuits
 manette = 1                   # 0 : manette ignorée
 vibrations = 1                # vibrations de la manette lors des chocs
 # touches de conduite (noms SDL : Up, Down, Left, Right, Space, W, A, S, D, Left Shift...) ;

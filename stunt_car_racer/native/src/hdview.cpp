@@ -522,6 +522,148 @@ void HdView::addCar(const OppPose &o, double hs, const Machine &m, bool closed) 
   (void)dark; (void)grey;
 }
 
+// ------------------------------------------------------------------ décor autour du circuit
+void HdView::drawScenery(const Camera &c, int track, double hs) {
+  auto it = scenery_.find(track & 7);
+  if (it == scenery_.end()) it = scenery_.emplace(track & 7, buildScenery(tracks_[track & 7])).first;
+  const double gy = GROUND_RAW * hs;
+  const double fwx = std::sin(c.yaw), fwz = std::cos(c.yaw);
+  const double Lx = 0.5, Ly = 0.7, Lz = 0.55, Ll = std::sqrt(Lx * Lx + Ly * Ly + Lz * Lz);   // lumière (côté du soleil)
+  auto lit = [&](uint32_t col, const Vec3 &nrm) {
+    const double nl = std::sqrt(nrm.x * nrm.x + nrm.y * nrm.y + nrm.z * nrm.z);
+    const double d = nl > 1e-9 ? (nrm.x * Lx + nrm.y * Ly + nrm.z * Lz) / (nl * Ll) : 0;
+    return shadeARGB(col, 0.58 + 0.5 * std::max(0.0, d));
+  };
+  auto normal = [](const Vec3 *p, int n) {
+    Vec3 r{0, 0, 0};
+    for (int i = 0; i < n; i++) {
+      const Vec3 &a = p[i], &b = p[(i + 1) % n];
+      r.x += (a.y - b.y) * (a.z + b.z); r.y += (a.z - b.z) * (a.x + b.x); r.z += (a.x - b.x) * (a.y + b.y);
+    }
+    return r;
+  };
+  // face vue de devant seulement (sommets dans le sens qui donne une normale vers l'extérieur)
+  auto face = [&](const Vec3 *p, int n, uint32_t col, const TexInfo *tex = nullptr) {
+    Vec3 nr = normal(p, n);
+    if (nr.x * (c.pos.x - p[0].x) + nr.y * (c.pos.y - p[0].y) + nr.z * (c.pos.z - p[0].z) <= 0) return;
+    if (tex) r3d_.polyTex(p, n, lit(col, nr), *tex);
+    else r3d_.poly(p, n, lit(col, nr));
+  };
+  // pavé orienté : centre du bas (x, z), axes horizontaux a (longueur) et b (profondeur), hauteurs y0..y1
+  auto box = [&](double x, double z, double ax, double az, double hl, double hd, double y0, double y1, uint32_t col) {
+    const double bx = -az, bz = ax;
+    Vec3 q[8];
+    for (int i = 0; i < 8; i++) {
+      const double sa = (i & 1) ? hl : -hl, sb = (i & 2) ? hd : -hd;
+      q[i] = {x + ax * sa + bx * sb, (i & 4) ? y1 : y0, z + az * sa + bz * sb};
+    }
+    const int F[6][4] = {{0, 1, 3, 2}, {4, 6, 7, 5}, {0, 4, 5, 1}, {2, 3, 7, 6}, {0, 2, 6, 4}, {1, 5, 7, 3}};
+    for (auto &fc : F) { Vec3 p[4] = {q[fc[0]], q[fc[1]], q[fc[2]], q[fc[3]]}; face(p, 4, col); }
+  };
+  for (const SceneObj &o : it->second) {
+    const double dx = o.x - c.pos.x, dz = o.z - c.pos.z, dist = std::hypot(dx, dz);
+    const double rad = o.kind == SCENE_STAND ? 1100 : o.kind == SCENE_BOARD ? 400 : 260 * o.size;
+    if (dist > 42000) continue;
+    const double along = dx * fwx + dz * fwz, side = std::fabs(dx * fwz - dz * fwx);
+    if (along < -rad || side > along * 1.9 + rad * 1.5) continue;   // derrière la caméra ou hors du champ
+    const uint32_t sd = o.seed;
+    if (o.kind == SCENE_PINE || o.kind == SCENE_TREE) {
+      const double k = o.size;
+      static const uint32_t GREENS[4] = {0xff2f6a2cu, 0xff3a7a30u, 0xff2a5c34u, 0xff4a8236u};
+      const uint32_t leaf = GREENS[sd % 4], trunk = 0xff5a3e26u;
+      const bool farLod = dist > 15000;
+      if (dist < 9000 && params.shadows) {   // ombre au pied
+        Vec3 sh[8];
+        for (int i = 0; i < 8; i++) { double a = i * 0.785398; sh[i] = {o.x + std::cos(a) * 125 * k + 40 * k, gy + 1.5, o.z + std::sin(a) * 125 * k + 30 * k}; }
+        r3d_.polyAlpha(sh, 8, 0xff000000u, 0.28f);
+      }
+      if (!farLod) box(o.x, o.z, 1, 0, 9 * k, 9 * k, gy, gy + (o.kind == SCENE_PINE ? 70 : 115) * k, trunk);
+      const int N = farLod ? 5 : 7;
+      auto ring = [&](double y, double r, Vec3 *v, double rot) {
+        for (int i = 0; i < N; i++) { double a = rot + i * 6.2831853 / N; v[i] = {o.x + std::cos(a) * r, y, o.z + std::sin(a) * r}; }
+      };
+      const double rot = (sd >> 8) % 100 * 0.06;
+      if (o.kind == SCENE_PINE) {   // sapin : cônes empilés
+        const double L[3][3] = {{55, 125, 160}, {150, 98, 145}, {240, 68, 140}};
+        for (int l = farLod ? 1 : 0; l < 3; l++) {
+          Vec3 v[8]; ring(gy + L[l][0] * k, L[l][1] * k * (farLod ? 1.25 : 1), v, rot + l * 0.4);
+          const Vec3 top{o.x, gy + (L[l][0] + L[l][2]) * k, o.z};
+          for (int i = 0; i < N; i++) { Vec3 t[3] = {v[(i + 1) % N], v[i], top}; face(t, 3, shadeARGB(leaf, 0.92 + 0.06 * l)); }
+          if (!farLod) { Vec3 b[8]; for (int i = 0; i < N; i++) b[i] = v[i]; face(b, N, shadeARGB(leaf, 0.7)); }
+        }
+      } else {   // feuillu : boule à facettes
+        Vec3 r0[8], r1[8], r2[8];
+        ring(gy + 135 * k, 85 * k, r0, rot); ring(gy + 215 * k, 135 * k, r1, rot + 0.3); ring(gy + 305 * k, 115 * k, r2, rot);
+        const Vec3 bot{o.x, gy + 105 * k, o.z}, top{o.x, gy + 375 * k, o.z};
+        const uint32_t lf = shadeARGB(leaf, 1.08);
+        for (int i = 0; i < N; i++) {
+          const int j = (i + 1) % N;
+          Vec3 a[3] = {r0[i], r0[j], bot}; face(a, 3, lf);
+          Vec3 b[4] = {r0[j], r0[i], r1[i], r1[j]}; face(b, 4, lf);
+          Vec3 cq[4] = {r1[j], r1[i], r2[i], r2[j]}; face(cq, 4, lf);
+          Vec3 d[3] = {r2[j], r2[i], top}; face(d, 3, lf);
+        }
+      }
+    } else if (o.kind == SCENE_BOARD) {   // panneau publicitaire sur deux poteaux, face au circuit
+      static const uint32_t COLS[6] = {0xffc82020u, 0xff1f4fb8u, 0xff1d8a3au, 0xfff0b818u, 0xff202020u, 0xffe0601cu};
+      const double ax = o.fz, az = -o.fx;   // le long du panneau
+      const double L = o.len, y0 = gy + 85, y1 = y0 + 150;
+      for (int sgn = -1; sgn <= 1; sgn += 2)
+        box(o.x + ax * sgn * L * 0.36, o.z + az * sgn * L * 0.36, ax, az, 7, 7, gy, y0 + 20, 0xff8a8a8au);
+      const double hx = ax * L / 2, hz = az * L / 2, bx = -o.fx * 10, bz = -o.fz * 10;
+      Vec3 fr[4] = {{o.x + hx, y0, o.z + hz}, {o.x - hx, y0, o.z - hz}, {o.x - hx, y1, o.z - hz}, {o.x + hx, y1, o.z + hz}};
+      TexInfo t; t.kind = TEX_BOARD; t.o = {o.x + hx, y0, o.z + hz}; t.u = {-ax, 0, -az}; t.v = {0, 1, 0};
+      t.s0 = 0; t.s1 = L; t.w0 = 0; t.w1 = 150; t.r = double(sd % 1000);
+      Vec3 nr = normal(fr, 4);
+      if (nr.x * (c.pos.x - fr[0].x) + nr.z * (c.pos.z - fr[0].z) > 0) r3d_.polyTex(fr, 4, COLS[sd % 6], t);
+      else {   // dos et tranche
+        Vec3 bk[4] = {{o.x - hx + bx, y0, o.z - hz + bz}, {o.x + hx + bx, y0, o.z + hz + bz}, {o.x + hx + bx, y1, o.z + hz + bz}, {o.x - hx + bx, y1, o.z - hz + bz}};
+        face(bk, 4, 0xff9a9a9au);
+      }
+      Vec3 tp[4] = {{o.x + hx, y1, o.z + hz}, {o.x - hx, y1, o.z - hz}, {o.x - hx + bx, y1, o.z - hz + bz}, {o.x + hx + bx, y1, o.z + hz + bz}};
+      face(tp, 4, 0xffbdbdbdu);
+    } else {   // tribune : gradins garnis de public, murs, toit sur poteaux
+      static const uint32_t ROOF[4] = {0xffb82828u, 0xff2a4ea8u, 0xffe8e8e8u, 0xff2f7a3au};
+      const double ax = o.fz, az = -o.fx;   // le long de la tribune
+      const double fx = o.fx, fz = o.fz, L = o.len, hl = L / 2;
+      const int R = 7;
+      const double D = 95, RISE = 55, base = gy + 40;
+      auto P = [&](double a, double depth, double y) { return Vec3{o.x + ax * a - fx * depth, y, o.z + az * a - fz * depth}; };
+      const uint32_t concrete = 0xffa6a39cu, dark = 0xff74716cu;
+      { Vec3 q[4] = {P(-hl, 0, gy), P(hl, 0, gy), P(hl, 0, base), P(-hl, 0, base)}; face(q, 4, dark); }   // muret avant
+      for (int r = 0; r < R; r++) {
+        const double y = base + r * RISE, d0 = r * D, d1 = d0 + D;
+        { Vec3 q[4] = {P(-hl, d0, y), P(-hl, d1, y), P(hl, d1, y), P(hl, d0, y)}; face(q, 4, concrete); }   // marche
+        if (r + 1 < R) { Vec3 q[4] = {P(-hl, d1, y), P(hl, d1, y), P(hl, d1, y + RISE), P(-hl, d1, y + RISE)}; face(q, 4, dark); }
+        if (dist < 26000) {   // rangée de spectateurs
+          Vec3 q[4] = {P(-hl + 10, d0 + 40, y), P(hl - 10, d0 + 40, y), P(hl - 10, d0 + 40, y + 58), P(-hl + 10, d0 + 40, y + 58)};
+          TexInfo t; t.kind = TEX_CROWD; t.o = P(-hl + 10, d0 + 40, y); t.u = {ax, 0, az}; t.v = {0, 1, 0};
+          t.r = double(r * 131 + sd % 997);
+          Vec3 nr = normal(q, 4);
+          if (nr.x * (c.pos.x - q[0].x) + nr.y * (c.pos.y - q[0].y) + nr.z * (c.pos.z - q[0].z) > 0) r3d_.polyTex(q, 4, 0xff8a7c74u, t);
+        }
+      }
+      const double dB = R * D, yTop = base + (R - 1) * RISE, yRoof = yTop + 190;
+      { Vec3 q[4] = {P(hl, dB, gy), P(-hl, dB, gy), P(-hl, dB, yRoof), P(hl, dB, yRoof)}; face(q, 4, concrete); }   // mur du fond
+      for (int sgn = -1; sgn <= 1; sgn += 2) {   // flancs
+        Vec3 q[5] = {P(sgn * hl, 0, gy), P(sgn * hl, dB, gy), P(sgn * hl, dB, yRoof), P(sgn * hl, dB * 0.15, yTop + 40), P(sgn * hl, 0, base)};
+        if (sgn > 0) face(q, 5, concrete);
+        else { Vec3 w[5] = {q[4], q[3], q[2], q[1], q[0]}; face(w, 5, concrete); }
+      }
+      const uint32_t roof = ROOF[sd % 4];
+      const double yF = yRoof - 25;   // toit légèrement incliné vers l'avant, dépassant au-dessus des premiers rangs
+      { Vec3 q[4] = {P(-hl - 30, -60, yF), P(hl + 30, -60, yF), P(hl + 30, dB + 20, yRoof), P(-hl - 30, dB + 20, yRoof)}; face(q, 4, roof); }
+      { Vec3 q[4] = {P(-hl - 30, -60, yF - 14), P(-hl - 30, dB + 20, yRoof - 14), P(hl + 30, dB + 20, yRoof - 14), P(hl + 30, -60, yF - 14)}; face(q, 4, shadeARGB(roof, 0.7)); }
+      { Vec3 q[4] = {P(-hl - 30, -60, yF - 14), P(hl + 30, -60, yF - 14), P(hl + 30, -60, yF), P(-hl - 30, -60, yF)}; face(q, 4, 0xffe8e8e8u); }   // bandeau
+      for (int i = 0; i <= 3; i++) {   // poteaux avant
+        const double a = -hl + 20 + i * (L - 40) / 3;
+        Vec3 pp = P(a, -40, 0);
+        box(pp.x, pp.z, ax, az, 8, 8, gy, yF - 14, 0xff8e8e8eu);
+      }
+    }
+  }
+}
+
 void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, double focal, double cx, double cy,
                          const Machine &m, const OppPose *opp) {
   const HdParams &P = params;
@@ -565,6 +707,8 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
       r3d_.polyFar(q, 4, l ? hillFar : hill, l ? 2e-12f : 3e-12f);
     }
   }
+
+  if (P.scenery) drawScenery(c, track, HSCALE);   // tribunes, panneaux, arbres
 
   // circuit
   const Track &tr = tracks_[track & 7];

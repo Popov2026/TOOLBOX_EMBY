@@ -20,7 +20,7 @@ struct Camera {
 };
 
 // textures procédurales (mode détails élevés) : calculées au pixel à partir du point du monde touché
-enum TexKind { TEX_NONE = -1, TEX_GROUND = 0, TEX_ROAD, TEX_WALL, TEX_PAINT, TEX_TIRE, TEX_RIM };
+enum TexKind { TEX_NONE = -1, TEX_GROUND = 0, TEX_ROAD, TEX_WALL, TEX_PAINT, TEX_TIRE, TEX_RIM, TEX_CROWD, TEX_BOARD };
 struct TexInfo {
   int kind = TEX_NONE;
   Vec3 o{0, 0, 0}, u{1, 0, 0}, v{0, 0, 1};   // repère local (origine, axes unitaires)

@@ -12,6 +12,7 @@
 #include "hdassets.hpp"
 #include "machine.hpp"
 #include "render3d.hpp"
+#include "scenery.hpp"
 #include "track.hpp"
 
 namespace scr {
@@ -43,6 +44,7 @@ struct HdParams {
   bool antialias = true;                   // lissage des bords (FXAA) de la scène 3D
   bool shadows = true;                     // ombres sous les voitures (posées sur la route, même en l'air)
   bool particles = true;                   // étincelles et fumée aux chocs et réceptions brutales
+  bool scenery = true;                     // décor autour des circuits : tribunes, panneaux, arbres
   bool sky = true;                         // ciel dégradé avec soleil et nuages (sinon couleur unie d'origine)
 };
 
@@ -104,7 +106,9 @@ class HdView {
   struct GhostWheels { OppPose prev; double roll = 0; double impactStamp = -1; };   // roues (et chocs) de chaque autre joueur
   std::map<uint32_t, GhostWheels> ghostWheels_;
   bool oppHave_ = false;
-  void addCar(const OppPose &o, double hs, const Machine &m, bool closed = false);   // closed : flanc gauche dessiné aussi
+  void addCar(const OppPose &o, double hs, const Machine &m, bool closed = false);
+  std::map<int, std::vector<SceneObj>> scenery_;   // décor de chaque circuit (calculé à la première vue)
+  void drawScenery(const Camera &c, int track, double hs);   // closed : flanc gauche dessiné aussi
   void addFlames(const OppPose &o, double hs, int seed);   // flammes du boost d'une voiture fantôme
   void addShadow(const OppPose &o, double hs, int track);   // ombre portée sur la route (ou le sol)
   // particules : étincelles (opaques, en traînée) et fumée (semi-transparente)

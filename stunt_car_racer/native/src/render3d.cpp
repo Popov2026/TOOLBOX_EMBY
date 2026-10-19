@@ -289,6 +289,47 @@ uint32_t Renderer3D::shade(const TexPlane &tp, uint32_t color, const Vec3 &p, do
       double kb = std::clamp(1.5 - foot / (t.r * 0.35) * 2.0, 0.0, 1.0) * t.contrast;
       return mulRGB(0xff262626u, 1 + 0.55 * std::clamp(0.5 + 1.2 * g, 0.0, 1.0) * kb);
     }
+    case TEX_CROWD: {  // public assis : une personne tous les 26 unités (tee-shirt, tête), sur fond de gradin
+      Vec3 d{p.x - t.o.x, p.y - t.o.y, p.z - t.o.z};
+      const double s = d.x * t.u.x + d.y * t.u.y + d.z * t.u.z, w = p.y - t.o.y;
+      const double far = std::clamp((foot - 3) / 8, 0.0, 1.0);
+      const uint32_t seat = 0xff5c5c60u;
+      if (far >= 1) return 0xff8a7c74u;   // de loin : teinte moyenne de la foule
+      const double cs = s / 26;
+      const int cell = int(std::floor(cs));
+      const double fx = cs - cell;
+      const uint32_t hh = hash2(cell, int(t.r), 77);
+      if (hh % 9 == 0) return far > 0 ? 0xff7a7270u : seat;   // place vide
+      static const uint32_t SHIRT[8] = {0xffd02828u, 0xff2850c8u, 0xffe8c020u, 0xffeeeeeeu, 0xff30a040u, 0xffe87818u, 0xff8040a0u, 0xff30b0c0u};
+      static const uint32_t SKIN[3] = {0xfff0c8a0u, 0xffc89870u, 0xff8a5a3au};
+      const double bob = ((hh >> 8) % 7) * 0.8;   // hauteurs un peu différentes
+      uint32_t c = seat;
+      if (w < 36 + bob && std::fabs(fx - 0.5) < 0.36) c = SHIRT[(hh >> 4) % 8];
+      else if (w > 39 + bob && w < 53 + bob && std::fabs(fx - 0.5) < 0.19) c = SKIN[(hh >> 12) % 3];
+      if (far > 0) {   // transition vers la teinte moyenne
+        auto mix = [&](int sh) { return uint32_t(((c >> sh) & 255) * (1 - far) + ((0xff8a7c74u >> sh) & 255) * far) << sh; };
+        c = 0xff000000u | mix(16) | mix(8) | mix(0);
+      }
+      return c;
+    }
+    case TEX_BOARD: {  // panneau publicitaire : bordure blanche, fond de couleur, « marque » en lettres blanches
+      Vec3 d{p.x - t.o.x, p.y - t.o.y, p.z - t.o.z};
+      const double s = d.x * t.u.x + d.y * t.u.y + d.z * t.u.z, w = d.x * t.v.x + d.y * t.v.y + d.z * t.v.z;
+      const double L = t.s1, H = t.w1, b = H * 0.07;
+      if (s < b || s > L - b || w < b || w > H - b) return 0xfff2f2f2u;
+      const double ty0 = H * 0.27, ty1 = H * 0.73, lh = ty1 - ty0, lw = lh * 0.62, gap = lh * 0.18;
+      const int nl = int((L * 0.8) / (lw + gap));
+      const double sx0 = (L - nl * (lw + gap) + gap) / 2;
+      if (w < ty0 || w > ty1 || s < sx0 || foot > lh * 0.35) return foot > lh * 0.35 && w > ty0 && w < ty1 ? mulRGB(color, 1.25) : color;
+      const double ls = (s - sx0) / (lw + gap);
+      const int li = int(ls);
+      const double lx = (ls - li) * (lw + gap);
+      if (li >= nl || lx > lw) return color;
+      const int px = std::clamp(int(lx / lw * 3), 0, 2), py = std::clamp(int((ty1 - w) / lh * 5), 0, 4);
+      const uint32_t glyph = hash2(li, int(t.r), 5) & 0x7fff;   // lettre 3×5 au hasard (trait vertical garanti)
+      const bool on = (glyph >> (py * 3 + px)) & 1 || px == 0;
+      return on ? 0xfffafafau : color;
+    }
     case TEX_RIM: {    // flanc du pneu, jante à trois branches, moyeu
       Vec3 d{p.x - t.o.x, p.y - t.o.y, p.z - t.o.z};
       double s = d.x * t.u.x + d.y * t.u.y + d.z * t.u.z, w = d.x * t.v.x + d.y * t.v.y + d.z * t.v.z;
