@@ -682,9 +682,20 @@ void RelayProbe::start(const std::string &server) {
       std::sscanf(msg.c_str() + 7, "%d %d", &sh->players, &sh->games);
       size_t sc = msg.find(';');
       if (sc != std::string::npos) sh->params = msg.substr(sc + 1);
+      size_t v = sh->params.find(";version=");   // serveur v49 et suivants : sa version
+      if (v != std::string::npos) {
+        sh->version = cleanText(sh->params.substr(v + 9), 16);
+        sh->params.resize(v);
+      }
     }
     sh->state = State::Ok;   // un ancien relais répond aussi (message d'erreur) : il est en service
   });
+}
+
+std::string RelayProbe::version() const {
+  if (!sh_) return "";
+  std::lock_guard<std::mutex> l(sh_->mu);
+  return sh_->version;
 }
 
 std::string RelayProbe::params() const {

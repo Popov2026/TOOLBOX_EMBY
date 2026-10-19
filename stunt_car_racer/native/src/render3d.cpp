@@ -17,7 +17,7 @@ void Renderer3D::begin(int W, int H, const Camera &cam, uint32_t background) {
   cyw_ = std::cos(cam.yaw); syw_ = std::sin(cam.yaw);
   cp_ = std::cos(cam.pitch); sp_ = std::sin(cam.pitch);
   cr_ = std::cos(cam.roll); sr_ = std::sin(cam.roll);
-  polys_.clear(); sx_.clear(); sy_.clear(); texs_.clear();
+  polys_.clear(); trans_.clear(); sx_.clear(); sy_.clear(); texs_.clear();
   // matrice de rotation monde -> caméra (colonnes = images des axes du monde)
   for (int c = 0; c < 3; c++) {
     Vec3 e{cam.pos.x + (c == 0), cam.pos.y + (c == 1), cam.pos.z + (c == 2)};
@@ -39,6 +39,12 @@ void Renderer3D::poly(const Vec3 *pts, int n, uint32_t color) {
   Vec3 cam[32];
   for (int i = 0; i < n; i++) cam[i] = toCam(pts[i]);
   addClipped(cam, n, color, -1);
+}
+
+void Renderer3D::polyAlpha(const Vec3 *pts, int n, uint32_t color, float alpha) {
+  Vec3 cam[32];
+  for (int i = 0; i < n; i++) cam[i] = toCam(pts[i]);
+  addClipped(cam, n, color, -1, -1, std::clamp(alpha, 0.f, 1.f));
 }
 
 void Renderer3D::polyFar(const Vec3 *pts, int n, uint32_t color, float depth) {
@@ -250,7 +256,7 @@ uint32_t Renderer3D::shade(const TexPlane &tp, uint32_t color, const Vec3 &p, do
   return mulRGB(color, k);
 }
 
-void Renderer3D::addClipped(const Vec3 *in, int n, uint32_t color, float fixedDepth, int tex) {
+void Renderer3D::addClipped(const Vec3 *in, int n, uint32_t color, float fixedDepth, int tex, float alpha) {
   const double zn = cam_.nearZ;
   // rejet rapide : tout derrière le plan proche
   bool any = false;
@@ -319,7 +325,7 @@ void Renderer3D::addClipped(const Vec3 *in, int n, uint32_t color, float fixedDe
     ia = float(nx / (f * d)); ib = float(-ny / (fy * d));
     ic = float((nz - nx * cam_.cx / f + ny * cam_.cy / fy) / d);
   }
-  polys_.push_back({first, k, color, ia, ib, ic, ymin, ymax, fixedDepth, tex});
+  (alpha < 1.f ? trans_ : polys_).push_back({first, k, color, ia, ib, ic, ymin, ymax, fixedDepth, tex, alpha});
 }
 
 // lignes y ≡ k (mod n) : les lignes entrelacées équilibrent la charge entre cœurs (le sol texturé
@@ -362,7 +368,40 @@ void Renderer3D::rasterBand(uint32_t *out, int k, int n) {
       }
     }
   }
-  if (texs_.empty()) return;
+  if (!texs_.empty()) shadeBand(out, k, n);
+  // surfaces semi-transparentes (ombres, fumée) : par-dessus l'image, sans écrire la profondeur
+  for (const SPoly &p : trans_) {
+    int ry0 = std::max(0, int(std::ceil(p.ymin - 0.5f))), ry1 = std::min(H_, int(std::ceil(p.ymax - 0.5f)));
+    ry0 += ((k - ry0) % n + n) % n;
+    const float *X = &sx_[p.first], *Y = &sy_[p.first];
+    const uint32_t cr = (p.color >> 16) & 255, cg = (p.color >> 8) & 255, cb = p.color & 255;
+    const uint32_t a = uint32_t(p.alpha * 256), na = 256 - a;
+    for (int y = ry0; y < ry1; y += n) {
+      float yc = y + 0.5f, xl = 1e30f, xr = -1e30f;
+      for (int i = 0; i < p.n; i++) {
+        int j = (i + 1 == p.n) ? 0 : i + 1;
+        float ya = Y[i], yb = Y[j];
+        if ((ya <= yc && yc < yb) || (yb <= yc && yc < ya)) {
+          float x = X[i] + (yc - ya) * (X[j] - X[i]) / (yb - ya);
+          xl = std::min(xl, x); xr = std::max(xr, x);
+        }
+      }
+      if (xl > xr) continue;
+      int xa = std::max(0, int(std::ceil(xl - 0.5f))), xb = std::min(W_, int(std::ceil(xr - 0.5f)));
+      uint32_t *o = out + size_t(y) * W_;
+      const float *zb = &zbuf_[size_t(y) * W_];
+      float d = p.ia * (xa + 0.5f) + p.ib * yc + p.ic;
+      for (int x = xa; x < xb; x++, d += p.ia)
+        if (d > zb[x] * 0.9995f) {
+          uint32_t c = o[x];
+          o[x] = 0xff000000u | (((((c >> 16) & 255) * na + cr * a) >> 8) << 16) | (((((c >> 8) & 255) * na + cg * a) >> 8) << 8) |
+                 (((c & 255) * na + cb * a) >> 8);
+        }
+    }
+  }
+}
+
+void Renderer3D::shadeBand(uint32_t *out, int k, int n) {
   // ombrage des pixels texturés visibles, par suites de pixels du même polygone
   const double f = cam_.focal, fy = cam_.focalY;
   const double bx = M_[0][0] / f, by = M_[0][1] / f, bz = M_[0][2] / f;
@@ -416,10 +455,72 @@ void Renderer3D::rasterBand(uint32_t *out, int k, int n) {
 
 void Renderer3D::finish(uint32_t *out) {
   int n = std::min(threads_, H_);
-  if (n <= 1) { rasterBand(out, 0, 1); return; }
-  std::vector<std::thread> th;
-  for (int k = 0; k < n; k++) th.emplace_back([this, out, k, n] { rasterBand(out, k, n); });
-  for (auto &t : th) t.join();
+  if (n <= 1) rasterBand(out, 0, 1);
+  else {
+    std::vector<std::thread> th;
+    for (int k = 0; k < n; k++) th.emplace_back([this, out, k, n] { rasterBand(out, k, n); });
+    for (auto &t : th) t.join();
+  }
+  if (!aa_ || W_ < 3 || H_ < 3) return;
+  // lissage lu dans l'image finie (inchangée pendant le calcul), pixels corrigés écrits ensuite
+  aaFix_.resize(size_t(std::max(n, 1)));
+  if (n <= 1) fxaaBand(out, 0, 1);
+  else {
+    std::vector<std::thread> th;
+    for (int k = 0; k < n; k++) th.emplace_back([this, out, k, n] { fxaaBand(out, k, n); });
+    for (auto &t : th) t.join();
+  }
+  for (auto &v : aaFix_) for (auto &f : v) out[f.first] = f.second;
 }
+
+// lissage des bords, d'après FXAA (Timothy Lottes) : là où le contraste local est fort, le pixel est
+// remplacé par une moyenne prise le long du bord (direction déduite des luminances voisines)
+void Renderer3D::fxaaBand(const uint32_t *src, int k, int n) {
+  auto luma = [](uint32_t c) { return int((((c >> 16) & 255) * 77 + ((c >> 8) & 255) * 150 + (c & 255) * 29) >> 8); };
+  std::vector<std::pair<size_t, uint32_t>> &fix = aaFix_[size_t(k)];
+  fix.clear();
+  auto fetch = [&](float x, float y, float rgb[3]) {   // lecture bilinéaire
+    x = std::clamp(x, 0.f, float(W_ - 1)); y = std::clamp(y, 0.f, float(H_ - 1));
+    int x0 = int(x), y0 = int(y), x1 = std::min(x0 + 1, W_ - 1), y1 = std::min(y0 + 1, H_ - 1);
+    float fx = x - float(x0), fy = y - float(y0);
+    uint32_t c00 = src[size_t(y0) * W_ + x0], c10 = src[size_t(y0) * W_ + x1], c01 = src[size_t(y1) * W_ + x0], c11 = src[size_t(y1) * W_ + x1];
+    for (int s = 0; s < 3; s++) {
+      int sh = 16 - 8 * s;
+      float a = float((c00 >> sh) & 255) * (1 - fx) + float((c10 >> sh) & 255) * fx, b = float((c01 >> sh) & 255) * (1 - fx) + float((c11 >> sh) & 255) * fx;
+      rgb[s] = a * (1 - fy) + b * fy;
+    }
+  };
+  const int ya = std::max(1, H_ * k / n), yb = std::min(H_ - 1, H_ * (k + 1) / n);
+  for (int y = ya; y < yb; y++) {
+    const uint32_t *r0 = src + size_t(y - 1) * W_, *r1 = r0 + W_, *r2 = r1 + W_;
+    for (int x = 1; x < W_ - 1; x++) {
+      const uint32_t cM = r1[x];
+      if (cM == r1[x - 1] && cM == r1[x + 1] && cM == r0[x] && cM == r2[x]) continue;   // aplat : rien à lisser
+      // contraste local, en entiers
+      int iM = luma(cM), iN = luma(r0[x]), iS = luma(r2[x]), iW = luma(r1[x - 1]), iE = luma(r1[x + 1]);
+      int imin = std::min({iM, iN, iS, iW, iE}), imax = std::max({iM, iN, iS, iW, iE});
+      if (imax - imin < std::max(16, imax * 42 >> 8)) continue;
+      const float s = 1.f / 255;
+      float lmin = imin * s, lmax = imax * s;
+      float lNW = luma(r0[x - 1]) * s, lNE = luma(r0[x + 1]) * s, lSW = luma(r2[x - 1]) * s, lSE = luma(r2[x + 1]) * s;
+      float dx = -((lNW + lNE) - (lSW + lSE)), dy = (lNW + lSW) - (lNE + lSE);
+      float reduce = std::max((lNW + lNE + lSW + lSE) * 0.03125f, 1.f / 128);
+      float rcp = 1.f / (std::min(std::fabs(dx), std::fabs(dy)) + reduce);
+      dx = std::clamp(dx * rcp, -8.f, 8.f); dy = std::clamp(dy * rcp, -8.f, 8.f);
+      float a1[3], a2[3], b1[3], b2[3];
+      const float fxp = float(x), fyp = float(y);
+      fetch(fxp + dx * (1.f / 3 - 0.5f), fyp + dy * (1.f / 3 - 0.5f), a1);
+      fetch(fxp + dx * (2.f / 3 - 0.5f), fyp + dy * (2.f / 3 - 0.5f), a2);
+      fetch(fxp - dx * 0.5f, fyp - dy * 0.5f, b1);
+      fetch(fxp + dx * 0.5f, fyp + dy * 0.5f, b2);
+      float A[3], B[3];
+      for (int s = 0; s < 3; s++) { A[s] = 0.5f * (a1[s] + a2[s]); B[s] = 0.5f * A[s] + 0.25f * (b1[s] + b2[s]); }
+      float lB = (B[0] * 77 + B[1] * 150 + B[2] * 29) * (1.f / 65280.f);
+      const float *C = (lB < lmin || lB > lmax) ? A : B;
+      fix.emplace_back(size_t(y) * W_ + x, 0xff000000u | uint32_t(C[0] + 0.5f) << 16 | uint32_t(C[1] + 0.5f) << 8 | uint32_t(C[2] + 0.5f));
+    }
+  }
+}
+
 
 }  // namespace scr

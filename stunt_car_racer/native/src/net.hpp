@@ -173,12 +173,13 @@ class RelayProbe {
   std::string text() const;                // texte pour le menu
   bool ok() const { return state() == State::Ok; }
   std::string params() const;              // réglages imposés par le serveur (vide si inconnus)
+  std::string version() const;             // version du serveur (= version du jeu à jour), vide si ancien serveur
 
  private:
   struct Shared {
     std::mutex mu;
     State state = State::Off;
-    std::string server, error, params;
+    std::string server, error, params, version;
     int players = -1, games = -1, pingMs = -1;
   };
   std::shared_ptr<Shared> sh_;

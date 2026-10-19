@@ -19,7 +19,22 @@ fréquence de l'écran), F2 recharger les images HD, F3 couper le son,
 F4, F11 ou Alt+Entrée plein écran, F5 détails élevés (sols, route et voiture
 adverse texturés, roues rondes ; active le mode HD), F6 recommencer,
 Page préc./suiv. circuit précédent/suivant (mode entraînement), F7 circuits d'origine / TNT,
-F12 quitter.
+F8 menu d'options, F12 quitter.
+
+Menu d'options (F8, ou bouton Start de la manette) : son et volume, mode HD, détails élevés,
+ombres des voitures, étincelles et fumée, lissage des bords, plein écran, circuits d'origine /
+TNT, manette (et vibrations lors des chocs), touches de conduite (accélérer, freiner, gauche,
+droite, boost : Entrée puis la nouvelle touche ; les flèches restent actives pour les menus).
+Chaque changement est enregistré aussitôt dans scr.ini. Le jeu est en pause pendant ce menu
+(sauf en multijoueur). Flèches + Entrée (ou gauche/droite) pour changer, Échap pour fermer.
+
+Mode HD : ombres sous les voitures, gerbes d'étincelles et fumée lors des chocs et des
+réceptions brutales (les vôtres et celles des autres joueurs en course à plusieurs), bords
+lissés (anticrénelage). Chaque effet se coupe dans le menu d'options.
+
+Mises à jour : au démarrage, le jeu interroge le serveur online ; si une version plus récente
+est sortie, un bandeau le signale (« Nouvelle version vXX disponible »), ainsi que le menu
+« 4. Online Multiplayer ».
 
 Multijoueur (à deux, en réseau) : premier menu du jeu, « 3. Computer Link - Local LAN » (même
 réseau : les adversaires trouvés sont proposés, ou une adresse IP) ou « 4. Online Multiplayer »

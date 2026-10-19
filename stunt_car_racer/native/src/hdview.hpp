@@ -40,6 +40,9 @@ struct HdParams {
   bool flameImages = false;                // utiliser les images de flammes du dossier hd/ (sinon ignorées)
   bool opponent3D = true;                  // voiture adverse redessinée en 3D (sinon : pixels d'origine)
   bool highDetail = false;                 // détails élevés (F5) : sols et voiture texturés, roues rondes
+  bool antialias = true;                   // lissage des bords (FXAA) de la scène 3D
+  bool shadows = true;                     // ombres sous les voitures (posées sur la route, même en l'air)
+  bool particles = true;                   // étincelles et fumée aux chocs et réceptions brutales
 };
 
 class HdView {
@@ -71,11 +74,17 @@ class HdView {
 
   // course à plusieurs : voitures des autres joueurs (fantômes : dessinées, sans collision),
   // remplies par l'appelant avant render() ; render() calcule la place de leur nom à l'écran
-  struct Ghost { OppPose pose; std::string name; bool boost = false; double sx = 0, sy = 0, dist = 0; bool onScreen = false; uint32_t id = 0; };
+  struct Ghost {
+    OppPose pose; std::string name; bool boost = false; double sx = 0, sy = 0, dist = 0; bool onScreen = false; uint32_t id = 0;
+    int impact = 0; double impactStamp = 0;   // dernier choc signalé par ce joueur : force (1-63) et numéro (0-3)
+  };
   std::vector<Ghost> ghosts;
   double viewSide = 0;   // décalage latéral de la vue (+ : à droite) : départ de la grue du côté de sa place
   // voiture d'un joueur (état de la physique, comme poseFromState) -> repère de voiture affichable
   OppPose ghostFromPose(const Pose &p) const;
+  // étincelles et fumée à ce point (x, z : unités du monde ; yRaw : hauteur brute), force 1 à 63
+  void impactAt(double x, double yRaw, double z, int strength);
+  void stepParticles(double dt);   // dt en trames (60 par seconde)
 
  private:
   // hauteur brute de la route sous (x, z), la plus proche de yRef ; faux hors de la route
@@ -88,11 +97,20 @@ class HdView {
   // roues de l'adversaire : distance parcourue (unités du monde) -> angle de rotation
   double oppRoll_ = 0, oppRollStep_ = 0, oppRollContrast_ = 1;   // angle affiché, pas par image, netteté
   OppPose oppPrev_;
-  struct GhostWheels { OppPose prev; double roll = 0; };   // roues de chaque autre joueur (course à plusieurs)
+  struct GhostWheels { OppPose prev; double roll = 0; double impactStamp = -1; };   // roues (et chocs) de chaque autre joueur
   std::map<uint32_t, GhostWheels> ghostWheels_;
   bool oppHave_ = false;
   void addCar(const OppPose &o, double hs, const Machine &m, bool closed = false);   // closed : flanc gauche dessiné aussi
   void addFlames(const OppPose &o, double hs, int seed);   // flammes du boost d'une voiture fantôme
+  void addShadow(const OppPose &o, double hs, int track);   // ombre portée sur la route (ou le sol)
+  // particules : étincelles (opaques, en traînée) et fumée (semi-transparente)
+  struct Particle { Vec3 p, v; float life, maxLife, size; int kind; };
+  std::vector<Particle> particles_;
+  double partT_ = -1;
+  int ownDamage_ = -1, ownImpact_ = 0;   // dégâts de la voiture du joueur ($10939-$1093B) : nouveaux chocs
+  uint32_t partSeed_ = 12345;
+  void spawnImpact(const Vec3 &at, int strength, const Vec3 &dir);
+  void drawParticles(const Camera &c);
   uint32_t flameTick_ = 0;
   std::vector<Track> tracks_;
   std::deque<Snap> snaps_;

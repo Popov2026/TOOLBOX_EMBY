@@ -155,6 +155,11 @@ void HdView::drawFlame(int id, double x0, double y0, double s, const Machine &m,
 
 void HdView::afterFrame(const Machine &m) {
   frame_++;
+  {   // dégâts de la voiture du joueur : une hausse = choc ou réception brutale (étincelles, fumée)
+    int d = m.b(0x10939) + m.b(0x1093a) + m.b(0x1093b);
+    if (ownDamage_ >= 0 && d > ownDamage_) ownImpact_ = std::min(63, ownImpact_ + (d - ownDamage_) * 4);
+    ownDamage_ = d;
+  }
   {   // vent relatif : vitesse au sol de la voiture ($10AD4 / $10AD8)
     double vx = int16_t(m.w(0x10ad4)), vz = int16_t(m.w(0x10ad8));
     windTarget_ = std::clamp(std::sqrt(vx * vx + vz * vz) / 20000.0, 0.0, 1.0);
@@ -603,7 +608,10 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
       r3d_.poly(sq, 4, pal(15));
     }
   }
-  if (opp && opp->valid) addCar(*opp, HSCALE, m);
+  if (opp && opp->valid) {
+    if (P.shadows) addShadow(*opp, HSCALE, track);
+    addCar(*opp, HSCALE, m);
+  }
   for (auto &g : ghosts) {   // autres joueurs (course à plusieurs) et place de leur nom au-dessus de la voiture
     g.onScreen = false;
     if (!g.pose.valid) continue;
@@ -615,8 +623,16 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
       if (surfaceRaw(tracks_[track & 7], g.pose.x, g.pose.z, g.pose.yRaw, s) && s > g.pose.yRaw && s - g.pose.yRaw < 260) g.pose.yRaw = s;
       hint_ = keepHint;
     }
+    if (P.shadows) addShadow(g.pose, HSCALE, track);
     {   // roues : rotation propre à chaque joueur, selon la distance parcourue depuis l'image précédente
       GhostWheels &gw = ghostWheels_[g.id];
+      // choc signalé par ce joueur (numéro de choc changé) : étincelles chez nous aussi
+      if (gw.impactStamp < 0) gw.impactStamp = g.impactStamp;
+      else if (g.impactStamp != gw.impactStamp) {
+        gw.impactStamp = g.impactStamp;
+        if (P.particles && g.impact > 0)
+          spawnImpact({g.pose.x + g.pose.fwd.x * 50, g.pose.yRaw * HSCALE + 8, g.pose.z + g.pose.fwd.z * 50}, g.impact, g.pose.fwd);
+      }
       double step = 0;
       if (gw.prev.valid) {
         double dx = g.pose.x - gw.prev.x, dy = (g.pose.yRaw - gw.prev.yRaw) * HSCALE, dz = g.pose.z - gw.prev.z;
@@ -642,7 +658,98 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
       g.onScreen = g.sx > -50 && g.sx < W + 50 && g.sy > -20 && g.sy < H;
     }
   }
+  if (P.particles) drawParticles(c);
+  r3d_.setAntialias(P.antialias && W > 400);
   r3d_.finish(out);
+}
+
+// ombre d'une voiture : rectangle sombre semi-transparent posé sur la route sous la voiture (chaque
+// coin à la hauteur de la route), plus grand et plus pâle quand la voiture est en l'air
+void HdView::addShadow(const OppPose &o, double hs, int track) {
+  const Track &T = tracks_[track & 7];
+  const int keepHint = hint_;
+  double s;
+  bool onRoad = surfaceRaw(T, o.x, o.z, o.yRaw, s);
+  if (!onRoad || s > o.yRaw + 80) s = GROUND_RAW;   // hors de la route : ombre sur le sol
+  const double height = o.yRaw - s;                 // hauteur brute au-dessus de la surface
+  if (height < -120) { hint_ = keepHint; return; }
+  const double up = std::max(0.0, height);
+  const float alpha = float(0.55 * std::clamp(1 - up / 1400, 0.2, 1.0));
+  const double grow = 1 + up / 2500, K = 0.55;
+  double fx = o.fwd.x, fz = o.fwd.z, fl = std::hypot(fx, fz);
+  if (fl < 1e-6) { hint_ = keepHint; return; }
+  fx /= fl; fz /= fl;
+  const double rx = fz, rz = -fx;   // droite de la voiture (à plat)
+  const double W2 = 58 * K * grow, Z0 = -128 * K * grow, Z1 = 158 * K * grow;
+  const double cxs[4] = {-W2, W2, W2, -W2}, czs[4] = {Z0, Z0, Z1, Z1};
+  Vec3 q[4];
+  for (int k = 0; k < 4; k++) {
+    double x = o.x + rx * cxs[k] + fx * czs[k], z = o.z + rz * cxs[k] + fz * czs[k], y = s;
+    double sc;
+    if (onRoad && surfaceRaw(T, x, z, s, sc) && std::fabs(sc - s) < 300) y = sc;
+    q[k] = {x, y * hs + 2.0, z};
+  }
+  hint_ = keepHint;
+  r3d_.polyAlpha(q, 4, 0xff000000u, alpha);
+}
+
+void HdView::impactAt(double x, double yRaw, double z, int strength) {
+  if (params.particles) spawnImpact({x, yRaw * params.hScale + 8, z}, strength, {0, 0, 0});
+}
+
+// choc : gerbe d'étincelles (vers le haut et dans le sens du choc) et bouffées de fumée
+void HdView::spawnImpact(const Vec3 &at, int strength, const Vec3 &dir) {
+  auto rnd = [&] { partSeed_ = partSeed_ * 1103515245u + 12345u; return double((partSeed_ >> 8) & 0xffff) / 65535.0; };
+  const int sparks = std::clamp(6 + strength * 2, 6, 60), puffs = std::clamp(1 + strength / 6, 1, 6);
+  for (int i = 0; i < sparks; i++) {
+    double a = rnd() * 6.2831853, sp = 3 + rnd() * (4 + strength * 0.15);
+    Vec3 v{std::cos(a) * sp + dir.x * 4, 2 + rnd() * 6, std::sin(a) * sp + dir.z * 4};
+    float life = float(12 + rnd() * 18);
+    particles_.push_back({{at.x + (rnd() - 0.5) * 30, at.y + rnd() * 6, at.z + (rnd() - 0.5) * 30}, v, life, life, float(0.7 + rnd() * 0.6), 0});
+  }
+  for (int i = 0; i < puffs; i++) {
+    float life = float(45 + rnd() * 40);
+    particles_.push_back({{at.x + (rnd() - 0.5) * 40, at.y + rnd() * 10, at.z + (rnd() - 0.5) * 40},
+                          {(rnd() - 0.5) * 1.2, 0.6 + rnd() * 0.8, (rnd() - 0.5) * 1.2}, life, life, float(10 + rnd() * 8), 1});
+  }
+  if (particles_.size() > 600) particles_.erase(particles_.begin(), particles_.begin() + long(particles_.size() - 600));
+}
+
+void HdView::stepParticles(double dt) {
+  for (auto &q : particles_) {
+    q.p.x += q.v.x * dt; q.p.y += q.v.y * dt; q.p.z += q.v.z * dt;
+    if (q.kind == 0) { q.v.y -= 0.9 * dt; q.v.x *= std::pow(0.97, dt); q.v.z *= std::pow(0.97, dt); }
+    else { q.v.x *= std::pow(0.96, dt); q.v.z *= std::pow(0.96, dt); q.v.y *= std::pow(0.985, dt); q.size += float(0.5 * dt); }
+    q.life -= float(dt);
+  }
+  particles_.erase(std::remove_if(particles_.begin(), particles_.end(), [](const Particle &q) { return q.life <= 0; }), particles_.end());
+}
+
+void HdView::drawParticles(const Camera &c) {
+  const Vec3 R{std::cos(c.yaw), 0, -std::sin(c.yaw)};
+  for (const auto &q : particles_) {
+    const float f = q.life / q.maxLife;
+    if (q.kind == 0) {   // étincelle : traînée du jaune au rouge
+      Vec3 tail{q.p.x - q.v.x * 1.5, q.p.y - q.v.y * 1.5, q.p.z - q.v.z * 1.5};
+      double w = q.size;
+      Vec3 s[4] = {{q.p.x - R.x * w, q.p.y + w, q.p.z - R.z * w}, {q.p.x + R.x * w, q.p.y - w, q.p.z + R.z * w},
+                   {tail.x + R.x * w * 0.4, tail.y - w * 0.4, tail.z + R.z * w * 0.4}, {tail.x - R.x * w * 0.4, tail.y + w * 0.4, tail.z - R.z * w * 0.4}};
+      uint32_t g = uint32_t(120 + 135 * f), b = uint32_t(60 * f * f);
+      r3d_.poly(s, 4, 0xff000000u | 0xff0000u | (g << 8) | b);
+    } else {   // fumée : carré face à la caméra, gris, de plus en plus pâle
+      // près de la caméra : de plus en plus transparente (pas de voile sur tout l'écran)
+      const double dx = q.p.x - c.pos.x, dy = q.p.y - c.pos.y, dz = q.p.z - c.pos.z, dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+      const float near = float(std::clamp((dist - 80) / 220, 0.0, 1.0));
+      if (near <= 0) continue;
+      double w = q.size;
+      Vec3 s[8];   // bouffée : octogone face à la caméra
+      for (int i = 0; i < 8; i++) {
+        double a = i * 0.785398 + 0.39, cx = std::cos(a) * w, cy = std::sin(a) * w;
+        s[i] = {q.p.x + R.x * cx, q.p.y + cy, q.p.z + R.z * cx};
+      }
+      r3d_.polyAlpha(s, 8, 0xff9a9a9au, 0.45f * f * near);
+    }
+  }
 }
 
 void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
@@ -665,6 +772,17 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
   if (viewSide != 0) { p.x += std::cos(p.yaw) * viewSide; p.z -= std::sin(p.yaw) * viewSide; }   // vue décalée sur le côté
   int track = snaps_.back().track;
   OppPose opp = opponentAt(T);
+  {   // particules (étincelles, fumée) : avancées selon le temps écoulé, en trames
+    double dt = partT_ < 0 ? 0 : std::clamp(T - partT_, 0.0, 4.0);
+    partT_ = T;
+    stepParticles(dt);
+    if (ownImpact_ > 0) {   // choc de notre voiture : gerbe devant le capot
+      const double sy = std::sin(p.yaw), cy = std::cos(p.yaw);
+      if (params.particles)
+        spawnImpact({p.x + sy * 120, p.y * params.hScale / 0.5 + 6, p.z + cy * 120}, ownImpact_, {sy, 0, cy});
+      ownImpact_ = 0;
+    }
+  }
   {   // roues de l'adversaire : distance parcourue depuis l'image précédente, dans le sens de la marche
     double step = 0;
     if (opp.valid && oppPrev_.valid) {

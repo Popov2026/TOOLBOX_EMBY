@@ -27,7 +27,7 @@
 //                                            (course à plusieurs, 2 à 6 joueurs d'une salle privée)
 //                       GPOS (21) position de la voiture (binaire), retransmise aux autres membres
 //                                 précédée du numéro du joueur (4 octets)
-//                       PROBE (15) ""       (test du serveur par le jeu : réponse INFO "SERVER joueurs parties")
+//                       PROBE (15) ""       (test du serveur par le jeu : réponse INFO "SERVER joueurs parties;réglages;version=vNN")
 //                       JOIN (10) "code\0version"  (ancienne version : appariement par code)
 //   serveur -> client : INFO (11) "WAIT" | "PAIRED 1" (maître) | "PAIRED 2" | "GONE" | "BUSY" | "ERR message"
 //                       LIST (13) "numéro\tnom\n..." (salle privée : joueurs présents et libres)
@@ -103,7 +103,7 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v48"
+#define SCR_RELAY_VERSION "v49"
 
 namespace {
 
@@ -499,7 +499,8 @@ void process(Client &c) {
       else if (type == NF_PROBE) {   // le jeu vérifie que le serveur répond
         size_t players = 0, games = 0;
         for (auto &kv : clients) { players += kv.second.joined; games += kv.second.peer != NONE; }
-        frame(c, NF_INFO, "SERVER " + std::to_string(players) + " " + std::to_string(games / 2) + ";" + paramsText());
+        // version du serveur (= version du jeu) : le jeu prévient le joueur quand une nouvelle version est sortie
+        frame(c, NF_INFO, "SERVER " + std::to_string(players) + " " + std::to_string(games / 2) + ";" + paramsText() + ";version=" SCR_RELAY_VERSION);
         c.probe = c.closing = true;
       }
       else { frame(c, NF_INFO, "ERR inscription attendue"); c.closing = true; }

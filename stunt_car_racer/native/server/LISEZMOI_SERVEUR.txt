@@ -117,6 +117,10 @@ données de l'un à l'autre. Deux façons de se trouver (menu « Computer Link �
     après le premier arrivé. (Serveur v34 ou plus récent.)
     Circuits TNT (8 à 15) proposés par l'organisateur : serveur v46 ou plus récent.
   - Les deux joueurs doivent avoir la même version de scr.exe (le serveur refuse sinon).
+  - Mises à jour : le serveur porte le même numéro de version que le jeu et l'annonce aux jeux
+    qui le testent (au démarrage et dans le menu « 4. Online Multiplayer », jeu v49 ou plus
+    récent) ; un jeu plus ancien affiche « Nouvelle version vXX disponible ». Mettre le serveur à
+    jour en même temps que le jeu distribué aux joueurs.
   - Une connexion silencieuse plus de 90 s est fermée ; 16 connexions au plus par adresse IP,
     512 en tout.
   - Le serveur ne voit que des octets du jeu : aucun compte, aucune donnée personnelle.

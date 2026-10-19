@@ -13,7 +13,7 @@
 // Touches : flèches = joystick (haut accélère), Espace/Ctrl/Maj/Alt = bouton (boost),
 //           clavier ST pour les menus, F4/F11/Alt+Entrée plein écran, F12 quitter, PageUp/PageDown
 //           circuit précédent/suivant (entraînement), F5 détails élevés, F6 recommencer,
-//           F7 circuits d'origine / circuits TNT.
+//           F7 circuits d'origine / circuits TNT, F8 menu d'options.
 #include <SDL.h>
 
 #include <algorithm>
@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v48"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v49"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -56,6 +56,9 @@ struct Options {
   std::string hdDir;
   bool hdFlames = false;   // images de flammes du dossier hd/ (sinon : sprites d'origine agrandis)
   bool highDetail = false; // détails élevés au démarrage (touche F5)
+  bool shadows = true, particles = true, antialias = true;   // HD : ombres, étincelles et fumée, lissage des bords
+  bool usePad = true, rumble = true;                         // manette, vibrations lors des chocs
+  std::string keyNames[5] = {"Up", "Down", "Left", "Right", "Space"};   // touches : accélérer, freiner, gauche, droite, boost
   // multijoueur (câble « Computer Link » par le réseau)
   std::string relay;       // serveur relais : adresse[:port]
   std::string tntPath;     // circuits TNT : fichier SCR-TNT ou archive .lha (sinon cherché à côté du jeu)
@@ -78,6 +81,12 @@ static std::string defaultRelay() {
 static const char *const DEFAULT_RELAY_NAME = "serveur officiel";
 static std::string relayAddr(const std::string &configured) { return configured.empty() ? defaultRelay() : configured; }
 static std::string relayShown(const std::string &configured) { return configured.empty() ? DEFAULT_RELAY_NAME : ""; }
+
+// version annoncée par le serveur (« v49 ») plus récente que ce jeu ?
+static bool newerVersion(const std::string &server) {
+  if (server.size() < 2 || (server[0] != 'v' && server[0] != 'V')) return false;
+  return std::atoi(server.c_str() + 1) > std::atoi(&SCR_VERSION[1]);
+}
 
 void setOption(Options &o, const std::string &key, const std::string &val) {
   auto d = [&] { return std::atof(val.c_str()); };
@@ -109,6 +118,16 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "damping") o.tuning.damping = d();
   else if (key == "boostuse") o.tuning.boostUse = d();
   else if (key == "shock") o.tuning.shockTolerance = std::atoi(val.c_str());
+  else if (key == "ombres" || key == "shadows") o.shadows = val != "0";
+  else if (key == "particules" || key == "particles") o.particles = val != "0";
+  else if (key == "lissage" || key == "antialias") o.antialias = val != "0";
+  else if (key == "manette" || key == "gamepad") o.usePad = val != "0";
+  else if (key == "vibrations" || key == "rumble") o.rumble = val != "0";
+  else if (key == "touche_accelerer") o.keyNames[0] = val;
+  else if (key == "touche_freiner") o.keyNames[1] = val;
+  else if (key == "touche_gauche") o.keyNames[2] = val;
+  else if (key == "touche_droite") o.keyNames[3] = val;
+  else if (key == "touche_boost") o.keyNames[4] = val;
   else if (key == "disk") o.disk = val;
   else std::fprintf(stderr, "option inconnue : %s\n", key.c_str());
 }
@@ -461,6 +480,7 @@ int main(int argc, char **argv) {
     view = std::make_unique<HdView>(*m);
     view->params.flameImages = o.hdFlames;
     view->params.highDetail = highDetail;
+    view->params.shadows = o.shadows; view->params.particles = o.particles; view->params.antialias = o.antialias;
     m->enableLayers(true);   // couches toujours suivies : F1 bascule sans délai
     hdImages = view->loadAssets(*m, hdDir);
     if (!view->assets.report.empty()) std::fprintf(stderr, "images HD (%s) :\n%s", hdDir.c_str(), view->assets.report.c_str());
@@ -559,6 +579,34 @@ int main(int argc, char **argv) {
     };
     add(0x10ac2, dx); add(0x10aca, dz);
   };
+  // F6 recommencer, F7 circuits d'origine <-> TNT (enregistré dans scr.ini) ; entraînement : les
+  // touches Page préc./suiv. passent par les 16 circuits (8 d'origine puis 8 TNT)
+  auto changeTrack = [&](SDL_Scancode sc) {
+    const int n = haveTnt ? 16 : 8;
+    int cur = track + (soloSet ? 8 : 0);
+    if (sc == SDL_SCANCODE_PAGEUP) cur = (cur + n - 1) % n;
+    if (sc == SDL_SCANCODE_PAGEDOWN) cur = (cur + 1) % n;
+    if (sc == SDL_SCANCODE_F7) cur = track < 0 ? (soloSet ? -1 : 8) : (cur + 8) % 16;
+    bool tntNow = sc == SDL_SCANCODE_F7 ? !soloSet : cur >= 8;
+    if (track >= 0) track = cur & 7;
+    if (tntNow != (soloSet != nullptr)) {
+      soloSet = tntNow ? &tntSet : nullptr;
+      o.tnt = tntNow;
+      saveIniValue(ini, {"circuits", "tracks"}, tntNow ? "tnt" : "original", "circuits : original ou tnt (touche F7)");
+      note = tntNow ? "Circuits TNT (F7 : circuits d'origine)" : "Circuits d'origine (F7 : circuits TNT)"; noteUntil = NetLink::clock() + 4;
+      uint32_t h = fnv1a(m->image().data(), m->image().size());
+      if (soloSet) h = fnv1a(tntSet.data.data(), tntSet.data.size(), h);
+      gameHash = h;
+      net.setIdentity(SCR_VERSION, gameHash, o.playerName, tuningText(o.tuning));
+    }
+    view.reset();
+    m.reset();
+    m = start(disk, o, track, soloSet);
+    trackList = decodeTracks(m->image(), m->trackSet());
+    newView();
+    setupAudio();
+    wireNet();
+  };
   uint64_t lastPresent = 0, fpsT0 = SDL_GetPerformanceCounter();
   int fpsN = 0;
   bool fpsLog = std::getenv("SCR_FPS") != nullptr;
@@ -577,6 +625,9 @@ int main(int argc, char **argv) {
   // 6 tester à nouveau le serveur
   struct MenuItem { std::string label; int kind; NetLink::Peer peer; };
   RelayProbe probe;                 // « Online Multiplayer » : le serveur relais répond-il ?
+  RelayProbe updateProbe;           // au démarrage : le serveur annonce la dernière version du jeu
+  bool updateShown = false;
+  updateProbe.start(relayAddr(o.relay));
   int netRate = o.netRate;          // cadence réseau en cours (scr.ini, ou imposée par le serveur relais)
   // 4. Online Multiplayer (sinon 3. Computer Link - Local LAN) ; retenu même si la machine est relancée
   bool onlineSel = false;
@@ -601,7 +652,8 @@ int main(int argc, char **argv) {
     double viewSide = 0;      // décalage de la vue (et de la position envoyée) : la grue arrive du côté de sa place
     uint32_t collTick = 0;    // collisions avec les autres voitures : une fois par cycle de la physique
     double tickRate = 17, rateT0 = 0; uint32_t rateTicks0 = 0;
-    double lastHit = 0;
+    double lastHit = 0, lastSpark = 0;
+    int dmgPrev = -1, impSeq = 0, impStr = 0;   // chocs de notre voiture (hausse des dégâts) signalés aux autres
     bool skip = false;        // circuit TNT choisi mais fichier SCR-TNT absent : ne participe pas
   } gr;
   int gTrack = 0, gLaps = 3;      // choix de l'organisateur
@@ -706,6 +758,96 @@ int main(int argc, char **argv) {
   };
   parseAuto(std::getenv("SCR_AUTOKEYS"), [&](uint32_t f, const std::string &k) { autoKeys.push_back({f, SDL_GetScancodeFromName(k.c_str())}); });
   parseAuto(std::getenv("SCR_SHOT"), [&](uint32_t f, const std::string &k) { autoShots.push_back({f, k}); });
+  // --- menu d'options (F8, ou bouton Start de la manette) : réglages enregistrés aussitôt dans scr.ini ;
+  // le jeu est en pause pendant ce menu, sauf en multijoueur
+  bool optOpen = false;
+  int optSel = 0, optBind = -1;   // optBind : touche en attente (0 accélérer ... 4 boost)
+  bool prevLeft = false, prevRight = false, prevStart = false;
+  SDL_Scancode bindSc[5];
+  static const SDL_Scancode bindDef[5] = {SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT, SDL_SCANCODE_SPACE};
+  static const char *const bindKeys[5] = {"touche_accelerer", "touche_freiner", "touche_gauche", "touche_droite", "touche_boost"};
+  static const char *const bindLabels[5] = {"Accélérer", "Freiner", "Gauche", "Droite", "Boost"};
+  for (int k = 0; k < 5; k++) {
+    bindSc[k] = SDL_GetScancodeFromName(o.keyNames[k].c_str());
+    if (bindSc[k] == SDL_SCANCODE_UNKNOWN) bindSc[k] = bindDef[k];
+  }
+  auto keyLabel = [](SDL_Scancode sc) -> std::string {
+    switch (sc) {
+      case SDL_SCANCODE_UP: return "Flèche haut";
+      case SDL_SCANCODE_DOWN: return "Flèche bas";
+      case SDL_SCANCODE_LEFT: return "Flèche gauche";
+      case SDL_SCANCODE_RIGHT: return "Flèche droite";
+      case SDL_SCANCODE_SPACE: return "Espace";
+      default: { const char *n = SDL_GetScancodeName(sc); return n && *n ? n : "?"; }
+    }
+  };
+  struct OptItem { std::string label; int id; };
+  auto optItems = [&] {
+    auto yn = [](bool b) { return std::string(b ? "oui" : "non"); };
+    std::vector<OptItem> it;
+    it.push_back({"Son : " + yn(!muted) + "  (F3)", 0});
+    it.push_back({"Volume : " + std::to_string(int(std::lround(o.volume * 100))) + " %  < >", 1});
+    it.push_back({"Affichage HD : " + yn(hd) + "  (F1)", 2});
+    it.push_back({"Détails élevés : " + yn(highDetail) + "  (F5)", 3});
+    it.push_back({"Ombres des voitures : " + yn(o.shadows), 4});
+    it.push_back({"Étincelles et fumée : " + yn(o.particles), 5});
+    it.push_back({"Lissage des bords : " + yn(o.antialias), 6});
+    it.push_back({"Plein écran : " + yn(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP) + "  (F11)", 7});
+    it.push_back({haveTnt ? std::string("Circuits : ") + (soloSet ? "TNT" : "d'origine") + "  (F7)" : "Circuits TNT : fichier SCR-TNT absent", 8});
+    it.push_back({"Manette : " + yn(o.usePad) + (pad ? "  (branchée)" : "  (aucune)"), 9});
+    it.push_back({"Vibrations aux chocs : " + yn(o.rumble), 10});
+    for (int k = 0; k < 5; k++)
+      it.push_back({std::string("Touche ") + bindLabels[k] + " : " + (optBind == k ? "appuyez sur une touche..." : keyLabel(bindSc[k])), 11 + k});
+    it.push_back({"Touches par défaut", 16});
+    it.push_back({"Fermer", 17});
+    return it;
+  };
+  auto saveFlag = [&](std::vector<std::string> keys, bool v, const char *comment) { saveIniValue(ini, keys, v ? "1" : "0", comment); };
+  // dir : -1 / +1 (gauche / droite), 0 (Entrée)
+  auto optChange = [&](int id, int dir) {
+    switch (id) {
+      case 0: muted = !muted; m->setVolume(muted ? 0.0 : o.volume); saveFlag({"son", "sound"}, !muted, "son (touche F3)"); break;
+      case 1: {
+        o.volume = std::clamp(std::round(o.volume * 10 + (dir < 0 ? -1 : 1)) / 10, 0.0, 2.0);
+        if (!muted) m->setVolume(o.volume);
+        char b[16]; std::snprintf(b, sizeof b, "%.1f", o.volume);
+        saveIniValue(ini, {"volume"}, b, "volume : 0 à 2");
+        break;
+      }
+      case 2: hd = !hd; applyMode(true); if (!hd) SDL_SetWindowTitle(win, "Stunt Car Racer " SCR_VERSION); saveFlag({"hd"}, hd, "affichage HD (touche F1)"); break;
+      case 3:
+        highDetail = !highDetail; view->params.highDetail = highDetail;
+        if (highDetail && !hd) { hd = true; applyMode(true); }
+        saveFlag({"details", "détails"}, highDetail, "détails élevés (touche F5)");
+        break;
+      case 4: o.shadows = !o.shadows; view->params.shadows = o.shadows; saveFlag({"ombres", "shadows"}, o.shadows, "ombres sous les voitures (HD)"); break;
+      case 5: o.particles = !o.particles; view->params.particles = o.particles; saveFlag({"particules", "particles"}, o.particles, "étincelles et fumée lors des chocs (HD)"); break;
+      case 6: o.antialias = !o.antialias; view->params.antialias = o.antialias; saveFlag({"lissage", "antialias"}, o.antialias, "lissage des bords (HD)"); break;
+      case 7: {
+        bool fs = !(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP);
+        SDL_SetWindowFullscreen(win, fs ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+        saveFlag({"fullscreen"}, fs, "plein écran (touche F11)");
+        break;
+      }
+      case 8:
+        if (!haveTnt) { note = "Circuits TNT : fichier SCR-TNT introuvable (dossier TNT à côté de scr.exe)"; noteUntil = NetLink::clock() + 5; }
+        else if (net.inGroup() || gr.active) { note = "Course à plusieurs : le circuit est choisi par l'organisateur"; noteUntil = NetLink::clock() + 4; }
+        else { changeTrack(SDL_SCANCODE_F7); optOpen = false; }
+        break;
+      case 9: o.usePad = !o.usePad; saveFlag({"manette", "gamepad"}, o.usePad, "manette"); break;
+      case 10: o.rumble = !o.rumble; saveFlag({"vibrations", "rumble"}, o.rumble, "vibrations de la manette lors des chocs"); break;
+      case 11: case 12: case 13: case 14: case 15: if (dir == 0) optBind = id - 11; break;
+      case 16:
+        for (int k = 0; k < 5; k++) {
+          bindSc[k] = bindDef[k];
+          saveIniValue(ini, {bindKeys[k]}, SDL_GetScancodeName(bindSc[k]), "touche (menu d'options, F8)");
+        }
+        break;
+      case 17: optOpen = false; break;
+    }
+  };
+  int lastDamage = -1;              // vibrations : hausse des dégâts de la voiture
+  const Machine *damageOf = nullptr;
   while (running) {
     for (size_t k = 0; k < autoKeys.size();) {
       if (m->frames() < autoKeys[k].frame) { k++; continue; }
@@ -747,6 +889,31 @@ int main(int argc, char **argv) {
           if (typing == Typing::Chat && ch >= 32 && typed.size() < 110) typed += char(ch);
           if (typing == Typing::Pseudo && (std::isalnum(ch) || ch == ' ' || ch == '.' || ch == '-') && typed.size() < 12) typed += char(ch);
         }
+      }
+      else if (ev.type == SDL_KEYDOWN && typing == Typing::None && !ev.key.repeat && ev.key.keysym.scancode == SDL_SCANCODE_F8 && optBind < 0) {
+        optOpen = !optOpen; optSel = 0;
+      }
+      else if (ev.type == SDL_KEYDOWN && optOpen && typing == Typing::None) {   // menu d'options
+        SDL_Scancode sc = ev.key.keysym.scancode;
+        auto items = optItems();
+        int n = int(items.size());
+        optSel = std::clamp(optSel, 0, n - 1);
+        if (optBind >= 0) {   // nouvelle touche (Échap : annuler)
+          if (sc != SDL_SCANCODE_ESCAPE && !ev.key.repeat) {
+            bindSc[optBind] = sc;
+            saveIniValue(ini, {bindKeys[optBind]}, SDL_GetScancodeName(sc), "touche (menu d'options, F8)");
+          }
+          optBind = -1;
+        }
+        else if (sc == SDL_SCANCODE_ESCAPE) optOpen = false;
+        else if (sc == SDL_SCANCODE_UP) optSel = (optSel + n - 1) % n;
+        else if (sc == SDL_SCANCODE_DOWN) optSel = (optSel + 1) % n;
+        else if (sc == SDL_SCANCODE_LEFT || sc == SDL_SCANCODE_RIGHT) {
+          int id = items[size_t(optSel)].id;
+          if (id <= 10) optChange(id, sc == SDL_SCANCODE_RIGHT ? 1 : -1);
+        }
+        else if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER || sc == SDL_SCANCODE_SPACE) optChange(items[size_t(optSel)].id, 0);
+        else if (sc == SDL_SCANCODE_F12) running = false;
       }
       else if (ev.type == SDL_KEYDOWN && typing == Typing::None && ev.key.keysym.scancode == SDL_SCANCODE_F9) {
         if (net.canChat()) { typing = Typing::Chat; typed.clear(); SDL_StartTextInput(); }   // discussion
@@ -834,32 +1001,7 @@ int main(int argc, char **argv) {
             note = "Circuits TNT : fichier SCR-TNT introuvable (dossier TNT à côté de scr.exe)"; noteUntil = NetLink::clock() + 5;
           } else if (sc == SDL_SCANCODE_F6 || (sc == SDL_SCANCODE_F7 && !net.inGroup() && !gr.active) ||
                      ((sc == SDL_SCANCODE_PAGEUP || sc == SDL_SCANCODE_PAGEDOWN) && track >= 0)) {
-            // F7 : circuits d'origine <-> circuits TNT (enregistré dans scr.ini) ; entraînement : les
-            // touches Page préc./suiv. passent par les 16 circuits (8 d'origine puis 8 TNT)
-            const int n = haveTnt ? 16 : 8;
-            int cur = track + (soloSet ? 8 : 0);
-            if (sc == SDL_SCANCODE_PAGEUP) cur = (cur + n - 1) % n;
-            if (sc == SDL_SCANCODE_PAGEDOWN) cur = (cur + 1) % n;
-            if (sc == SDL_SCANCODE_F7) cur = track < 0 ? (soloSet ? -1 : 8) : (cur + 8) % 16;
-            bool tntNow = sc == SDL_SCANCODE_F7 ? !soloSet : cur >= 8;
-            if (track >= 0) track = cur & 7;
-            if (tntNow != (soloSet != nullptr)) {
-              soloSet = tntNow ? &tntSet : nullptr;
-              o.tnt = tntNow;
-              saveIniValue(ini, {"circuits", "tracks"}, tntNow ? "tnt" : "original", "circuits : original ou tnt (touche F7)");
-              note = tntNow ? "Circuits TNT (F7 : circuits d'origine)" : "Circuits d'origine (F7 : circuits TNT)"; noteUntil = NetLink::clock() + 4;
-              uint32_t h = fnv1a(m->image().data(), m->image().size());
-              if (soloSet) h = fnv1a(tntSet.data.data(), tntSet.data.size(), h);
-              gameHash = h;
-              net.setIdentity(SCR_VERSION, gameHash, o.playerName, tuningText(o.tuning));
-            }
-            view.reset();
-            m.reset();
-            m = start(disk, o, track, soloSet);
-            trackList = decodeTracks(m->image(), m->trackSet());
-            newView();
-            setupAudio();
-            wireNet();
+            changeTrack(sc);
           }
         }
         // Échap dans un menu du jeu : retour au menu précédent (la touche n'est alors pas transmise au jeu)
@@ -886,21 +1028,34 @@ int main(int argc, char **argv) {
           } else handled = false;
           if (handled) continue;
         }
-        if (int st = stScancode(sc)) if ((!menuOpen || !down) && !back) m->setKey(st, down);
+        // touche de conduite choisie dans le menu d'options : pas transmise au jeu pendant la course
+        bool driveKey = view && view->racing() && down && std::find(std::begin(bindSc), std::end(bindSc), sc) != std::end(bindSc) &&
+                        std::find(std::begin(bindDef), std::end(bindDef), sc) == std::end(bindDef);
+        if (int st = stScancode(sc)) if ((!menuOpen || !down) && !back && !driveKey) m->setKey(st, down);
       }
     }
     if (m.get() != seenFor) { seenFor = m.get(); seenMenu = false; }
+    if (!updateShown && updateProbe.state() != RelayProbe::State::Probing) {   // nouvelle version : prévenu une fois
+      updateShown = true;
+      if (updateProbe.ok() && newerVersion(updateProbe.version())) {
+        note = "Nouvelle version " + updateProbe.version() + " de Stunt Car Racer disponible (vous avez " SCR_VERSION ")";
+        noteUntil = NetLink::clock() + 12;
+      }
+    }
     if (m->inMenu()) seenMenu = true;
     Joystick j;
-    j.up = keys[SDL_SCANCODE_UP]; j.down = keys[SDL_SCANCODE_DOWN];
-    j.left = keys[SDL_SCANCODE_LEFT]; j.right = keys[SDL_SCANCODE_RIGHT];
+    // flèches toujours actives (menus du jeu) ; touches choisies dans le menu d'options en plus
+    j.up = keys[SDL_SCANCODE_UP] || keys[bindSc[0]]; j.down = keys[SDL_SCANCODE_DOWN] || keys[bindSc[1]];
+    j.left = keys[SDL_SCANCODE_LEFT] || keys[bindSc[2]]; j.right = keys[SDL_SCANCODE_RIGHT] || keys[bindSc[3]];
     // boost : plusieurs touches, car beaucoup de claviers ne lisent pas Espace + deux flèches à la fois
     // (la direction semblait alors bloquée pendant le boost) ; Maj et Alt n'ont pas ce problème
     j.fire = keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL] || keys[SDL_SCANCODE_LSHIFT] ||
-             keys[SDL_SCANCODE_RSHIFT] || keys[SDL_SCANCODE_LALT] || keys[SDL_SCANCODE_RALT];
+             keys[SDL_SCANCODE_RSHIFT] || keys[SDL_SCANCODE_LALT] || keys[SDL_SCANCODE_RALT] || keys[bindSc[4]];
     // en multijoueur, les menus lisent le joystick à travers le lien : un appui bref pourrait être manqué
     double tNow = double(SDL_GetPerformanceCounter()) / double(SDL_GetPerformanceFrequency());
-    if (pad) {
+    bool padStart = false;
+    if (pad && o.usePad) {
+      padStart = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_START);
       int ax = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX), ay = SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY);
       j.left |= ax < -12000 || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_LEFT);
       j.right |= ax > 12000 || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
@@ -910,15 +1065,26 @@ int main(int argc, char **argv) {
                 SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 8000;
       j.fire |= SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A) || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_X);
     }
-    if (menuOpen && typing == Typing::None) {   // manette dans le menu « Computer Link »
+    if (padStart && !prevStart && typing == Typing::None && optBind < 0) { optOpen = !optOpen; optSel = 0; }
+    prevStart = padStart;
+    if (optOpen && optBind < 0) {   // manette dans le menu d'options
+      auto items = optItems();
+      int n = int(items.size());
+      if (j.up && !prevUp) optSel = (optSel + n - 1) % n;
+      if (j.down && !prevDown) optSel = (optSel + 1) % n;
+      int id = items[size_t(std::clamp(optSel, 0, n - 1))].id;
+      if (((j.left && !prevLeft) || (j.right && !prevRight)) && id <= 10) optChange(id, j.right ? 1 : -1);
+      if (j.fire && !prevFire && (id < 11 || id > 15)) optChange(id, 0);   // touches : au clavier
+    }
+    else if (menuOpen && typing == Typing::None) {   // manette dans le menu « Computer Link »
       auto items = menuItems();
       int n = int(items.size());
       if (j.up && !prevUp) menuSel = (menuSel + n - 1) % n;
       if (j.down && !prevDown) menuSel = (menuSel + 1) % n;
       if (j.fire && !prevFire && pad && NetLink::clock() - menuOpenedAt > 0.8) chooseItem(items[size_t(std::min(menuSel, n - 1))]);
     }
-    prevUp = j.up; prevDown = j.down; prevFire = j.fire;
-    if (menuOpen || typing != Typing::None) j = Joystick();
+    prevUp = j.up; prevDown = j.down; prevFire = j.fire; prevLeft = j.left; prevRight = j.right;
+    if (menuOpen || optOpen || typing != Typing::None) j = Joystick();
     if (net.active()) {
       if (j.fire) fireUntil = tNow + 0.35;
       j.fire = j.fire || tNow < fireUntil;
@@ -997,6 +1163,7 @@ int main(int argc, char **argv) {
     last = now;
     if (acc > 0.25) acc = 0.25;
     if (gr.waitingGo) acc = 0;   // course à plusieurs : la voiture attend le départ commun
+    if (optOpen && !net.active() && !gr.active && autoKeys.empty() && autoShots.empty()) acc = 0;   // menu d'options : pause (sauf en multijoueur ; tests automatiques : pas de pause)
     int n = 0;
     // multijoueur : chaque trame est émulée en tranches réparties dans le temps réel, le câble est lu
     // et écrit à chaque tranche (reseau_cadence fois par seconde) ; sinon, trames entières
@@ -1021,6 +1188,14 @@ int main(int argc, char **argv) {
         queueAudio();
         acc -= framePeriod; n++;
       }
+    {   // vibrations de la manette : choc ou réception brutale (hausse des dégâts $10939-$1093B)
+      int d = m->b(0x10939) + m->b(0x1093a) + m->b(0x1093b);
+      if (damageOf == m.get() && d > lastDamage && pad && o.usePad && o.rumble) {
+        double k = std::min(1.0, 0.35 + (d - lastDamage) / 8.0);
+        SDL_GameControllerRumble(pad, Uint16(0xffff * k), Uint16(0xc000 * k), Uint32(150 + 250 * k));
+      }
+      lastDamage = d; damageOf = m.get();
+    }
 
     // grille de départ : la grue repose la voiture près du milieu de la route ; après l'atterrissage, la
     // voiture est placée au milieu de sa moitié de route (gauche ou droite), mesuré sur le tracé du circuit,
@@ -1108,7 +1283,13 @@ int main(int argc, char **argv) {
           m->overlayARGB(ov.data(), &vis);
           for (auto &sd : vis) boost = boost || sd.id == 6 || sd.id == 7 || sd.id == 49 || sd.id == 8 || sd.id == 9 || sd.id == 50;
         }
-        net.sendGhost(v, uint8_t(std::clamp(int(gr.total / ns) + 1, 0, 255)), uint8_t((gr.finished ? 1 : 0) | (boost ? 2 : 0)));
+        {   // choc : numéro (bits 2-3, change à chaque choc) et force / 4 (bits 4-7), répétés dans chaque envoi
+          int d = m->b(0x10939) + m->b(0x1093a) + m->b(0x1093b);
+          if (gr.dmgPrev >= 0 && d > gr.dmgPrev) { gr.impSeq = (gr.impSeq + 1) & 3; gr.impStr = std::clamp((d - gr.dmgPrev) * 4, 4, 63); }
+          gr.dmgPrev = d;
+        }
+        net.sendGhost(v, uint8_t(std::clamp(int(gr.total / ns) + 1, 0, 255)),
+                      uint8_t((gr.finished ? 1 : 0) | (boost ? 2 : 0) | (gr.impSeq << 2) | ((gr.impStr / 4) << 4)));
       }
     }
     // collisions avec les autres voitures (course à plusieurs) : chaque jeu ne déplace que sa propre voiture.
@@ -1161,6 +1342,10 @@ int main(int argc, char **argv) {
           const double target = (vn + vo) / 2 - 0.15 * (vn - vo), dv = target - vn;
           addW(0x10ad4, dv * nx / K); addW(0x10ad8, dv * nz / K);
           const double closing = (vn - vo) * gr.tickRate;   // unités / s
+          if (closing > 300 && view && now - gr.lastSpark > 0.25) {   // choc léger : quelques étincelles au contact
+            gr.lastSpark = now;
+            view->impactAt(me.x + nx * WH, me.y / 0.5, me.z + nz * WH, int(std::min(30.0, closing / 100)));
+          }
           if (closing > 1200 && now - gr.lastHit > 0.5) {   // choc violent : dégâts, comme une mauvaise réception
             gr.lastHit = now;
             int dmg = std::clamp(int((closing - 1200) / 150), 1, 24);
@@ -1172,6 +1357,10 @@ int main(int argc, char **argv) {
     }
     // voiture détruite : le jeu lance le compte à rebours de fin ($10956) et arrête la physique ; le joueur abandonne
     if (gr.active && gr.racing && !gr.finished && gr.sideDone) {
+      if (const char *fh = std::getenv("SCR_FAKEHIT")) {   // test : choc simulé (dégâts) après N secondes
+        static bool hit = false;
+        if (!hit && NetLink::clock() - gr.goAt > std::atof(fh)) { hit = true; m->ram[0x10939] = uint8_t(m->b(0x10939) + 6); }
+      }
       if (const char *fw = std::getenv("SCR_FAKEWRECK"))   // test : casse simulée après N secondes
         if (NetLink::clock() - gr.goAt > std::atof(fw) && !m->b(0x10956)) m->ram[0x10956] = 0x3c;
       gr.wreckFrames = m->b(0x10956) != 0 ? gr.wreckFrames + 1 : 0;
@@ -1371,6 +1560,8 @@ int main(int argc, char **argv) {
         }
         lines.push_back({"Serveur : " + (o.relay.empty() ? std::string(DEFAULT_RELAY_NAME) : o.relay),
                          0xffc0c0c0u, 0xe0202020u});
+        if (probe.ok() && newerVersion(probe.version()))
+          lines.push_back({"Nouvelle version " + probe.version() + " disponible (vous : " SCR_VERSION ")", 0xffffc040u, 0xe0202020u});
       }
       if (net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting)
         st = net.peers().empty() ? "Recherche de joueurs sur le réseau local..." : "Joueurs trouvés sur le réseau local :";
@@ -1452,6 +1643,52 @@ int main(int argc, char **argv) {
         y += lineH;
       }
     };
+    // menu d'options (F8), même allure que le menu du multijoueur
+    auto drawOptions = [&](int logicalW, int logicalH) {
+      if (!optOpen) return;
+      static std::map<std::string, std::tuple<SDL_Texture *, int, int>> cache;
+      if (cache.size() > 80) { for (auto &kv : cache) SDL_DestroyTexture(std::get<0>(kv.second)); cache.clear(); }
+      auto items = optItems();
+      int scale = std::max(1, std::min(logicalW / 400, logicalH / ((int(items.size()) + 2) * 13 + 16)));
+      struct Line { std::string text; uint32_t fg, bg; };
+      std::vector<Line> lines;
+      lines.push_back({"OPTIONS" + std::string(!net.active() && !gr.active ? "  (jeu en pause)" : ""), 0xffffff00u, 0xe0202020u});
+      optSel = std::clamp(optSel, 0, int(items.size()) - 1);
+      for (size_t k = 0; k < items.size(); k++) {
+        bool sel = int(k) == optSel;
+        lines.push_back({items[k].label, sel ? 0xff000000u : 0xff202020u, sel ? 0xffff9a00u : 0xffb6b6b6u});
+      }
+      lines.push_back({optBind >= 0 ? "Nouvelle touche ?   (Échap : annuler)"
+                                    : "Flèches + Entrée : changer   Échap : fermer", 0xffc0c0c0u, 0xe0202020u});
+      int lineH = 13 * scale, total = int(lines.size()) * lineH;
+      int y = std::max(0, (logicalH - total) / 2);
+      {
+        int pw = std::min(logicalW, (44 * 6 + 6) * scale + 16 * scale), ph = total + 12 * scale;
+        SDL_Rect pr{(logicalW - pw) / 2, std::max(0, y - 6 * scale), pw, ph};
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+        SDL_SetRenderDrawColor(ren, 0x48, 0x48, 0x48, 255);
+        SDL_RenderFillRect(ren, &pr);
+        SDL_SetRenderDrawColor(ren, 0x24, 0x24, 0x24, 255);
+        SDL_RenderDrawRect(ren, &pr);
+      }
+      for (auto &ln : lines) {
+        std::string key = ln.text + "|" + std::to_string(ln.fg) + "|" + std::to_string(ln.bg) + "|" + std::to_string(scale);
+        auto it = cache.find(key);
+        if (it == cache.end()) {
+          int bw, bh;
+          auto img = renderBanner(ln.text, scale, bw, bh, ln.fg, ln.bg, 44);
+          SDL_Texture *t = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, bw, bh);
+          SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
+          SDL_UpdateTexture(t, nullptr, img.data(), bw * 4);
+          it = cache.emplace(key, std::make_tuple(t, bw, bh)).first;
+        }
+        auto [t, bw, bh] = it->second;
+        int rw = std::min(bw, logicalW), rh = bw > logicalW ? bh * logicalW / bw : bh;
+        SDL_Rect r{(logicalW - rw) / 2, y, rw, rh};
+        SDL_RenderCopy(ren, t, nullptr, &r);
+        y += lineH;
+      }
+    };
     {   // titre de la fenêtre : état du réseau (mode d'origine ; en HD, avec le compteur d'images)
       static double lastTitle = 0;
       if (!hd && tNow - lastTitle > 0.5) {
@@ -1482,6 +1719,8 @@ int main(int argc, char **argv) {
           HdView::Ghost g;
           g.pose = view->ghostFromPose(ps);
           g.boost = (b->flags & 2) != 0;
+          g.impactStamp = (q.back().flags >> 2) & 3;
+          g.impact = (q.back().flags >> 4) * 4;
           g.id = kv.first;
           for (auto &gm : net.groupMembers()) if (gm.id == kv.first) g.name = gm.name;
           view->ghosts.push_back(g);
@@ -1496,6 +1735,7 @@ int main(int argc, char **argv) {
       drawMenu(o.hdW, o.hdH);
       drawRaceHud(o.hdW, o.hdH);
       drawChat(o.hdW, o.hdH);
+      drawOptions(o.hdW, o.hdH);
       if (gr.active && gr.goAt > 0 && std::getenv("SCR_RACESHOT")) {   // test : captures « secondes:fichier » après le départ
         static std::vector<std::pair<double, std::string>> rs;
         static bool parsed = false;
@@ -1545,6 +1785,11 @@ int main(int argc, char **argv) {
       drawMenu(320, 200);
       drawRaceHud(320, 200);
       drawChat(320, 200);
+      if (optOpen) {   // le menu d'options ne tient pas en 320×200 : dessiné en 640×400
+        SDL_RenderSetLogicalSize(ren, 640, 400);
+        drawOptions(640, 400);
+        SDL_RenderSetLogicalSize(ren, 320, 200);
+      }
       for (size_t k = 0; k < autoShots.size();)
         if (m->frames() >= autoShots[k].first) {
           int w, h; SDL_GetRendererOutputSize(ren, &w, &h);

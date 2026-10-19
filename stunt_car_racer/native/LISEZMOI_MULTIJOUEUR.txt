@@ -8,6 +8,9 @@ retrouve l'autre joueur comme adversaire sur la piste.
 Il faut que les deux joueurs aient la même version de scr.exe et la même image disque (c'est
 vérifié à la connexion). Les réglages de physique sont uniformisés automatiquement : en ligne,
 ceux du serveur ; en réseau local, ceux du joueur qui a choisi l'adversaire.
+Le serveur online annonce la dernière version du jeu : si la vôtre est plus ancienne, le jeu
+l'affiche au démarrage et dans le menu « 4. Online Multiplayer » (« Nouvelle version vXX
+disponible »).
 
 
 1. Se relier et lancer la course

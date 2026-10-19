@@ -2,6 +2,7 @@
 // tampon de profondeur (1/z), découpage au plan proche, répartition par bandes sur plusieurs cœurs.
 #pragma once
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace scr {
@@ -41,6 +42,11 @@ class Renderer3D {
   void polyFarTex(const Vec3 *pts, int n, uint32_t color, float depth, const TexInfo &t, double h);
   // pour le décor lointain (sol, collines) : profondeur fixée au plus loin
   void polyFar(const Vec3 *pts, int n, uint32_t color, float depth);
+  // polygone semi-transparent (ombres, fumée) : dessiné après les surfaces opaques, testé contre leur
+  // profondeur sans l'écrire, mélangé à alpha (0 à 1) dans l'ordre d'envoi
+  void polyAlpha(const Vec3 *pts, int n, uint32_t color, float alpha);
+  // lissage des bords (anticrénelage de type FXAA) appliqué à l'image à la fin de finish()
+  void setAntialias(bool on) { aa_ = on; }
   void finish(uint32_t *out);   // rastérisation (multi-cœurs) dans out (W×H ARGB)
   int threads() const { return threads_; }
   static void warmTextures();   // précalcule les textures (sinon au premier rendu détaillé)
@@ -48,14 +54,19 @@ class Renderer3D {
   Vec3 toCam(const Vec3 &p) const;
 
  private:
-  struct SPoly { int first, n; uint32_t color; float ia, ib, ic; float ymin, ymax; float fixedDepth; int tex; };
+  struct SPoly { int first, n; uint32_t color; float ia, ib, ic; float ymin, ymax; float fixedDepth; int tex; float alpha; };
   struct TexPlane { TexInfo t; Vec3 n; double d; };   // plan du polygone dans le monde : n·p = d
-  void addClipped(const Vec3 *cam, int n, uint32_t color, float fixedDepth, int tex = -1);
+  void addClipped(const Vec3 *cam, int n, uint32_t color, float fixedDepth, int tex = -1, float alpha = 1.f);
+  void fxaaBand(const uint32_t *src, int k, int n);
+  bool aa_ = false;
+  std::vector<std::vector<std::pair<size_t, uint32_t>>> aaFix_;   // pixels lissés, par fil de calcul
+  std::vector<SPoly> trans_;   // polygones semi-transparents
   int addTex(const TexInfo &t, const Vec3 &n, double d);
   uint32_t shade(const TexPlane &tp, uint32_t color, const Vec3 &p, double foot) const;
   double M_[3][3];   // monde -> caméra (rotation)
   std::vector<TexPlane> texs_;
   void rasterBand(uint32_t *out, int k, int n);   // lignes y ≡ k (mod n)
+  void shadeBand(uint32_t *out, int k, int n);    // ombrage différé des surfaces texturées
   int W_ = 0, H_ = 0, threads_ = 1;
   Camera cam_;
   double cyw_, syw_, cp_, sp_, cr_, sr_;
