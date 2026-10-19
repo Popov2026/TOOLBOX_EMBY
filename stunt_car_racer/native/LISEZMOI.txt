@@ -22,13 +22,13 @@ Page préc./suiv. circuit précédent/suivant (mode entraînement), F7 circuits 
 F8 menu d'options, F12 quitter.
 
 Menu d'options (F8, ou bouton Start de la manette) : son et volume, mode HD, détails élevés,
-ombres des voitures, étincelles et fumée, lissage des bords, plein écran, circuits d'origine /
+ciel, ombres des voitures, étincelles et fumée, lissage des bords, plein écran, circuits d'origine /
 TNT, manette (et vibrations lors des chocs), touches de conduite (accélérer, freiner, gauche,
 droite, boost : Entrée puis la nouvelle touche ; les flèches restent actives pour les menus).
 Chaque changement est enregistré aussitôt dans scr.ini. Le jeu est en pause pendant ce menu
 (sauf en multijoueur). Flèches + Entrée (ou gauche/droite) pour changer, Échap pour fermer.
 
-Mode HD : ombres sous les voitures, gerbes d'étincelles et fumée lors des chocs et des
+Mode HD : ciel dégradé avec soleil et nuages qui dérivent lentement, ombres sous les voitures, gerbes d'étincelles et fumée lors des chocs et des
 réceptions brutales (les vôtres et celles des autres joueurs en course à plusieurs), bords
 lissés (anticrénelage). Chaque effet se coupe dans le menu d'options. La voiture adverse suit
 pendant les sauts la trajectoire calculée par le jeu d'origine (elle reste en l'air jusqu'à

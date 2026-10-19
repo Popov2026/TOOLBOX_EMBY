@@ -547,6 +547,7 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
   c.yaw = p.yaw + P.yawOffset; c.pitch = pitch + P.pitchOffset; c.roll = roll;
   c.focal = focal; c.focalY = focal * P.aspect; c.cx = cx; c.cy = cy; c.nearZ = 2;
   r3d_.begin(W, H, c, sky);
+  r3d_.setSky(P.sky, sky, frame_ / 50.0);
 
   // sol et collines (au plus loin, dans l'ordre)
   const double gy = GROUND_RAW * HSCALE, R = 2e6;

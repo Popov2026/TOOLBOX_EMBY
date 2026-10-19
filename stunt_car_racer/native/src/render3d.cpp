@@ -168,9 +168,78 @@ const MipTex &groundMacro() { static const MipTex t({{64, 0.16f}, {16, 0.10f}}, 
 const MipTex &groundDetail() { static const MipTex t({{128, 0.08f}, {32, 0.09f}, {8, 0.11f}, {2, 0.09f}}, 2); return t; }
 const MipTex &roadDetail() { static const MipTex t({{256, 0.06f}, {64, 0.05f}, {8, 0.07f}, {2, 0.06f}}, 3); return t; }
 const MipTex &wallDetail() { static const MipTex t({{64, 0.06f}, {8, 0.07f}}, 4); return t; }
+// nuages : grandes masses découpées (octaves du plus grand au plus fin)
+const MipTex &cloudTex() { static const MipTex t({{128, 0.55f}, {64, 0.28f}, {32, 0.15f}, {16, 0.08f}, {8, 0.04f}}, 7); return t; }
 }  // namespace
 
-void Renderer3D::warmTextures() { groundMacro(); groundDetail(); roadDetail(); wallDetail(); }
+void Renderer3D::warmTextures() { groundMacro(); groundDetail(); roadDetail(); wallDetail(); cloudTex(); }
+
+void Renderer3D::skyBand(uint32_t *out, int k, int n) {
+  const MipTex &cl = cloudTex();
+  auto chan = [&](int sh) { return float((skyBase_ >> sh) & 255); };
+  const float br = chan(16), bgc = chan(8), bb = chan(0);
+  // horizon pâle et brumeux, zénith plus profond (teinte du ciel de la palette du jeu)
+  const float hr = br + (232 - br) * 0.62f, hg = bgc + (240 - bgc) * 0.62f, hb = bb + (255 - bb) * 0.62f;
+  const float zr = br * 0.62f, zg = bgc * 0.72f, zb = bb * 0.92f;
+  // soleil : assez bas pour être vu depuis le cockpit (≈ 8° au-dessus de l'horizon), fixe dans le monde
+  const double sl = std::sqrt(0.62 * 0.62 + 0.14 * 0.14 + 0.72 * 0.72);
+  const double sx = 0.62 / sl, sy = 0.14 / sl, sz = 0.72 / sl;
+  const double f = cam_.focal, fy = cam_.focalY;
+  const double bx = M_[0][0] / f, by = M_[0][1] / f, bz = M_[0][2] / f;
+  const double HC = 9000, SCALE = 260;   // hauteur des nuages au-dessus de l'œil, unités du monde par texel
+  const double du = skyT_ * 2.2, dv = skyT_ * 0.9;   // dérive lente (texels par seconde)
+  for (int y = k; y < H_; y += n) {
+    uint32_t *o = out + size_t(y) * W_;
+    const float *z = &zbuf_[size_t(y) * W_];
+    const double dy = -(y + 0.5 - cam_.cy) / fy;
+    const double ax = M_[1][0] * dy + M_[2][0], ay = M_[1][1] * dy + M_[2][1], az = M_[1][2] * dy + M_[2][2];
+    // couleur du ciel en x (calculée tous les 8 pixels, interpolée entre : le ciel est doux)
+    auto at = [&](int x, float c[3]) {
+      const double xc = x + 0.5 - cam_.cx;
+      const double rx = ax + bx * xc, ry = ay + by * xc, rz = az + bz * xc;
+      const double il = 1.0 / std::sqrt(rx * rx + ry * ry + rz * rz);
+      const double e = ry * il;
+      float t = float(std::sqrt(std::clamp(e, 0.0, 1.0)));
+      float r = hr + (zr - hr) * t, g = hg + (zg - hg) * t, b = hb + (zb - hb) * t;
+      const double sd = (rx * sx + ry * sy + rz * sz) * il;
+      if (sd > 0.9) {   // halo et disque du soleil
+        const double h = (sd - 0.9) * 10, glow = std::min(1.0, h * h * h * h * 0.35 + (sd > 0.9994 ? 1.0 : sd > 0.999 ? (sd - 0.999) * 2500 : 0.0));
+        r += float((255 - r) * glow); g += float((246 - g) * glow); b += float((222 - b) * glow);
+      }
+      if (e > 0.015) {   // nuages : plan horizontal au-dessus de l'œil
+        const double tt = HC / ry;   // ry > 0
+        const double px = cam_.pos.x + rx * tt, pz = cam_.pos.z + rz * tt;
+        const double foot = 8 * tt * il / f / SCALE / std::max(0.05, e);
+        const float nv = cl.sample(px / SCALE + du, pz / SCALE + dv, foot);
+        float k = std::clamp((nv + 0.02f) / 0.22f, 0.f, 1.f);
+        k = k * k * (3 - 2 * k) * float(std::clamp((e - 0.015) / 0.12, 0.0, 1.0));
+        if (k > 0) {
+          const float dense = std::clamp(nv * 2.2f, 0.f, 1.f), lit = float(std::max(0.0, sd));
+          const float cr = 248 - 52 * dense + 7 * lit, cg = 249 - 48 * dense + 4 * lit, cb = 252 - 38 * dense;
+          r += (cr - r) * k * 0.92f; g += (cg - g) * k * 0.92f; b += (cb - b) * k * 0.92f;
+        }
+      }
+      c[0] = r; c[1] = g; c[2] = b;
+    };
+    float ca[3], cb[3];
+    int have = -1;   // x de la dernière couleur calculée (ca)
+    for (int x0 = 0; x0 < W_; x0 += 8) {
+      const int x1 = std::min(W_, x0 + 8);
+      bool any = false;
+      for (int x = x0; x < x1; x++) any |= z[x] == 0.f;
+      if (!any) continue;
+      if (have != x0) at(x0, ca);
+      at(x0 + 8, cb);
+      for (int x = x0; x < x1; x++) {
+        if (z[x] != 0.f) continue;
+        const float w = (x - x0) * 0.125f;
+        const float r = ca[0] + (cb[0] - ca[0]) * w, g = ca[1] + (cb[1] - ca[1]) * w, b = ca[2] + (cb[2] - ca[2]) * w;
+        o[x] = 0xff000000u | uint32_t(std::clamp(r, 0.f, 255.f)) << 16 | uint32_t(std::clamp(g, 0.f, 255.f)) << 8 | uint32_t(std::clamp(b, 0.f, 255.f));
+      }
+      ca[0] = cb[0]; ca[1] = cb[1]; ca[2] = cb[2]; have = x0 + 8;
+    }
+  }
+}
 
 // couleur d'un pixel texturé : p = point du monde, foot = taille du pixel sur la surface (unités du monde)
 uint32_t Renderer3D::shade(const TexPlane &tp, uint32_t color, const Vec3 &p, double foot) const {
@@ -368,6 +437,7 @@ void Renderer3D::rasterBand(uint32_t *out, int k, int n) {
       }
     }
   }
+  if (sky_) skyBand(out, k, n);
   if (!texs_.empty()) shadeBand(out, k, n);
   // surfaces semi-transparentes (ombres, fumée) : par-dessus l'image, sans écrire la profondeur
   for (const SPoly &p : trans_) {

@@ -47,6 +47,9 @@ class Renderer3D {
   void polyAlpha(const Vec3 *pts, int n, uint32_t color, float alpha);
   // lissage des bords (anticrénelage de type FXAA) appliqué à l'image à la fin de finish()
   void setAntialias(bool on) { aa_ = on; }
+  // ciel (là où rien n'est dessiné) : dégradé de l'horizon au zénith à partir de la couleur de base,
+  // soleil et nuages qui dérivent (t en secondes) ; sinon couleur unie de begin()
+  void setSky(bool on, uint32_t base, double t) { sky_ = on; skyBase_ = base; skyT_ = t; }
   void finish(uint32_t *out);   // rastérisation (multi-cœurs) dans out (W×H ARGB)
   int threads() const { return threads_; }
   static void warmTextures();   // précalcule les textures (sinon au premier rendu détaillé)
@@ -67,6 +70,8 @@ class Renderer3D {
   std::vector<TexPlane> texs_;
   void rasterBand(uint32_t *out, int k, int n);   // lignes y ≡ k (mod n)
   void shadeBand(uint32_t *out, int k, int n);    // ombrage différé des surfaces texturées
+  void skyBand(uint32_t *out, int k, int n);      // ciel des pixels vides
+  bool sky_ = false; uint32_t skyBase_ = 0; double skyT_ = 0;
   int W_ = 0, H_ = 0, threads_ = 1;
   Camera cam_;
   double cyw_, syw_, cp_, sp_, cr_, sr_;

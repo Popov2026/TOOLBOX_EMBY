@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v50"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v51"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -56,7 +56,7 @@ struct Options {
   std::string hdDir;
   bool hdFlames = false;   // images de flammes du dossier hd/ (sinon : sprites d'origine agrandis)
   bool highDetail = false; // détails élevés au démarrage (touche F5)
-  bool shadows = true, particles = true, antialias = true;   // HD : ombres, étincelles et fumée, lissage des bords
+  bool shadows = true, particles = true, antialias = true, sky = true;   // HD : ombres, étincelles et fumée, lissage des bords, ciel
   bool usePad = true, rumble = true;                         // manette, vibrations lors des chocs
   std::string keyNames[5] = {"Up", "Down", "Left", "Right", "Space"};   // touches : accélérer, freiner, gauche, droite, boost
   // multijoueur (câble « Computer Link » par le réseau)
@@ -121,6 +121,7 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "ombres" || key == "shadows") o.shadows = val != "0";
   else if (key == "particules" || key == "particles") o.particles = val != "0";
   else if (key == "lissage" || key == "antialias") o.antialias = val != "0";
+  else if (key == "ciel" || key == "sky") o.sky = val != "0";
   else if (key == "manette" || key == "gamepad") o.usePad = val != "0";
   else if (key == "vibrations" || key == "rumble") o.rumble = val != "0";
   else if (key == "touche_accelerer") o.keyNames[0] = val;
@@ -480,7 +481,7 @@ int main(int argc, char **argv) {
     view = std::make_unique<HdView>(*m);
     view->params.flameImages = o.hdFlames;
     view->params.highDetail = highDetail;
-    view->params.shadows = o.shadows; view->params.particles = o.particles; view->params.antialias = o.antialias;
+    view->params.shadows = o.shadows; view->params.particles = o.particles; view->params.antialias = o.antialias; view->params.sky = o.sky;
     m->enableLayers(true);   // couches toujours suivies : F1 bascule sans délai
     hdImages = view->loadAssets(*m, hdDir);
     if (!view->assets.report.empty()) std::fprintf(stderr, "images HD (%s) :\n%s", hdDir.c_str(), view->assets.report.c_str());
@@ -792,6 +793,7 @@ int main(int argc, char **argv) {
     it.push_back({"Ombres des voitures : " + yn(o.shadows), 4});
     it.push_back({"Étincelles et fumée : " + yn(o.particles), 5});
     it.push_back({"Lissage des bords : " + yn(o.antialias), 6});
+    it.push_back({"Ciel avec nuages et soleil : " + yn(o.sky), 18});
     it.push_back({"Plein écran : " + yn(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP) + "  (F11)", 7});
     it.push_back({haveTnt ? std::string("Circuits : ") + (soloSet ? "TNT" : "d'origine") + "  (F7)" : "Circuits TNT : fichier SCR-TNT absent", 8});
     it.push_back({"Manette : " + yn(o.usePad) + (pad ? "  (branchée)" : "  (aucune)"), 9});
@@ -844,6 +846,7 @@ int main(int argc, char **argv) {
         }
         break;
       case 17: optOpen = false; break;
+      case 18: o.sky = !o.sky; view->params.sky = o.sky; saveFlag({"ciel", "sky"}, o.sky, "ciel dégradé avec nuages et soleil (HD)"); break;
     }
   };
   int lastDamage = -1;              // vibrations : hausse des dégâts de la voiture
@@ -910,7 +913,7 @@ int main(int argc, char **argv) {
         else if (sc == SDL_SCANCODE_DOWN) optSel = (optSel + 1) % n;
         else if (sc == SDL_SCANCODE_LEFT || sc == SDL_SCANCODE_RIGHT) {
           int id = items[size_t(optSel)].id;
-          if (id <= 10) optChange(id, sc == SDL_SCANCODE_RIGHT ? 1 : -1);
+          if (id <= 10 || id == 18) optChange(id, sc == SDL_SCANCODE_RIGHT ? 1 : -1);
         }
         else if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER || sc == SDL_SCANCODE_SPACE) optChange(items[size_t(optSel)].id, 0);
         else if (sc == SDL_SCANCODE_F12) running = false;
@@ -1073,7 +1076,7 @@ int main(int argc, char **argv) {
       if (j.up && !prevUp) optSel = (optSel + n - 1) % n;
       if (j.down && !prevDown) optSel = (optSel + 1) % n;
       int id = items[size_t(std::clamp(optSel, 0, n - 1))].id;
-      if (((j.left && !prevLeft) || (j.right && !prevRight)) && id <= 10) optChange(id, j.right ? 1 : -1);
+      if (((j.left && !prevLeft) || (j.right && !prevRight)) && (id <= 10 || id == 18)) optChange(id, j.right ? 1 : -1);
       if (j.fire && !prevFire && (id < 11 || id > 15)) optChange(id, 0);   // touches : au clavier
     }
     else if (menuOpen && typing == Typing::None) {   // manette dans le menu « Computer Link »

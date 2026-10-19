@@ -43,6 +43,7 @@ struct HdParams {
   bool antialias = true;                   // lissage des bords (FXAA) de la scène 3D
   bool shadows = true;                     // ombres sous les voitures (posées sur la route, même en l'air)
   bool particles = true;                   // étincelles et fumée aux chocs et réceptions brutales
+  bool sky = true;                         // ciel dégradé avec soleil et nuages (sinon couleur unie d'origine)
 };
 
 class HdView {
