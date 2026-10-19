@@ -76,6 +76,7 @@ int HdAssets::load(const std::string &dir) {
     }
     if (s.frames.empty() || id < 0 || id > 255) continue;
     s.additive = !anyAlpha;
+    s.layer = id == 10 ? 1 : (id == 6 || id == 7 || id == 8 || id == 9 || id == 49 || id == 50) ? 2 : 0;   // moteur sur les roues, flammes sur le moteur
     sprites_[id] = std::move(s);
   }
   // réglages
@@ -105,6 +106,11 @@ int HdAssets::load(const std::string &dir) {
     else if (k == "dy") s.dy = d;
     else if (k == "fps" && d > 0) s.fps = d;
     else if (k == "wind") s.wind = d;
+    else if (k == "pad_top" || k == "padT") s.padT = std::clamp(d, 0.0, 4.0);
+    else if (k == "pad_bottom" || k == "padB") s.padB = std::clamp(d, 0.0, 4.0);
+    else if (k == "pad_left" || k == "padL") s.padL = std::clamp(d, 0.0, 4.0);
+    else if (k == "pad_right" || k == "padR") s.padR = std::clamp(d, 0.0, 4.0);
+    else if (k == "layer") s.layer = int(d);
     else if (k == "anchor") s.anchor = v == "top" ? 0 : v == "center" ? 2 : 1;
   }
   for (auto &[id, s] : sprites_)

@@ -1089,6 +1089,15 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
   if (assets.sprites().empty() && !params.builtinFlames) return;
   const double xa = 32, xb = 288, la = ox + xa * s, lb = ox + xb * s;
   auto fx = [&](double u) { return u < xa ? u / xa * la : u >= xb ? lb + (u - xb) / (320 - xb) * (W - lb) : la + (u - xa) * s; };
+  // ordre : celui du jeu, sauf priorité donnée par les images (moteur au-dessus des roues, flammes au-dessus du moteur)
+  std::stable_sort(visible_.begin(), visible_.end(), [&](const SpriteDraw &a, const SpriteDraw &b) {
+    auto lay = [&](int id) {
+      const HdSprite *p = assets.sprite(id);
+      if (p) return p->layer;
+      return std::find(std::begin(FLAME_IDS), std::end(FLAME_IDS), id) != std::end(FLAME_IDS) ? 2 : 0;
+    };
+    return lay(a.id) < lay(b.id);
+  });
   for (const SpriteDraw &e : visible_) {
     bool flameId = std::find(std::begin(FLAME_IDS), std::end(FLAME_IDS), e.id) != std::end(FLAME_IDS);
     // flammes : images du dossier hd/ seulement si demandé (d'anciennes versions y laissaient les leurs)

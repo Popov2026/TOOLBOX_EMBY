@@ -11,6 +11,9 @@
 //       dy = -4
 //       fps = 15
 //       wind = 1         ; couché par le vent selon la vitesse (flammes : 1 par défaut)
+//       pad_top = 0.3    ; l'image déborde de l'emplacement (fraction de sa hauteur / largeur) :
+//       pad_bottom = 0   ;   pad_top, pad_bottom, pad_left, pad_right
+//       layer = 1        ; ordre de dessin : plus grand = par-dessus (moteur 1, flammes 2, autres 0)
 //   hd/cockpit.png              cockpit fixe (cadre, tableau de bord) aux proportions de l'écran 320x200,
 //                               fenêtre et vitres transparentes ; afficheurs et compteur sans chiffres
 //   Sans réglage : alpha si l'image a de la transparence, sinon add (image sur fond noir).
@@ -35,6 +38,7 @@ struct HdSprite {
   // marge de l'image autour de l'emplacement d'origine (fraction de sa largeur / hauteur)
   double padL = 0, padT = 0, padR = 0, padB = 0;
   double wind = -1;          // sensibilité au vent de la course (-1 : 1 pour les flammes, 0 sinon)
+  int layer = 0;             // ordre de dessin (plus grand : par-dessus)
   int windLevels = 1;        // > 1 : frames rangées par niveau de vent (flammes calculées), sans cisaillement
 };
 
