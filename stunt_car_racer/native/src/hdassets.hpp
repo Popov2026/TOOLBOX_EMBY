@@ -16,6 +16,8 @@
 //       layer = 1        ; ordre de dessin : plus grand = par-dessus (moteur 1, flammes 2, autres 0)
 //   hd/cockpit.png              cockpit fixe (cadre, tableau de bord) aux proportions de l'écran 320x200,
 //                               fenêtre et vitres transparentes ; afficheurs et compteur sans chiffres
+//   hd/cockpit_avant.png        partie du cockpit dessinée par-dessus les roues (base du moteur...),
+//                               mêmes proportions ; sous le moteur (sprite 10) et les flammes
 //   Sans réglage : alpha si l'image a de la transparence, sinon add (image sur fond noir).
 #pragma once
 #include <cstdint>
@@ -54,6 +56,7 @@ class HdAssets {
   const std::map<int, HdSprite> &sprites() const { return sprites_; }
   std::string report;        // résumé du chargement (fichiers, erreurs)
   HdImage cockpit;           // cockpit fixe (vide : celui du jeu)
+  HdImage cockpitFront;      // partie du cockpit au-dessus des roues (facultatif)
 
   // dessine l'image (instant t en secondes) dans le rectangle [x0,x1)x[y0,y1) de out (W×H)
   // shear : décalage horizontal du haut de l'image, en fraction de la largeur (0 = droit)

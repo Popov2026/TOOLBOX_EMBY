@@ -921,16 +921,12 @@ void HdView::drawParticles(const Camera &c) {
   }
 }
 
-// cockpit fixe remplacé par hd/cockpit.png. Le cockpit du jeu reste la référence : là où il est
-// comme au début de la course, on montre l'image HD ; ce qui a changé (fissure des dégâts, textes,
-// sprites sans image HD) est dessiné par-dessus. Dans les afficheurs et la barre de vitesse, l'image
-// HD sert de fond et les chiffres / la barre du jeu (pixels plus sombres ou plus clairs que le fond)
-// sont posés dessus.
-void HdView::drawCockpitHd(uint32_t *out, int W, int H, double s, double ox) {
-  const HdImage &ck = assets.cockpit;
-  if (ckW_ != W || ckH_ != H || ckImg_ != &ck || ckScaled_.size() != size_t(W) * H) {   // image à la taille de l'écran
-    ckW_ = W; ckH_ = H; ckImg_ = &ck;
-    ckScaled_.assign(size_t(W) * H, 0);
+// image de cockpit (proportions 320x200) agrandie à l'écran, avec l'étirement 16/9 du cockpit d'origine
+void HdView::scaleCockpit(const HdImage &ck, std::vector<uint32_t> &dst, int W, int H, double s, double ox) {
+  dst.clear();
+  if (ck.px.empty()) return;
+  dst.assign(size_t(W) * H, 0);
+  {
     const double xa = 32, xb = 288, la = ox + xa * s, lb = ox + xb * s;
     std::vector<double> us(static_cast<size_t>(W));
     for (int x = 0; x < W; x++) {
@@ -953,14 +949,53 @@ void HdView::drawCockpitHd(uint32_t *out, int W, int H, double s, double ox) {
           acc[0] += a; acc[1] += ((q[k] >> 16) & 255) * a; acc[2] += ((q[k] >> 8) & 255) * a; acc[3] += (q[k] & 255) * a;
         }
         if (acc[0] <= 0.004) continue;
-        ckScaled_[size_t(y) * W + x] = uint32_t(std::min(255.0, acc[0] * 255)) << 24 | uint32_t(acc[1] / acc[0]) << 16 |
+        dst[size_t(y) * W + x] = uint32_t(std::min(255.0, acc[0] * 255)) << 24 | uint32_t(acc[1] / acc[0]) << 16 |
                                       uint32_t(acc[2] / acc[0]) << 8 | uint32_t(acc[3] / acc[0]);
       }
     }
   }
-  // cockpit de référence : relevé peu après le début de la course
-  if (ckRefFrames_ < 12 && ++ckRefFrames_ == 12) ckRef_ = overlay_;
-  const bool ref = ckRef_.size() == overlay_.size();
+}
+
+// cockpit fixe remplacé par hd/cockpit.png. Le cockpit du jeu reste la référence : là où il est
+// comme au début de la course, on montre l'image HD ; ce qui a changé (fissure des dégâts, textes,
+// sprites sans image HD) est dessiné par-dessus. Dans les afficheurs et la barre de vitesse, l'image
+// HD sert de fond et les chiffres / la barre du jeu (pixels plus sombres ou plus clairs que le fond)
+// sont posés dessus.
+void HdView::drawCockpitHd(const Machine &m, uint32_t *out, int W, int H, double s, double ox) {
+  const HdImage &ck = assets.cockpit;
+  // images à la taille de l'écran (de nouveau après F2 : images rechargées)
+  if (ckW_ != W || ckH_ != H || ckData_ != ck.px.data() || ckFrontData_ != assets.cockpitFront.px.data() || ckScaled_.size() != size_t(W) * H) {
+    ckW_ = W; ckH_ = H; ckData_ = ck.px.data(); ckFrontData_ = assets.cockpitFront.px.data();
+    scaleCockpit(ck, ckScaled_, W, H, s, ox);
+    scaleCockpit(assets.cockpitFront, ckFront_, W, H, s, ox);
+  }
+  // cockpit en index de la palette du jeu (indépendant des fondus de couleurs) ; 255 : transparent
+  uint32_t pal[16];
+  int distinct = 0;
+  for (int i = 0; i < 16; i++) {
+    pal[i] = m.paletteARGB(i);
+    bool seen = false;
+    for (int j = 0; j < i; j++) seen |= pal[j] == pal[i];
+    distinct += !seen;
+  }
+  ckIdx_.resize(overlay_.size());
+  for (size_t i = 0; i < overlay_.size(); i++) {
+    uint8_t k = 255;
+    if (overlay_[i]) for (int j = 0; j < 16; j++) if (pal[j] == overlay_[i]) { k = uint8_t(j); break; }
+    ckIdx_[i] = k;
+  }
+  // cockpit de référence (ce qui ne change pas pendant la course) : relevé peu après le départ, avec
+  // une palette normale (pas pendant un fondu) ; relevé de nouveau s'il ne correspond plus (trop de
+  // différences : écran pas encore complet au moment du relevé)
+  if (ckRefFrames_ < 12) ckRefFrames_++;
+  if (ckRefFrames_ >= 12 && ckRef_.size() != ckIdx_.size() && distinct >= 12) ckRef_ = ckIdx_;
+  if (ckRef_.size() == ckIdx_.size()) {
+    int diff = 0, tot = 0;
+    for (int y = 150; y < 200; y++)   // tableau de bord (hors afficheurs) : ne doit presque pas changer
+      for (int x = 0; x < 320; x += 2) { tot++; diff += ckIdx_[size_t(y) * 320 + x] != ckRef_[size_t(y) * 320 + x]; }
+    if (diff * 5 > tot) { ckRef_.clear(); ckRefFrames_ = 0; }
+  }
+  const bool ref = ckRef_.size() == ckIdx_.size();
   // afficheurs (2 lignes à gauche, 2 à droite) et barre de vitesse, en pixels de l'écran d'origine
   struct Zone { int x0, y0, x1, y1; uint32_t bg; };
   Zone zones[5] = {{37, 178, 86, 186, 0}, {37, 188, 86, 196, 0}, {234, 178, 283, 186, 0}, {234, 188, 283, 196, 0}, {96, 173, 225, 177, 0}};
@@ -978,7 +1013,8 @@ void HdView::drawCockpitHd(uint32_t *out, int W, int H, double s, double ox) {
   for (int y = 0; y < H; y++) {
     const int v = mapY_[y];
     const uint32_t *src = &overlay_[size_t(v) * 320];
-    const uint32_t *rf = ref ? &ckRef_[size_t(v) * 320] : nullptr;
+    const uint8_t *rf = ref ? &ckRef_[size_t(v) * 320] : nullptr;
+    const uint8_t *ci = &ckIdx_[size_t(v) * 320];
     const uint32_t *hd = &ckScaled_[size_t(y) * W];
     uint32_t *o = out + size_t(y) * W;
     for (int x = 0; x < W; x++) {
@@ -988,7 +1024,7 @@ void HdView::drawCockpitHd(uint32_t *out, int W, int H, double s, double ox) {
       const int zk = zoneOf[v * 320 + u];
       bool lowres;
       if (zk) lowres = c && c != zones[zk - 1].bg && std::abs(luma(c) - luma(zones[zk - 1].bg)) > 30;   // chiffres, barre
-      else lowres = c && (ref ? c != rf[u] : (h >> 24) == 0);   // changé depuis le début (ou hors de l'image HD)
+      else lowres = c && (ref ? ci[u] != rf[u] : (h >> 24) == 0);   // changé depuis le début (ou hors de l'image HD)
       if (h >> 24) {
         const uint32_t a = h >> 24, d = o[x];
         if (a >= 255) o[x] = h;
@@ -1075,7 +1111,7 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
     }
     for (int y = 0; y < H; y++) mapY_[y] = std::min(199, int((y + 0.5) / s));
   }
-  if (!assets.cockpit.px.empty()) drawCockpitHd(out, W, H, s, ox);
+  if (!assets.cockpit.px.empty()) drawCockpitHd(m, out, W, H, s, ox);
   else
     for (int y = 0; y < H; y++) {
       const uint32_t *src = &overlay_[mapY_[y] * 320];
@@ -1086,7 +1122,7 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
       }
     }
   // sprites remplacés par les images du dossier hd/, dans l'ordre où le jeu les a dessinés
-  if (assets.sprites().empty() && !params.builtinFlames) return;
+  if (assets.sprites().empty() && !params.builtinFlames) { drawCockpitFront(out, W, H); return; }
   const double xa = 32, xb = 288, la = ox + xa * s, lb = ox + xb * s;
   auto fx = [&](double u) { return u < xa ? u / xa * la : u >= xb ? lb + (u - xb) / (320 - xb) * (W - lb) : la + (u - xa) * s; };
   // ordre : celui du jeu, sauf priorité donnée par les images (moteur au-dessus des roues, flammes au-dessus du moteur)
@@ -1098,7 +1134,13 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
     };
     return lay(a.id) < lay(b.id);
   });
+  bool frontDone = false;
   for (const SpriteDraw &e : visible_) {
+    if (!frontDone) {   // partie avant du cockpit : après les roues, avant le moteur et les flammes
+      const HdSprite *p = assets.sprite(e.id);
+      const bool fl = std::find(std::begin(FLAME_IDS), std::end(FLAME_IDS), e.id) != std::end(FLAME_IDS);
+      if ((p ? p->layer : fl ? 2 : 0) >= 1) { drawCockpitFront(out, W, H); frontDone = true; }
+    }
     bool flameId = std::find(std::begin(FLAME_IDS), std::end(FLAME_IDS), e.id) != std::end(FLAME_IDS);
     // flammes : images du dossier hd/ seulement si demandé (d'anciennes versions y laissaient les leurs)
     const HdSprite *spr = flameId && !params.flameImages ? nullptr : spriteFor(e.id, m);
@@ -1124,6 +1166,20 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
     double top = ny0 + h * (1 - squash);
     HdAssets::draw(*spr, T / 50.0 * (1 + 0.8 * wk), cx - w2 + spr->dx * s, top + spr->dy * s, cx + w2 + spr->dx * s,
                    ny0 + h + spr->dy * s, out, W, H, baked ? 0 : side * 0.55 * wk, wk);
+  }
+  if (!frontDone) drawCockpitFront(out, W, H);
+}
+
+// partie avant du cockpit (hd/cockpit_avant.png), mélangée par-dessus l'image
+void HdView::drawCockpitFront(uint32_t *out, int W, int H) {
+  if (ckFront_.size() != size_t(W) * H) return;
+  for (size_t i = 0; i < ckFront_.size(); i++) {
+    const uint32_t h = ckFront_[i], a = h >> 24;
+    if (!a) continue;
+    if (a >= 255) { out[i] = h; continue; }
+    const uint32_t d = out[i];
+    auto mix = [&](int sh) { return ((((h >> sh) & 255) * a + ((d >> sh) & 255) * (255 - a)) / 255) << sh; };
+    out[i] = 0xff000000u | mix(16) | mix(8) | mix(0);
   }
 }
 

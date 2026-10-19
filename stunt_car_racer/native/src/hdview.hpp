@@ -109,7 +109,9 @@ class HdView {
   void addCar(const OppPose &o, double hs, const Machine &m, bool closed = false);
   std::map<int, std::vector<SceneObj>> scenery_;   // décor de chaque circuit (calculé à la première vue)
   void drawScenery(const Camera &c, int track, double hs);
-  void drawCockpitHd(uint32_t *out, int W, int H, double s, double ox);   // closed : flanc gauche dessiné aussi
+  void drawCockpitHd(const Machine &m, uint32_t *out, int W, int H, double s, double ox);
+  void drawCockpitFront(uint32_t *out, int W, int H);
+  static void scaleCockpit(const HdImage &ck, std::vector<uint32_t> &dst, int W, int H, double s, double ox);   // closed : flanc gauche dessiné aussi
   void addFlames(const OppPose &o, double hs, int seed);   // flammes du boost d'une voiture fantôme
   void addShadow(const OppPose &o, double hs, int track);   // ombre portée sur la route (ou le sol)
   // particules : étincelles (opaques, en traînée) et fumée (semi-transparente)
@@ -140,9 +142,10 @@ class HdView {
   const HdSprite *spriteFor(int id, const Machine &m);
   std::vector<int> mapX_, mapY_;
   // cockpit HD (hd/cockpit.png) : image agrandie à l'écran, cockpit d'origine au début de la course
-  std::vector<uint32_t> ckScaled_, ckRef_;
+  std::vector<uint32_t> ckScaled_, ckFront_;
+  std::vector<uint8_t> ckRef_, ckIdx_;   // cockpit de référence et cockpit actuel, en index de palette
   int ckW_ = 0, ckH_ = 0, ckRefFrames_ = 0;
-  const HdImage *ckImg_ = nullptr;
+  const uint32_t *ckData_ = nullptr, *ckFrontData_ = nullptr;
   int mapW_ = 0, mapH_ = 0;
 };
 

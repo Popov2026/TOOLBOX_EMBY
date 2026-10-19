@@ -23,6 +23,9 @@ Cockpit fixe (cadre, montants, tableau de bord)
                                dessus. La fissure des dégâts et tout ce qui change en course restent
                                visibles par-dessus l'image. Le bas du moteur (sous le sprite 10) fait
                                partie du cockpit fixe : dessinez-le dans cockpit.png.
+  cockpit_avant.png            (facultatif) partie du cockpit à dessiner DEVANT les roues, par exemple
+                               la base du moteur ; mêmes proportions que cockpit.png, le reste
+                               transparent. Elle passe sous le moteur (sprite 10) et les flammes.
 
 Règles pour les sprites
   - même proportions que le sprite d'origine (planche complète) ;

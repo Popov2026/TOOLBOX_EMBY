@@ -212,7 +212,8 @@ void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const
   std::memset(sprMask, 0, sizeof sprMask);
   uint32_t vb = vbase();
   std::vector<int> spx;
-  std::vector<std::pair<size_t, std::vector<int>>> live;   // (indice, pixels) des sprites visibles
+  struct Live { size_t k; std::vector<int> px; int w, h; };   // sprite visible : indice, pixels, taille actuelle
+  std::vector<Live> live;
   for (size_t k = 0; k < spriteDraws_.size();) {
     SpriteDraw &e = spriteDraws_[k];
     int sw, sh;
@@ -231,7 +232,7 @@ void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const
         int x = e.x + c, y = e.y + r, v = spx[size_t(r) * sw + c];
         if (v >= 0 && x >= 0 && x < 320 && y >= 0 && y < 200 && idx[y * 320 + x] == v) sprMask[y * 320 + x] = 1;
       }
-    live.push_back({k, spx});
+    live.push_back({k, spx, sw, sh});
     k++;
   }
   for (int i = 0; i < 64000; i++) {
@@ -242,13 +243,15 @@ void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const
   }
   // sprites remplacés en HD : on efface l'original du cockpit (on remet ce qu'il recouvrait)
   if (visible) visible->clear();
-  for (auto &[k, px] : live) {
-    const SpriteDraw &e = spriteDraws_[k];
+  for (const Live &lv : live) {
+    const SpriteDraw &e = spriteDraws_[lv.k];
     if (e.under.empty()) continue;
-    int sw = e.w, sh = e.h;
+    // taille du dessin relevé et taille actuelle du sprite : la plus petite des deux (le jeu peut
+    // avoir changé l'image d'un même numéro depuis)
+    const int sw = std::min(lv.w, e.w), sh = std::min(lv.h, e.h);
     for (int r = 0; r < sh; r++)
       for (int c = 0; c < sw; c++) {
-        int x = e.x + c, y = e.y + r, v = px[size_t(r) * sw + c];
+        int x = e.x + c, y = e.y + r, v = lv.px[size_t(r) * lv.w + c];
         if (v < 0 || x < 0 || x >= 320 || y < 0 || y >= 200 || idx[y * 320 + x] != v) continue;
         uint8_t u = e.under[size_t(r) * e.w + c];
         out[y * 320 + x] = u == 255 ? 0 : paletteARGB(u);
