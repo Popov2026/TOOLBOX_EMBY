@@ -11,6 +11,8 @@
 //       dy = -4
 //       fps = 15
 //       wind = 1         ; couché par le vent selon la vitesse (flammes : 1 par défaut)
+//   hd/cockpit.png              cockpit fixe (cadre, tableau de bord) aux proportions de l'écran 320x200,
+//                               fenêtre et vitres transparentes ; afficheurs et compteur sans chiffres
 //   Sans réglage : alpha si l'image a de la transparence, sinon add (image sur fond noir).
 #pragma once
 #include <cstdint>
@@ -47,6 +49,7 @@ class HdAssets {
   }
   const std::map<int, HdSprite> &sprites() const { return sprites_; }
   std::string report;        // résumé du chargement (fichiers, erreurs)
+  HdImage cockpit;           // cockpit fixe (vide : celui du jeu)
 
   // dessine l'image (instant t en secondes) dans le rectangle [x0,x1)x[y0,y1) de out (W×H)
   // shear : décalage horizontal du haut de l'image, en fraction de la largeur (0 = droit)

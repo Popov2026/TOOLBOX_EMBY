@@ -14,6 +14,21 @@ Numéros utiles (planche complète : voir le paquet des graphismes)
                      le jeu alterne 6+8, 7+9, 49+50 ; vous pouvez mettre les mêmes images aux trois
   chaînes de la grue : 19 à 22
 
+Cockpit fixe (cadre, montants, tableau de bord)
+  cockpit.png                  image aux proportions de l'écran d'origine (320x200, par exemple
+                               1280x800), fenêtre et vitres latérales transparentes. Elle remplace
+                               le cockpit dessiné par le jeu. Laissez les afficheurs (plaques grises)
+                               et le compteur de vitesse SANS chiffres ni repère : les chiffres du
+                               jeu (tour, boost, dégâts, temps) et la barre de vitesse sont posés
+                               dessus. La fissure des dégâts et tout ce qui change en course restent
+                               visibles par-dessus l'image.
+
+Règles pour les sprites
+  - même proportions que le sprite d'origine (planche complète) ;
+  - le dessin doit remplir le cadre comme l'original : pas de grande marge vide autour
+    (l'image entière est ajustée à l'emplacement du sprite) ;
+  - là où l'original est plein (noir compris), ne laissez pas de trou transparent.
+
 Transparence
   - PNG avec transparence  -> collé tel quel (mélange « alpha »)
   - image sans transparence -> mélange « add » : le noir disparaît, le reste s'ajoute en

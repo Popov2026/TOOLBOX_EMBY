@@ -108,7 +108,8 @@ class HdView {
   bool oppHave_ = false;
   void addCar(const OppPose &o, double hs, const Machine &m, bool closed = false);
   std::map<int, std::vector<SceneObj>> scenery_;   // décor de chaque circuit (calculé à la première vue)
-  void drawScenery(const Camera &c, int track, double hs);   // closed : flanc gauche dessiné aussi
+  void drawScenery(const Camera &c, int track, double hs);
+  void drawCockpitHd(uint32_t *out, int W, int H, double s, double ox);   // closed : flanc gauche dessiné aussi
   void addFlames(const OppPose &o, double hs, int seed);   // flammes du boost d'une voiture fantôme
   void addShadow(const OppPose &o, double hs, int track);   // ombre portée sur la route (ou le sol)
   // particules : étincelles (opaques, en traînée) et fumée (semi-transparente)
@@ -138,6 +139,10 @@ class HdView {
   double windTarget_ = 0, wind_ = 0;   // vent relatif (0 à l'arrêt, 1 à pleine vitesse)
   const HdSprite *spriteFor(int id, const Machine &m);
   std::vector<int> mapX_, mapY_;
+  // cockpit HD (hd/cockpit.png) : image agrandie à l'écran, cockpit d'origine au début de la course
+  std::vector<uint32_t> ckScaled_, ckRef_;
+  int ckW_ = 0, ckH_ = 0, ckRefFrames_ = 0;
+  const HdImage *ckImg_ = nullptr;
   int mapW_ = 0, mapH_ = 0;
 };
 

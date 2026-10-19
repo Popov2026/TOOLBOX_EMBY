@@ -45,6 +45,7 @@ static bool loadImage(const fs::path &p, HdImage &img, bool &hasAlpha) {
 int HdAssets::load(const std::string &dir) {
   sprites_.clear();
   report.clear();
+  cockpit = HdImage();
   std::error_code ec;
   fs::path base = fs::u8path(dir);
   if (!fs::is_directory(base, ec)) return 0;
@@ -55,6 +56,13 @@ int HdAssets::load(const std::string &dir) {
     std::smatch mm;
     std::string name = e.path().filename().u8string();
     if (std::regex_match(name, mm, re)) files[std::atoi(mm[1].str().c_str())][mm[2].matched ? std::atoi(mm[2].str().c_str()) : 0] = e.path();
+  }
+  for (const char *n : {"cockpit.png", "cockpit.jpg", "cockpit.jpeg"}) {   // cockpit fixe
+    bool a;
+    if (fs::exists(base / n, ec) && cockpit.px.empty()) {
+      if (loadImage(base / n, cockpit, a)) report += std::string("cockpit : ") + n + " (" + std::to_string(cockpit.w) + "x" + std::to_string(cockpit.h) + ")\n";
+      else report += std::string("illisible : ") + n + "\n";
+    }
   }
   std::map<int, bool> alpha;
   for (auto &[id, fr] : files) {

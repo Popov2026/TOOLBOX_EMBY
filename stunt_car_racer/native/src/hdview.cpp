@@ -2,6 +2,7 @@
 #include "hdview.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <cmath>
 #include <thread>
 #include <cstdio>
@@ -920,9 +921,91 @@ void HdView::drawParticles(const Camera &c) {
   }
 }
 
+// cockpit fixe remplacé par hd/cockpit.png. Le cockpit du jeu reste la référence : là où il est
+// comme au début de la course, on montre l'image HD ; ce qui a changé (fissure des dégâts, textes,
+// sprites sans image HD) est dessiné par-dessus. Dans les afficheurs et la barre de vitesse, l'image
+// HD sert de fond et les chiffres / la barre du jeu (pixels plus sombres ou plus clairs que le fond)
+// sont posés dessus.
+void HdView::drawCockpitHd(uint32_t *out, int W, int H, double s, double ox) {
+  const HdImage &ck = assets.cockpit;
+  if (ckW_ != W || ckH_ != H || ckImg_ != &ck || ckScaled_.size() != size_t(W) * H) {   // image à la taille de l'écran
+    ckW_ = W; ckH_ = H; ckImg_ = &ck;
+    ckScaled_.assign(size_t(W) * H, 0);
+    const double xa = 32, xb = 288, la = ox + xa * s, lb = ox + xb * s;
+    std::vector<double> us(static_cast<size_t>(W));
+    for (int x = 0; x < W; x++) {
+      const double X = x + 0.5;
+      us[size_t(x)] = X < la ? (la > 0 ? X / la * xa : 0) : X >= lb ? xb + (X - lb) / std::max(1.0, W - lb) * (320 - xb) : xa + (X - la) / s;
+    }
+    for (int y = 0; y < H; y++) {
+      const double v = std::clamp((y + 0.5) / s / 200.0 * ck.h - 0.5, 0.0, ck.h - 1.0);
+      const int v0 = int(v), v1 = std::min(v0 + 1, ck.h - 1);
+      const double fv = v - v0;
+      for (int x = 0; x < W; x++) {
+        const double u = std::clamp(us[size_t(x)] / 320.0 * ck.w - 0.5, 0.0, ck.w - 1.0);
+        const int u0 = int(u), u1 = std::min(u0 + 1, ck.w - 1);
+        const double fu = u - u0;
+        const uint32_t q[4] = {ck.px[size_t(v0) * ck.w + u0], ck.px[size_t(v0) * ck.w + u1], ck.px[size_t(v1) * ck.w + u0], ck.px[size_t(v1) * ck.w + u1]};
+        const double wq[4] = {(1 - fu) * (1 - fv), fu * (1 - fv), (1 - fu) * fv, fu * fv};
+        double acc[4] = {0, 0, 0, 0};
+        for (int k = 0; k < 4; k++) {
+          const double a = (q[k] >> 24) / 255.0 * wq[k];
+          acc[0] += a; acc[1] += ((q[k] >> 16) & 255) * a; acc[2] += ((q[k] >> 8) & 255) * a; acc[3] += (q[k] & 255) * a;
+        }
+        if (acc[0] <= 0.004) continue;
+        ckScaled_[size_t(y) * W + x] = uint32_t(std::min(255.0, acc[0] * 255)) << 24 | uint32_t(acc[1] / acc[0]) << 16 |
+                                      uint32_t(acc[2] / acc[0]) << 8 | uint32_t(acc[3] / acc[0]);
+      }
+    }
+  }
+  // cockpit de référence : relevé peu après le début de la course
+  if (ckRefFrames_ < 12 && ++ckRefFrames_ == 12) ckRef_ = overlay_;
+  const bool ref = ckRef_.size() == overlay_.size();
+  // afficheurs (2 lignes à gauche, 2 à droite) et barre de vitesse, en pixels de l'écran d'origine
+  struct Zone { int x0, y0, x1, y1; uint32_t bg; };
+  Zone zones[5] = {{37, 178, 86, 186, 0}, {37, 188, 86, 196, 0}, {234, 178, 283, 186, 0}, {234, 188, 283, 196, 0}, {96, 173, 225, 177, 0}};
+  static uint8_t zoneOf[320 * 200];
+  std::memset(zoneOf, 0, sizeof zoneOf);
+  auto luma = [](uint32_t c) { return int((c >> 16) & 255) * 77 + int((c >> 8) & 255) * 150 + int(c & 255) * 29 >> 8; };
+  for (int k = 0; k < 5; k++) {   // fond de la zone : couleur la plus fréquente
+    Zone &z = zones[k];
+    std::map<uint32_t, int> cnt;
+    for (int y = z.y0; y < z.y1; y++)
+      for (int x = z.x0; x < z.x1; x++) { cnt[overlay_[size_t(y) * 320 + x]]++; zoneOf[y * 320 + x] = uint8_t(k + 1); }
+    int best = -1;
+    for (auto &[c, n] : cnt) if (n > best) { best = n; z.bg = c; }
+  }
+  for (int y = 0; y < H; y++) {
+    const int v = mapY_[y];
+    const uint32_t *src = &overlay_[size_t(v) * 320];
+    const uint32_t *rf = ref ? &ckRef_[size_t(v) * 320] : nullptr;
+    const uint32_t *hd = &ckScaled_[size_t(y) * W];
+    uint32_t *o = out + size_t(y) * W;
+    for (int x = 0; x < W; x++) {
+      const int u = mapX_[x];
+      if (u < 0) continue;
+      const uint32_t c = src[u], h = hd[x];
+      const int zk = zoneOf[v * 320 + u];
+      bool lowres;
+      if (zk) lowres = c && c != zones[zk - 1].bg && std::abs(luma(c) - luma(zones[zk - 1].bg)) > 30;   // chiffres, barre
+      else lowres = c && (ref ? c != rf[u] : (h >> 24) == 0);   // changé depuis le début (ou hors de l'image HD)
+      if (h >> 24) {
+        const uint32_t a = h >> 24, d = o[x];
+        if (a >= 255) o[x] = h;
+        else {
+          auto mix = [&](int sh) { return ((((h >> sh) & 255) * a + ((d >> sh) & 255) * (255 - a)) / 255) << sh; };
+          o[x] = 0xff000000u | mix(16) | mix(8) | mix(0);
+        }
+      }
+      if (lowres) o[x] = c;
+    }
+  }
+}
+
 void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
   const double s = H / 200.0, ox = (W - 320 * s) / 2;
   if (!racing()) {
+    ckRefFrames_ = 0; ckRef_.clear();   // cockpit HD : nouvelle référence à la prochaine course
     // hors course : écran d'origine agrandi, centré
     static uint32_t st[320 * 200];
     m.screenARGB(st);
@@ -992,14 +1075,16 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
     }
     for (int y = 0; y < H; y++) mapY_[y] = std::min(199, int((y + 0.5) / s));
   }
-  for (int y = 0; y < H; y++) {
-    const uint32_t *src = &overlay_[mapY_[y] * 320];
-    uint32_t *o = out + size_t(y) * W;
-    for (int x = 0; x < W; x++) {
-      int u = mapX_[x];
-      if (u >= 0 && src[u]) o[x] = src[u];
+  if (!assets.cockpit.px.empty()) drawCockpitHd(out, W, H, s, ox);
+  else
+    for (int y = 0; y < H; y++) {
+      const uint32_t *src = &overlay_[mapY_[y] * 320];
+      uint32_t *o = out + size_t(y) * W;
+      for (int x = 0; x < W; x++) {
+        int u = mapX_[x];
+        if (u >= 0 && src[u]) o[x] = src[u];
+      }
     }
-  }
   // sprites remplacés par les images du dossier hd/, dans l'ordre où le jeu les a dessinés
   if (assets.sprites().empty() && !params.builtinFlames) return;
   const double xa = 32, xb = 288, la = ox + xa * s, lb = ox + xb * s;
