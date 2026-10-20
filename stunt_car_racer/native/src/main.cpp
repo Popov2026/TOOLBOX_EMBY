@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v65"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v66"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -383,8 +383,16 @@ int main(int argc, char **argv) {
   // scr.ini : à côté de scr.exe (même si le jeu est lancé depuis un autre dossier), sinon dossier courant
   std::string ini = "scr.ini";
   if (char *bp = SDL_GetBasePath()) {
-    std::string cand = std::string(bp) + "scr.ini";
+    std::string cand = std::string(bp) + "scr.ini", model = std::string(bp) + "scr.ini.exemple";
     SDL_free(bp);
+    // premier lancement : scr.ini créé à partir du modèle livré (scr.ini.exemple). Le jeu n'est plus
+    // livré avec un scr.ini : décompresser une nouvelle version n'écrase plus vos réglages
+    // (adresse du serveur relais, touches, options)
+    if (!std::ifstream(cand).good() && std::ifstream(model).good()) {
+      std::ifstream in(model, std::ios::binary);
+      std::ofstream out(cand, std::ios::binary);
+      out << in.rdbuf();
+    }
     if (std::ifstream(cand).good()) ini = cand;
   }
   for (int i = 1; i < argc; i++)
