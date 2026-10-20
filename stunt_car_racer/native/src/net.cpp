@@ -407,13 +407,14 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
     case NF_GSTATE: {   // état du groupe (course à plusieurs)
       std::string s(reinterpret_cast<const char *>(p), n);
       std::stringstream ss(s); std::string line;
-      groupMembers_.clear();
+      groupMembers_.clear(); groupDuel_ = false;
       while (std::getline(ss, line)) {
         std::stringstream ls(line); std::string k; ls >> k;
         if (k == "me") ls >> groupMe_;
         else if (k == "host") ls >> groupHost_;
         else if (k == "phase") ls >> groupPhase_;
         else if (k == "track") { std::string l; ls >> groupTrack_ >> l >> groupLaps_; }
+        else if (k == "duel") groupDuel_ = true;
         else if (k == "m") {
           GroupMember gm; ls >> gm.id >> gm.state; std::getline(ls, gm.name);
           if (!gm.name.empty() && gm.name[0] == ' ') gm.name.erase(0, 1);
@@ -739,6 +740,11 @@ std::string NetLink::status() const {
       if (mode_ == Mode::Lobby) return "Réseau local : visible sous le nom " + name_ + (peers_.empty() ? ", aucun autre joueur pour l'instant" : "");
       if (mode_ == Mode::LanHost) return "Réseau local : partie hébergée, en attente d'un joueur (port " + std::to_string(port_) + ")";
       if (mode_ == Mode::LanJoin) return "Réseau local : recherche d'une partie...";
+      if (mode_ == Mode::Relay && groupIn_ && groupDuel_) {
+        std::string other;
+        for (auto &gm : groupMembers_) if (gm.id != groupMe_) other = gm.name;
+        return "En ligne : course à deux contre " + other;
+      }
       if (mode_ == Mode::Relay && room_.empty()) return "En ligne : recherche d'un adversaire (premier joueur disponible)";
       if (mode_ == Mode::Relay && groupIn_)
         return "Course à plusieurs : salle " + room_ + ", " + std::to_string(groupMembers_.size()) + " joueur(s)";

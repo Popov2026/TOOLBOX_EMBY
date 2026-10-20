@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v63"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v64"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -715,6 +715,17 @@ int main(int argc, char **argv) {
     bool idle = !net.active() || net.state() == NetLink::State::Failed;
     if (online()) {
       bool inRoom = net.relayRoom() && net.state() == NetLink::State::Waiting;   // salle privée du relais
+      if (net.inGroup() && net.groupDuel()) {   // course à deux : circuit proposé, accepté par les deux
+        if (net.groupPhase() == "vote") {
+          bool accepted = false;
+          for (auto &gm : net.groupMembers()) if (gm.id == net.groupMe()) accepted = gm.state == "accept";
+          it.push_back({accepted ? "Circuit accepté : en attente de l'autre joueur" : "Accepter ce circuit", accepted ? 17 : 15, {}});
+          it.push_back({"Autre circuit", 16, {}});
+        }
+        it.push_back({"Écrire un message (F9)", 8, {}});
+        it.push_back({"Quitter la course", 13, {}});
+        return it;
+      }
       if (net.inGroup()) {   // course à plusieurs : réglages de l'organisateur, départ
         bool host = net.groupHost() == net.groupMe(), lobby = net.groupPhase() == "lobby";
         if (host && lobby) {
@@ -753,7 +764,9 @@ int main(int argc, char **argv) {
     return it;
   };
   std::function<void()> leaveGroup = [&] {   // quitter la course à plusieurs (retour au titre si une course a eu lieu)
+    const bool duelAuto = net.groupDuel() && !net.relayRoom();   // premier joueur disponible : on quitte le serveur
     net.groupCommand("LEAVE");
+    if (duelAuto) net.close("course quittée");
     bool wasActive = gr.active;
     gr = GroupRace();
     menuSel = 0;
@@ -783,6 +796,8 @@ int main(int argc, char **argv) {
       case 11: gLaps = gLaps % 9 + 1; break;
       case 12: net.groupCommand("START " + std::to_string(gTrack) + " " + std::to_string(gLaps)); break;
       case 13: leaveGroup(); break;
+      case 15: net.groupCommand("ACCEPT"); break;
+      case 16: net.groupCommand("REJECT"); menuSel = 0; break;
     }
   };
   // aide aux tests automatiques (aucun effet sinon) : SCR_AUTOKEYS="trame:Touche,..." simule des appuis
@@ -1587,7 +1602,8 @@ int main(int argc, char **argv) {
       int scale = std::max(1, logicalW / 400);
       struct Line { std::string text; uint32_t fg, bg; };
       std::vector<Line> lines;
-      lines.push_back({net.inGroup() ? "COURSE A PLUSIEURS - SALLE " + net.room()
+      lines.push_back({net.inGroup() && net.groupDuel() ? std::string("COURSE A DEUX") + (net.relayRoom() ? " - SALLE " + net.room() : "")
+                       : net.inGroup() ? "COURSE A PLUSIEURS - SALLE " + net.room()
                        : online() ? "ONLINE MULTIPLAYER - SERVEUR RELAIS" : "COMPUTER LINK - RESEAU LOCAL (LAN)", 0xffffff00u, 0xe0202020u});
       std::string st = net.status();
       std::vector<Line> groupLines;
@@ -1595,7 +1611,9 @@ int main(int argc, char **argv) {
         std::string hostName;
         for (auto &gm : net.groupMembers()) if (gm.id == net.groupHost()) hostName = gm.name;
         bool host = net.groupHost() == net.groupMe();
-        st = net.groupPhase() != "lobby" ? (gr.out ? "Abandon (voiture détruite). Attente des autres..."
+        st = net.groupDuel() && net.groupPhase() == "vote"
+                 ? "Circuit proposé : " + trackName(net.groupTrack()) + ", " + std::to_string(net.groupLaps()) + " tours"
+             : net.groupPhase() != "lobby" ? (gr.out ? "Abandon (voiture détruite). Attente des autres..."
                                                 : gr.finished ? "Arrivé ! En attente des autres joueurs..." : "Course en cours...")
              : host ? (net.groupMembers().size() < 2 ? "En attente d'autres joueurs (2 à 6)" : "Choisissez le circuit puis lancez")
                     : "En attente du départ donné par " + hostName;
@@ -1613,7 +1631,8 @@ int main(int argc, char **argv) {
             char b[48]; std::snprintf(b, sizeof b, "%d. ", ++rank); t = b + t;
             std::snprintf(b, sizeof b, "  %ld:%04.1f", msv / 60000, (msv % 60000) / 1000.0); t += b;
           } else t = "-  " + t + (gm.state == "out" ? "  abandon" : "");
-          if (gm.id == net.groupHost()) t += "  (organisateur)";
+          if (net.groupDuel()) { if (net.groupPhase() == "vote") t += gm.state == "accept" ? "  : circuit accepté" : "  : choisit..."; }
+          else if (gm.id == net.groupHost()) t += "  (organisateur)";
           groupLines.push_back({t, gm.id == net.groupMe() ? 0xffa0e0ffu : 0xffffffffu, 0xe0202020u});
         }
       }

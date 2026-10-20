@@ -1,11 +1,14 @@
 Serveur relais Stunt Car Racer (multijoueur par Internet)
 =========================================================
 
-Rôle : les jeux se connectent au serveur, qui met deux joueurs en relation puis transmet leurs
-données de l'un à l'autre. Deux façons de se trouver (menu « Computer Link » du jeu) :
-  - « premier joueur disponible » : le serveur relie le joueur au premier qui attend ;
-  - « salle privée (code) » : les joueurs qui tapent le même code voient qui est présent et
-    choisissent leur adversaire. Les joueurs n'ont aucun port à ouvrir : seul le serveur
+Rôle : les jeux se connectent au serveur, qui met les joueurs en relation puis transmet leurs
+données. Façons de se trouver (menu « 4. Online Multiplayer » du jeu) :
+  - « premier joueur disponible » : le serveur met le joueur en course à deux avec le premier
+    qui attend ; chacun mène son jeu, le circuit est tiré au sort et accepté par les deux
+    (« Autre circuit » en fait tirer un autre) ;
+  - « salle privée (code) » : les joueurs qui tapent le même code voient qui est présent,
+    choisissent leur adversaire (même course à deux) ou font une course à plusieurs (2 à 6).
+  Les joueurs n'ont aucun port à ouvrir : seul le serveur
 écoute (port TCP 27420 par défaut). Trafic : environ 300 octets/s par joueur pendant une course.
 
 
@@ -101,8 +104,8 @@ données de l'un à l'autre. Deux façons de se trouver (menu « Computer Link �
 
     relais = ADRESSE_DU_SERVEUR:27420
 
-  (adresse IP ou nom de domaine). Puis en jeu : « 3. Computer Link », « Par Internet : code de
-  salle », même code pour les deux joueurs, Entrée.
+  (adresse IP ou nom de domaine). Puis en jeu : « 4. Online Multiplayer », « Premier joueur
+  disponible » ou « Salle privée (code) », même code pour tous les joueurs, Entrée.
 
 
 4. Fonctionnement et limites

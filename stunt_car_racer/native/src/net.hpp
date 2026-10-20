@@ -87,6 +87,7 @@ class NetLink {
   const std::string &groupPhase() const { return groupPhase_; }
   int groupTrack() const { return groupTrack_; }
   int groupLaps() const { return groupLaps_; }
+  bool groupDuel() const { return groupDuel_; }   // course à deux (circuit proposé, accepté par les deux)
   bool takeGroupEvent(std::string &ev);        // START / GO / END reçus (dans l'ordre)
   void sendGhost(const float v[7], uint8_t lap, uint8_t flags);
   const std::map<uint32_t, std::deque<GhostSample>> &ghosts() const { return ghosts_; }
@@ -136,6 +137,7 @@ class NetLink {
   uint32_t groupMe_ = 0, groupHost_ = 0;
   std::string groupPhase_;
   int groupTrack_ = 0, groupLaps_ = 3;
+  bool groupDuel_ = false;
   std::deque<std::string> groupEvents_;
   std::map<uint32_t, std::deque<GhostSample>> ghosts_;
   bool openListener(int port);

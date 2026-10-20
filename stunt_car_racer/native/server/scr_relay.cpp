@@ -3,9 +3,11 @@
 // Les jeux se connectent au serveur, qui met deux joueurs en relation puis transmet leurs trames de
 // l'un à l'autre. Aucun port à ouvrir chez les joueurs : seul ce serveur écoute.
 // Deux façons de se trouver :
-//   - automatique : le serveur relie le joueur au premier autre joueur en attente ;
+//   - automatique : le serveur met le joueur en course à deux avec le premier autre joueur en
+//     attente (chacun mène son jeu ; circuit tiré au sort, accepté par les deux ou « autre circuit ») ;
 //   - salle privée : les joueurs qui tapent le même code voient la liste des présents et
-//     choisissent leur adversaire.
+//     choisissent leur adversaire (même course à deux), ou font une course à plusieurs (2 à 6).
+//   Le Computer Link (une seule partie menée par le maître) reste pour le réseau local.
 // La fenêtre du serveur affiche en direct les joueurs connectés (option --journal : simple journal).
 // Trafic : environ 300 octets/s par joueur pendant une course.
 //
@@ -25,13 +27,14 @@
 //                                            reçu « nom\ttexte » ; en partie : retransmis à l'adversaire)
 //                       GCMD (19) "ENTER" | "LEAVE" | "START circuit tours" | "LOADED" | "FINISH ms" | "OUT"
 //                                            (course à plusieurs, 2 à 6 joueurs d'une salle privée)
+//                                 | "ACCEPT" | "REJECT"   (course à deux : circuit proposé accepté / autre circuit)
 //                       GPOS (21) position de la voiture (binaire), retransmise aux autres membres
 //                                 précédée du numéro du joueur (4 octets)
 //                       PROBE (15) ""       (test du serveur par le jeu : réponse INFO "SERVER joueurs parties;réglages;version=vNN")
 //                       JOIN (10) "code\0version"  (ancienne version : appariement par code)
 //   serveur -> client : INFO (11) "WAIT" | "PAIRED 1" (maître) | "PAIRED 2" | "GONE" | "BUSY" | "ERR message"
 //                       LIST (13) "numéro\tnom\n..." (salle privée : joueurs présents et libres)
-//                       GSTATE (18) état du groupe : "me N\nhost N\nphase lobby|loading|racing\n
+//                       GSTATE (18) état du groupe : "me N\nhost N\nphase lobby|vote|loading|racing|gone\n
 //                                   track T laps L\nm N état nom\n..." (état : lobby, loading, loaded,
 //                                   racing, finished:ms, out = abandon)
 //                       GEVENT (20) "START circuit tours n1 n2 ..." (ordre sur la grille) | "GO" | "END"
@@ -103,7 +106,7 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v63"
+#define SCR_RELAY_VERSION "v64"
 
 namespace {
 
@@ -171,6 +174,7 @@ struct Client {
   double closingSince = 0;
   double since = 0, lastRx = 0, pairedAt = 0, lastChat = 0;
   bool inGroup = false;          // course à plusieurs
+  std::string gkey;              // groupe : code de la salle, ou « DUEL n » (course à deux par appariement)
   std::string gstate = "lobby";  // lobby, loading, loaded, racing, finished:ms, out (voiture détruite)
   uint64_t rxBytes = 0, rxMark = 0;
   double rate = 0;               // octets reçus par seconde
@@ -260,6 +264,8 @@ struct Group {
   std::vector<Sock> members;     // ordre d'arrivée ; le premier est l'organisateur
   std::string phase = "lobby";   // lobby, loading, racing
   int track = 0, laps = 3;
+  bool duel = false;             // course à deux (premier joueur disponible, ou « Affronter » dans une salle) :
+                                 // chacun mène son jeu, circuit proposé et accepté par les deux (phase vote)
   double deadline = 0, firstFinish = 0, startedAt = 0;
   std::string lastState;
 };
@@ -274,7 +280,7 @@ void groupState(const std::string &room, bool force = false) {
   if (git == groups.end()) return;
   Group &g = git->second;
   std::string body = "host " + std::to_string(g.members.empty() ? 0 : clients[g.members[0]].id) + "\nphase " + g.phase +
-                     "\ntrack " + std::to_string(g.track) + " laps " + std::to_string(g.laps) + "\n";
+                     "\ntrack " + std::to_string(g.track) + " laps " + std::to_string(g.laps) + "\n" + (g.duel ? "duel 1\n" : "");
   for (Sock f : g.members) {
     Client &m = clients[f];
     body += "m " + std::to_string(m.id) + " " + m.gstate + " " + (m.name.empty() ? "Joueur" + std::to_string(m.id) : m.name) + "\n";
@@ -285,49 +291,108 @@ void groupState(const std::string &room, bool force = false) {
   dirty = true;
 }
 
+void matchAuto(Client &c);
+void duelDissolve(const std::string &key);
+
 void groupLeave(Client &c) {
   if (!c.inGroup) return;
   c.inGroup = false;
-  auto git = groups.find(c.room);
+  const std::string key = c.gkey;
+  auto git = groups.find(key);
   if (git == groups.end()) return;
   Group &g = git->second;
   g.members.erase(std::remove(g.members.begin(), g.members.end(), c.fd), g.members.end());
-  logf("%s quitte la course à plusieurs de la salle %s", who(c).c_str(), c.room.c_str());
+  logf("%s quitte la course %s", who(c).c_str(), key.c_str());
   if (g.members.empty()) { groups.erase(git); return; }
-  groupState(c.room);
+  // course à deux : seul, le joueur restant retrouve la salle ou attend un autre adversaire (hors course)
+  if (g.duel && g.phase != "racing" && g.phase != "loading") { duelDissolve(key); return; }
+  groupState(key);
+}
+
+// fin d'une course à deux : les joueurs restants redeviennent libres (salle) ou attendent (automatique)
+void duelDissolve(const std::string &key) {
+  auto git = groups.find(key);
+  if (git == groups.end()) return;
+  std::vector<Sock> rest = git->second.members;
+  groups.erase(git);
+  for (Sock f : rest) {
+    auto it = clients.find(f);
+    if (it == clients.end()) continue;
+    Client &m = it->second;
+    m.inGroup = false; m.gkey.clear(); m.gstate = "lobby";
+    frame(m, NF_GSTATE, "me " + std::to_string(m.id) + "\nhost 0\nphase gone\n");   // plus de groupe
+    frame(m, NF_INFO, "WAIT");
+    if (m.mode == Mode::Auto) matchAuto(m);
+  }
+}
+
+// course à deux : groupe des deux joueurs, circuit tiré au sort et proposé aux deux
+void duelCreate(Client &a, Client &b) {
+  const std::string key = "DUEL" + std::to_string(a.id);
+  Group &g = groups[key];
+  g = Group();
+  g.duel = true; g.phase = "vote"; g.track = std::rand() % 8; g.laps = 3;
+  for (Client *m : {&a, &b}) { m->inGroup = true; m->gkey = key; m->gstate = "vote"; g.members.push_back(m->fd); }
+  totalGames++;
+  logf("course à deux : %s contre %s (circuit %d proposé)", who(a).c_str(), who(b).c_str(), g.track + 1);
+  groupState(key, true);
 }
 
 void groupEnter(Client &c) {
   if (c.mode != Mode::Room || c.inGroup || c.peer != NONE) return;
   Group &g = groups[c.room];
+  c.gkey = c.room;
   if (g.phase != "lobby") { frame(c, NF_INFO, "ERR une course est en cours dans cette salle, réessayez à la fin"); return; }
   if (g.members.size() >= GROUP_MAX) { frame(c, NF_INFO, "ERR course complète (6 joueurs)"); return; }
   c.inGroup = true; c.gstate = "lobby";
   g.members.push_back(c.fd);
   logf("%s rejoint la course à plusieurs de la salle %s (%zu joueur(s))", who(c).c_str(), c.room.c_str(), g.members.size());
-  groupState(c.room, true);
+  groupState(c.gkey, true);
+}
+
+// départ de la course d'un groupe : grille tirée au sort, chargement
+void groupStart(const std::string &key, Group &g) {
+  g.phase = "loading"; g.deadline = now() + 30; g.firstFinish = 0;
+  for (Sock f : g.members) clients[f].gstate = "loading";
+  // grille de départ (3 rangées de 2) : ordre tiré au sort à chaque course
+  std::vector<uint32_t> grid;
+  for (Sock f : g.members) grid.push_back(clients[f].id);
+  for (size_t i = grid.size(); i > 1; i--) std::swap(grid[i - 1], grid[size_t(std::rand()) % i]);
+  std::string startMsg = "START " + std::to_string(g.track) + " " + std::to_string(g.laps);
+  for (uint32_t id : grid) startMsg += " " + std::to_string(id);
+  groupSend(g, NF_GEVENT, startMsg);
+  logf("%s : course à %zu joueurs lancée (circuit %d, %d tour(s))", key.c_str(), g.members.size(), g.track + 1, g.laps);
 }
 
 void groupCmd(Client &c, const std::string &cmd) {
   if (cmd == "ENTER") { groupEnter(c); return; }
   if (!c.inGroup) return;
-  if (cmd == "LEAVE") { groupLeave(c); return; }
-  Group &g = groups[c.room];
+  if (cmd == "LEAVE") {
+    if (c.mode == Mode::Auto) c.mode = Mode::None;   // quitte la course à deux : le jeu se déconnecte, pas de nouvel adversaire
+    groupLeave(c);
+    return;
+  }
+  const std::string key = c.gkey;
+  Group &g = groups[key];
   if (cmd.rfind("START", 0) == 0) {
-    if (g.members.empty() || g.members[0] != c.fd || g.phase != "lobby" || g.members.size() < 2) return;
+    if (g.duel || g.members.empty() || g.members[0] != c.fd || g.phase != "lobby" || g.members.size() < 2) return;
     int t = 0, l = 3;
     std::sscanf(cmd.c_str() + 5, "%d %d", &t, &l);
     g.track = std::max(0, std::min(15, t)); g.laps = std::max(1, std::min(9, l));   // 8-15 : circuits TNT
-    g.phase = "loading"; g.deadline = now() + 30; g.firstFinish = 0;
-    for (Sock f : g.members) clients[f].gstate = "loading";
-    // grille de départ (3 rangées de 2) : ordre tiré au sort à chaque course
-    std::vector<uint32_t> grid;
-    for (Sock f : g.members) grid.push_back(clients[f].id);
-    for (size_t i = grid.size(); i > 1; i--) std::swap(grid[i - 1], grid[size_t(std::rand()) % i]);
-    std::string startMsg = "START " + std::to_string(g.track) + " " + std::to_string(g.laps);
-    for (uint32_t id : grid) startMsg += " " + std::to_string(id);
-    groupSend(g, NF_GEVENT, startMsg);
-    logf("salle %s : course à %zu joueurs lancée (circuit %d, %d tour(s))", c.room.c_str(), g.members.size(), g.track + 1, g.laps);
+    groupStart(key, g);
+  } else if (cmd == "ACCEPT") {   // course à deux : circuit proposé accepté ; départ quand les deux acceptent
+    if (!g.duel || g.phase != "vote") return;
+    c.gstate = "accept";
+    bool all = g.members.size() >= 2;
+    for (Sock f : g.members) all = all && clients[f].gstate == "accept";
+    if (all) groupStart(key, g);
+  } else if (cmd == "REJECT") {   // « Autre circuit » : nouveau tirage, les deux doivent de nouveau accepter
+    if (!g.duel || g.phase != "vote") return;
+    int t = g.track;
+    while (t == g.track) t = std::rand() % 8;
+    g.track = t;
+    for (Sock f : g.members) clients[f].gstate = "vote";
+    logf("%s : %s demande un autre circuit (circuit %d proposé)", key.c_str(), c.name.c_str(), g.track + 1);
   } else if (cmd == "LOADED") {
     if (g.phase == "loading") c.gstate = "loaded";
   } else if (cmd.rfind("FINISH", 0) == 0) {
@@ -335,20 +400,21 @@ void groupCmd(Client &c, const std::string &cmd) {
       long ms = std::max(0L, std::min(86400000L, std::atol(cmd.c_str() + 6)));
       c.gstate = "finished:" + std::to_string(ms);
       if (!g.firstFinish) g.firstFinish = now();
-      logf("salle %s : %s arrive en %ld,%03ld s", c.room.c_str(), c.name.c_str(), ms / 1000, ms % 1000);
+      logf("%s : %s arrive en %ld,%03ld s", key.c_str(), c.name.c_str(), ms / 1000, ms % 1000);
     }
   } else if (cmd == "OUT") {   // voiture détruite : abandon
     if (g.phase == "racing" && c.gstate == "racing") {
       c.gstate = "out";
-      logf("salle %s : %s abandonne (voiture détruite)", c.room.c_str(), c.name.c_str());
+      logf("%s : %s abandonne (voiture détruite)", key.c_str(), c.name.c_str());
     }
   }
-  groupState(c.room);
+  if (groups.count(key)) groupState(key);
 }
 
 // avancement des groupes : départ quand tous sont prêts, fin quand tous sont arrivés
 void groupTick() {
   double t = now();
+  std::vector<std::string> duelDoomed;   // courses à deux réduites à un joueur : dissoutes après la boucle
   for (auto &kv : groups) {
     Group &g = kv.second;
     if (g.phase == "loading") {
@@ -365,14 +431,17 @@ void groupTick() {
       for (Sock f : g.members) all = all && (clients[f].gstate.rfind("finished", 0) == 0 || clients[f].gstate == "out");
       // fin : tous arrivés ou abandonnés, ou 2 minutes après le premier, ou 30 minutes de course
       if (all || (g.firstFinish && t - g.firstFinish > 120) || t - g.startedAt > 1800) {
-        g.phase = "lobby";
+        g.phase = g.duel ? "vote" : "lobby";
+        if (g.duel) { int nt = g.track; while (nt == g.track) nt = std::rand() % 8; g.track = nt; }   // revanche : autre circuit proposé
         groupSend(g, NF_GEVENT, "END");
         groupState(kv.first, true);
-        for (Sock f : g.members) if (clients[f].gstate.rfind("finished", 0) != 0 && clients[f].gstate != "out") clients[f].gstate = "lobby";
-        logf("salle %s : course terminée", kv.first.c_str());
+        for (Sock f : g.members) if (clients[f].gstate.rfind("finished", 0) != 0 && clients[f].gstate != "out") clients[f].gstate = g.duel ? "vote" : "lobby";
+        logf("%s : course terminée", kv.first.c_str());
+        if (g.duel && g.members.size() < 2) { duelDoomed.push_back(kv.first); }
       }
     }
   }
+  for (auto &key : duelDoomed) duelDissolve(key);
 }
 
 void pair(Client &master, Client &other) {
@@ -407,6 +476,7 @@ void drop(Sock fd, const char *why) {
     if (p != clients.end()) { frame(p->second, NF_INFO, "GONE"); p->second.peer = NONE; p->second.closing = true; }
   }
   if (!c.probe) logf("%s déconnecté (%s)", who(c).c_str(), why);
+  c.closing = true;   // plus disponible : jamais réapparié pendant son départ
   groupLeave(c);
   closeSock(fd);
   clients.erase(it);
@@ -458,16 +528,29 @@ void onJoin(Client &c, Mode mode, const std::string &room, const std::string &ve
   frame(c, NF_PARAMS, paramsText());   // réglages imposés, appliqués par le jeu pendant la partie
   frame(c, NF_INFO, "WAIT");
   if (mode == Mode::Room) { logf("%s entre dans la salle %s", who(c).c_str(), c.room.c_str()); return; }
-  // automatique (ou ancien appariement par code) : le premier joueur libre compatible, arrivé avant
+  if (mode == Mode::Auto) { matchAuto(c); return; }
+  // ancien appariement par code : le premier joueur libre compatible, arrivé avant (Computer Link)
   Client *best = nullptr;
   for (auto &kv : clients) {
     Client &o = kv.second;
-    if (&o == &c || !free_(o) || o.mode != mode || o.version != c.version) continue;
-    if (mode == Mode::Code && o.room != c.room) continue;
+    if (&o == &c || !free_(o) || o.mode != mode || o.version != c.version || o.room != c.room) continue;
     if (!best || o.since < best->since) best = &o;
   }
   if (best) pair(*best, c);
-  else logf("%s attend un adversaire (%s)", who(c).c_str(), mode == Mode::Auto ? "automatique" : ("code " + c.room).c_str());
+  else logf("%s attend un adversaire (code %s)", who(c).c_str(), c.room.c_str());
+}
+
+// premier joueur disponible : course à deux avec le premier joueur libre (même version) arrivé avant ;
+// chacun mène son propre jeu (pas de Computer Link)
+void matchAuto(Client &c) {
+  Client *best = nullptr;
+  for (auto &kv : clients) {
+    Client &o = kv.second;
+    if (&o == &c || !free_(o) || o.mode != Mode::Auto || o.version != c.version) continue;
+    if (!best || o.since < best->since) best = &o;
+  }
+  if (best) duelCreate(*best, c);
+  else logf("%s attend un adversaire (automatique)", who(c).c_str());
 }
 
 void onPick(Client &c, const std::string &s) {
@@ -476,7 +559,7 @@ void onPick(Client &c, const std::string &s) {
   for (auto &kv : clients) {
     Client &o = kv.second;
     if (o.id == id && &o != &c && o.mode == Mode::Room && free_(o) && o.room == c.room && o.version == c.version) {
-      pair(c, o);   // celui qui choisit mène la partie
+      duelCreate(c, o);   // course à deux : chacun mène son jeu
       return;
     }
   }
@@ -514,7 +597,7 @@ void process(Client &c) {
       std::string m(4, '\0');
       for (int k = 0; k < 4; k++) m[size_t(k)] = char((c.id >> (24 - 8 * k)) & 255);
       m.append(reinterpret_cast<const char *>(p), n);
-      for (Sock f : groups[c.room].members) if (f != c.fd) frame(clients[f], NF_GPOS, m);
+      for (Sock f : groups[c.gkey].members) if (f != c.fd) frame(clients[f], NF_GPOS, m);
     }
     else if (type == NF_CHAT && c.mode == Mode::Room && now() - c.lastChat > 0.3) {   // discussion de la salle
       c.lastChat = now();
@@ -547,6 +630,7 @@ std::string stateOf(const Client &c, double t) {
     const std::string &g = c.gstate;
     if (g.rfind("finished:", 0) == 0) { long ms = std::atol(g.c_str() + 9); char b[64]; std::snprintf(b, sizeof b, "course à plusieurs : arrivé %ld,%ld s", ms / 1000, ms % 1000 / 100); return b; }
     if (g == "out") return "course à plusieurs : abandon (voiture détruite)";
+    if (g == "vote" || g == "accept") return std::string("course à deux : ") + (g == "accept" ? "circuit accepté" : "choix du circuit");
     return "course à plusieurs : " + std::string(g == "lobby" ? "attente du départ" : g == "racing" ? "en course" : "chargement");
   }
   return c.mode == Mode::Room ? "dans la salle, libre" : "attend un adversaire";
