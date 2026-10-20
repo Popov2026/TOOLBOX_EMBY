@@ -397,6 +397,9 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
         startSession();
       }
       else if (s == "WAIT") { info_ = "WAIT"; waitedFirst_ = true; }
+      else if (s.compare(0, 9, "MISMATCH ") == 0)
+        localNote("Un joueur attend avec la version " + cleanText(s.substr(9), 12) + " (vous : " + version_ +
+                  ") : les deux jeux et le serveur doivent avoir la même version");
       else if (s == "BUSY") peerName_.clear();   // joueur choisi déjà parti : la liste se met à jour
       else if (s == "FULL") fail("salle " + room_ + " déjà complète (deux joueurs)");
       else if (s == "GONE") fail("l'autre joueur s'est déconnecté");

@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v67"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v68"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -1701,6 +1701,8 @@ int main(int argc, char **argv) {
                          0xffc0c0c0u, 0xe0202020u});
         if (probe.ok() && newerVersion(probe.version()))
           lines.push_back({"Nouvelle version " + probe.version() + " disponible (vous : " SCR_VERSION ")", 0xffffc040u, 0xe0202020u});
+        else if (probe.ok() && !probe.version().empty() && probe.version() != SCR_VERSION)
+          lines.push_back({"Serveur en " + probe.version() + ", jeu en " SCR_VERSION " : mettez le serveur à jour", 0xffffc040u, 0xe0202020u});
       }
       if (net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting)
         st = net.peers().empty() ? "Recherche de joueurs sur le réseau local..." : "Joueurs trouvés sur le réseau local :";

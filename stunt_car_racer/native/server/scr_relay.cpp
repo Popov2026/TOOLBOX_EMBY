@@ -108,7 +108,7 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v67"
+#define SCR_RELAY_VERSION "v68"
 
 namespace {
 
@@ -540,7 +540,16 @@ void onJoin(Client &c, Mode mode, const std::string &room, const std::string &ve
   c.joined = true; dirty = true;
   frame(c, NF_PARAMS, paramsText());   // réglages imposés, appliqués par le jeu pendant la partie
   frame(c, NF_INFO, "WAIT");
-  if (mode == Mode::Room) { logf("%s entre dans la salle %s", who(c).c_str(), c.room.c_str()); return; }
+  if (mode == Mode::Room) {
+    logf("%s entre dans la salle %s", who(c).c_str(), c.room.c_str());
+    for (auto &kv : clients) {   // même salle, autre version : invisibles l'un pour l'autre, on prévient
+      Client &o = kv.second;
+      if (&o == &c || !o.joined || o.closing || o.mode != Mode::Room || o.room != c.room || o.version == c.version) continue;
+      frame(c, NF_INFO, "MISMATCH " + o.version);
+      frame(o, NF_INFO, "MISMATCH " + c.version);
+    }
+    return;
+  }
   if (mode == Mode::Auto) { matchAuto(c); return; }
   // ancien appariement par code : le premier joueur libre compatible, arrivé avant (Computer Link)
   Client *best = nullptr;
@@ -562,8 +571,16 @@ void matchAuto(Client &c) {
     if (&o == &c || !free_(o) || o.mode != Mode::Auto || o.version != c.version) continue;
     if (!best || o.since < best->since) best = &o;
   }
-  if (best) duelCreate(*best, c);
-  else logf("%s attend un adversaire (automatique)", who(c).c_str());
+  if (best) { duelCreate(*best, c); return; }
+  logf("%s attend un adversaire (automatique)", who(c).c_str());
+  // joueurs libres avec une autre version du jeu : jamais associés, on prévient les deux
+  for (auto &kv : clients) {
+    Client &o = kv.second;
+    if (&o == &c || !free_(o) || o.mode != Mode::Auto || o.version == c.version) continue;
+    frame(c, NF_INFO, "MISMATCH " + o.version);
+    frame(o, NF_INFO, "MISMATCH " + c.version);
+    logf("%s (%s) et %s (%s) : versions différentes, pas de course possible", who(c).c_str(), c.version.c_str(), who(o).c_str(), o.version.c_str());
+  }
 }
 
 void onPick(Client &c, const std::string &s) {
