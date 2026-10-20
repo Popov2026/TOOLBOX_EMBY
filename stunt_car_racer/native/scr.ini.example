@@ -7,21 +7,22 @@ smooth = 0                    # 1 : lissage à l'agrandissement
 speed = 1                     # vitesse de la machine (1 = 50 Hz d'origine)
 son = 1                       # 0 : sans son (F3 en jeu)
 volume = 0.8                  # 0 à 2
-hd = 0                        # 1 : démarrer en mode HD (touche F1 pour basculer)
+hd = 0                        # 1 : démarrer en mode HD (touche F8 pour basculer)
 details = 0                   # 1 : démarrer en détails élevés (touche F5 : sols et voiture texturés, roues rondes)
 hdres = 1920x1080             # définition du mode HD (16/9)
 ombres = 1                    # HD : ombres sous les voitures
 particules = 1                # HD : étincelles et fumée lors des chocs et des réceptions brutales
 lissage = 1                   # HD : lissage des bords (anticrénelage)
 ciel = 1                      # HD : ciel dégradé avec nuages qui dérivent et soleil (0 : ciel uni d'origine)
-decor = 1                     # HD : tribunes avec public, panneaux publicitaires et arbres autour des circuits
+decor = 1                     # HD : tribunes avec public, panneaux publicitaires, arbres et voitures garées autour des circuits
+densite = 1                   # HD : densité du décor, 1 à 4 (plus d'arbres, de panneaux, de tribunes et de voitures)
 foule = 1                     # HD : encouragements de la foule devant les tribunes (effet Doppler)
-volume_foule = 0.4            # volume de la foule, 0 à 2 (réglable dans le menu F8)
+volume_foule = 0.4            # volume de la foule, 0 à 2 (réglable dans le menu F1)
 textures_hd = 1               # HD : images du dossier hd (cockpit, sprites) ; 0 : graphismes d'origine agrandis
 manette = 1                   # 0 : manette ignorée
 vibrations = 1                # vibrations de la manette lors des chocs
 # touches de conduite (noms SDL : Up, Down, Left, Right, Space, W, A, S, D, Left Shift...) ;
-# les flèches restent toujours actives. Réglables dans le menu d'options (touche F8).
+# les flèches restent toujours actives. Réglables dans le menu d'options (touche F1).
 # touche_accelerer = Up
 # touche_freiner = Down
 # touche_gauche = Left

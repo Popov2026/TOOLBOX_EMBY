@@ -245,7 +245,9 @@ void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const
   if (visible) visible->clear();
   for (const Live &lv : live) {
     const SpriteDraw &e = spriteDraws_[lv.k];
-    if (e.under.empty()) continue;
+    // seulement les sprites suivis maintenant (textures HD coupées ou remises en cours de jeu : le
+    // relevé fait au dessin peut dater d'avant) ; dessous inconnu : transparent (l'image HD le couvre)
+    if (!spriteWatch_[e.id & 255]) continue;
     // taille du dessin relevé et taille actuelle du sprite : la plus petite des deux (le jeu peut
     // avoir changé l'image d'un même numéro depuis)
     const int sw = std::min(lv.w, e.w), sh = std::min(lv.h, e.h);
@@ -253,7 +255,7 @@ void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const
       for (int c = 0; c < sw; c++) {
         int x = e.x + c, y = e.y + r, v = lv.px[size_t(r) * lv.w + c];
         if (v < 0 || x < 0 || x >= 320 || y < 0 || y >= 200 || idx[y * 320 + x] != v) continue;
-        uint8_t u = e.under[size_t(r) * e.w + c];
+        uint8_t u = e.under.empty() ? 255 : e.under[size_t(r) * e.w + c];
         out[y * 320 + x] = u == 255 ? 0 : paletteARGB(u);
       }
     if (visible) visible->push_back(e);
@@ -284,12 +286,21 @@ Machine::Machine(const Bytes &file) {
 }
 
 void Machine::useTrackSet(const TrackSet *ts) {
+  // zones remplacées : pointeurs de la routine des circuits, noms, initiales, une valeur et des
+  // réglages par circuit
+  static const std::pair<uint32_t, uint32_t> zones[] = {{0x48398, 4}, {0x483b8, 4}, {0x13498, 128}, {0x4d35c, 16}, {0x4e7e4, 8}, {0x1451a, 64}};
+  if (origTracks_.empty())
+    for (auto &[a, n] : zones) origTracks_.insert(origTracks_.end(), ram + a, ram + a + n);
   trackSet_ = ts;
-  if (!ts) return;
+  if (!ts) {   // circuits d'origine
+    size_t k = 0;
+    for (auto &[a, n] : zones) { std::memcpy(ram + a, origTracks_.data() + k, n); k += n; }
+    return;
+  }
   // comme le chargeur de la version TNT : nouvelle table des circuits et nouvelle base de leurs
   // données dans la routine de décodage $48390 (movea.l #$13790,A2 / addi.l #$13670,D0)
   auto put32 = [&](uint32_t a, uint32_t v) { ram[a] = uint8_t(v >> 24); ram[a + 1] = uint8_t(v >> 16); ram[a + 2] = uint8_t(v >> 8); ram[a + 3] = uint8_t(v); };
-  if (w(0x48396) != 0x247c || l(0x48398) != 0x13790 || w(0x483b6) != 0x0680 || l(0x483b8) != 0x13670)
+  if (w(0x48396) != 0x247c || (l(0x48398) != 0x13790 && l(0x48398) != TNT_TABLE) || w(0x483b6) != 0x0680 || (l(0x483b8) != 0x13670 && l(0x483b8) != TNT_DATA))
     throw std::runtime_error("circuits TNT : routine des circuits non reconnue");
   std::memcpy(ram + TNT_DATA, ts->data.data(), ts->data.size());
   for (int k = 0; k < 8; k++) { uint16_t p = uint16_t(0xb100 + ts->offsets[k]); ram[TNT_TABLE + 2 * k] = uint8_t(p); ram[TNT_TABLE + 2 * k + 1] = uint8_t(p >> 8); }

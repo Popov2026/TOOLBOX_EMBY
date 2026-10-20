@@ -81,8 +81,10 @@ class Machine {
   void setTuning(const Tuning &t);
 
   const Bytes &image() const { return image_; }   // TEXT+DATA du jeu relogés à $10100 (non modifiés)
-  // circuits TNT (Stunt Car Racer « The New Tracks ») à la place des 8 circuits d'origine ; à appeler
-  // juste après la construction (ts doit rester valide). trackSet() : nullptr = circuits d'origine
+  // circuits TNT (Stunt Car Racer « The New Tracks ») à la place des 8 circuits d'origine (ts doit
+  // rester valide) ; nullptr : circuits d'origine. Possible à tout moment hors course (menus) : la
+  // table des circuits, leurs noms et réglages sont remplacés en mémoire, sans relancer le jeu.
+  // trackSet() : nullptr = circuits d'origine
   void useTrackSet(const struct TrackSet *ts);
   const struct TrackSet *trackSet() const { return trackSet_; }
   uint32_t ticks() const { return ticks_; }       // nombre d'appels de la physique ($4EEB0)
@@ -132,6 +134,7 @@ class Machine {
   uint8_t *layers_ = nullptr;     // [RAMSIZE] classe ; [RAMSIZE..2×) valeur du décor ; [2×..3×) écrit par le décor
   static constexpr uint32_t RAMSIZE = 0x100000;
   const struct TrackSet *trackSet_ = nullptr;
+  std::vector<uint8_t> origTracks_;   // valeurs d'origine remplacées par useTrackSet (pour revenir aux circuits d'origine)
 
  private:
   std::deque<uint8_t> serialIn_;

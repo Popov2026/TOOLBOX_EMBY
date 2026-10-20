@@ -14,22 +14,24 @@ En course : abandon (comme l'original) ; entraînement lancé directement : reto
 course à plusieurs : abandon, puis menu du groupe.
 Si la direction semble bloquée pendant le boost avec Espace, c'est le clavier qui ne lit
 pas trois touches à la fois : prenez Maj ou Alt pour le boost.
-Manette XInput reconnue. F1 mode HD (1920x1080, 16/9, image fluide à la
+Manette XInput reconnue. F8 mode HD (1920x1080, 16/9, image fluide à la
 fréquence de l'écran), F2 recharger les images HD, F3 couper le son,
 F4, F11 ou Alt+Entrée plein écran, F5 détails élevés (sols, route et voiture
 adverse texturés, roues rondes ; active le mode HD), F6 recommencer,
 Page préc./suiv. circuit précédent/suivant (mode entraînement), F7 circuits d'origine / TNT,
-F8 menu d'options, F12 quitter.
+F1 menu d'options, F12 quitter.
 
-Menu d'options (F8, ou bouton Start de la manette) : son et volume, mode HD, détails élevés,
-textures HD (images du dossier hd), ciel, décor, encouragements de la foule et leur volume, ombres des voitures, étincelles et fumée, lissage des bords, plein écran, circuits d'origine /
+Menu d'options (F1, ou bouton Start de la manette) : son et volume, mode HD, détails élevés,
+textures HD (images du dossier hd), ciel, décor et sa densité, encouragements de la foule et leur volume, ombres des voitures, étincelles et fumée, lissage des bords, plein écran, circuits d'origine /
 TNT, manette (et vibrations lors des chocs), touches de conduite (accélérer, freiner, gauche,
 droite, boost : Entrée puis la nouvelle touche ; les flèches restent actives pour les menus).
 Chaque changement est enregistré aussitôt dans scr.ini. Le jeu est en pause pendant ce menu
 (sauf en multijoueur). Flèches + Entrée (ou gauche/droite) pour changer, Échap pour fermer.
 
 Mode HD : ciel dégradé avec soleil et nuages qui dérivent lentement, décor autour des circuits
-(tribunes garnies de public, panneaux publicitaires, sapins et feuillus), ombres sous les voitures, gerbes d'étincelles et fumée lors des chocs et des
+(tribunes garnies de public, panneaux publicitaires, sapins et feuillus, voitures garées sur
+les parkings derrière les tribunes ; « Densité du décor » de 1 à 4 dans le menu d'options pour
+en mettre plus), ombres sous les voitures, gerbes d'étincelles et fumée lors des chocs et des
 réceptions brutales (les vôtres et celles des autres joueurs en course à plusieurs), bords
 lissés (anticrénelage). Chaque effet se coupe dans le menu d'options. La voiture adverse suit
 pendant les sauts la trajectoire calculée par le jeu d'origine (elle reste en l'air jusqu'à
@@ -57,10 +59,11 @@ DIZZY DESCENT, WITTY WAY, CRAZY CAPER, AMAZING ADEPT, JERKILY JUMP, EVILLY EPISO
 TEMPER, RAT RACE). Aucune donnée n'est fournie : placez votre fichier SCR-TNT, ou directement
 l'archive WHDLoad StuntCarRacerTNT_v1.4.lha qui le contient, dans le dossier TNT à côté de
 scr.exe (ou indiquez-le dans scr.ini : tnt = chemin). Ensuite :
-  - touche F7 (à tout moment hors course à plusieurs) : circuits d'origine <-> circuits TNT ; le
-    jeu repart du titre avec l'autre série, et le choix est enregistré dans scr.ini
-    (circuits = tnt ; aussi scr.exe --circuits tnt). Avec les circuits TNT, tout le jeu
-    (championnat, entraînement, duel) se joue sur eux, à la place des circuits d'origine ;
+  - touche F7 (ou menu d'options) : circuits d'origine <-> circuits TNT, en direct, SANS
+    relancer le jeu : les menus du jeu (entraînement, championnat) proposent aussitôt l'autre
+    série, la saison en cours est conservée. Pendant une course, le changement se fait à la fin
+    de la course. Le choix est enregistré dans scr.ini (circuits = tnt ; aussi scr.exe
+    --circuits tnt). L'écran des divisions garde les noms d'origine (image du jeu) ;
   - en entraînement, Page préc./suiv. passent par les 16 circuits (8 d'origine puis 8 TNT) ;
   - en course à plusieurs, l'organisateur choisit parmi 16 circuits : les 8 d'origine puis les
     8 TNT (marqués « (TNT) »). Un joueur qui n'a pas le fichier est prévenu et ne court pas.

@@ -13,7 +13,7 @@
 // Touches : flèches = joystick (haut accélère), Espace/Ctrl/Maj/Alt = bouton (boost),
 //           clavier ST pour les menus, F4/F11/Alt+Entrée plein écran, F12 quitter, PageUp/PageDown
 //           circuit précédent/suivant (entraînement), F5 détails élevés, F6 recommencer,
-//           F7 circuits d'origine / circuits TNT, F8 menu d'options.
+//           F7 circuits d'origine / circuits TNT, F1 menu d'options, F8 mode HD.
 #include <SDL.h>
 
 #include <algorithm>
@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v62"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v63"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -56,6 +56,7 @@ struct Options {
   std::string hdDir;
   bool highDetail = false; // détails élevés au démarrage (touche F5)
   bool shadows = true, particles = true, antialias = true, sky = true, scenery = true;   // HD : ombres, étincelles et fumée, lissage, ciel, décor
+  int density = 1;   // densité du décor (1 à 4) : arbres, panneaux, tribunes, voitures garées
   bool hdTextures = true;   // images HD du dossier hd/ (cockpit, sprites)
   double crowdVolume = 0.4;   // volume de la foule (0 à 2, par rapport au volume du jeu)
   bool crowd = true;   // encouragements de la foule des tribunes (HD, décor)
@@ -125,6 +126,7 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "ciel" || key == "sky") o.sky = val != "0";
   else if (key == "decor" || key == "décor" || key == "scenery") o.scenery = val != "0";
   else if (key == "foule" || key == "crowd") o.crowd = val != "0";
+  else if (key == "densite" || key == "densité" || key == "density") o.density = std::clamp(int(d()), 1, 4);
   else if (key == "volume_foule" || key == "crowd_volume") o.crowdVolume = std::clamp(d(), 0.0, 2.0);
   else if (key == "textures_hd" || key == "images_hd" || key == "hd_images") o.hdTextures = val != "0";
   else if (key == "manette" || key == "gamepad") o.usePad = val != "0";
@@ -486,8 +488,8 @@ int main(int argc, char **argv) {
     view = std::make_unique<HdView>(*m);
     view->params.flameImages = o.hdTextures;   // flammes HD avec les autres textures HD
     view->params.highDetail = highDetail;
-    view->params.shadows = o.shadows; view->params.particles = o.particles; view->params.antialias = o.antialias; view->params.sky = o.sky; view->params.scenery = o.scenery;
-    m->enableLayers(true);   // couches toujours suivies : F1 bascule sans délai
+    view->params.shadows = o.shadows; view->params.particles = o.particles; view->params.antialias = o.antialias; view->params.sky = o.sky; view->params.scenery = o.scenery; view->params.density = o.density;
+    m->enableLayers(true);   // couches toujours suivies : F8 bascule sans délai
     hdImages = view->loadAssets(*m, o.hdTextures ? hdDir : "");
     if (!view->assets.report.empty()) std::fprintf(stderr, "images HD (%s) :\n%s", hdDir.c_str(), view->assets.report.c_str());
   };
@@ -595,7 +597,31 @@ int main(int argc, char **argv) {
   };
   // F6 recommencer, F7 circuits d'origine <-> TNT (enregistré dans scr.ini) ; entraînement : les
   // touches Page préc./suiv. passent par les 16 circuits (8 d'origine puis 8 TNT)
+  // jeu complet : circuits d'origine <-> TNT changés en direct, sans relancer le jeu (menus,
+  // saison en cours conservée) ; pendant une course, le changement attend la fin de la course
+  bool swapPending = false;
+  auto swapSet = [&] {
+    soloSet = soloSet ? nullptr : &tntSet;
+    o.tnt = soloSet != nullptr;
+    saveIniValue(ini, {"circuits", "tracks"}, o.tnt ? "tnt" : "original", "circuits : original ou tnt (touche F7)");
+    m->useTrackSet(soloSet);
+    trackList = decodeTracks(m->image(), m->trackSet());
+    if (view) view->setTracks(*m);
+    uint32_t h = fnv1a(m->image().data(), m->image().size());
+    if (soloSet) h = fnv1a(tntSet.data.data(), tntSet.data.size(), h);
+    gameHash = h;
+    net.setIdentity(SCR_VERSION, gameHash, o.playerName, tuningText(o.tuning));
+    note = o.tnt ? "Circuits TNT (F7 : circuits d'origine)" : "Circuits d'origine (F7 : circuits TNT)"; noteUntil = NetLink::clock() + 4;
+  };
   auto changeTrack = [&](SDL_Scancode sc) {
+    if (sc == SDL_SCANCODE_F7 && track < 0) {
+      if (view && (hd ? view->raceShown() : view->racing())) {
+        swapPending = !swapPending;
+        note = swapPending ? std::string("Circuits ") + (soloSet ? "d'origine" : "TNT") + " après cette course" : "Changement de circuits annulé";
+        noteUntil = NetLink::clock() + 4;
+      } else swapSet();
+      return;
+    }
     const int n = haveTnt ? 16 : 8;
     int cur = track + (soloSet ? 8 : 0);
     if (sc == SDL_SCANCODE_PAGEUP) cur = (cur + n - 1) % n;
@@ -772,7 +798,7 @@ int main(int argc, char **argv) {
   };
   parseAuto(std::getenv("SCR_AUTOKEYS"), [&](uint32_t f, const std::string &k) { autoKeys.push_back({f, SDL_GetScancodeFromName(k.c_str())}); });
   parseAuto(std::getenv("SCR_SHOT"), [&](uint32_t f, const std::string &k) { autoShots.push_back({f, k}); });
-  // --- menu d'options (F8, ou bouton Start de la manette) : réglages enregistrés aussitôt dans scr.ini ;
+  // --- menu d'options (F1, ou bouton Start de la manette) : réglages enregistrés aussitôt dans scr.ini ;
   // le jeu est en pause pendant ce menu, sauf en multijoueur
   bool optOpen = false;
   int optSel = 0, optBind = -1;   // optBind : touche en attente (0 accélérer ... 4 boost)
@@ -801,14 +827,15 @@ int main(int argc, char **argv) {
     std::vector<OptItem> it;
     it.push_back({"Son : " + yn(!muted) + "  (F3)", 0});
     it.push_back({"Volume : " + std::to_string(int(std::lround(o.volume * 100))) + " %  < >", 1});
-    it.push_back({"Affichage HD : " + yn(hd) + "  (F1)", 2});
+    it.push_back({"Affichage HD : " + yn(hd) + "  (F8)", 2});
     it.push_back({"Détails élevés : " + yn(highDetail) + "  (F5)", 3});
     it.push_back({"Ombres des voitures : " + yn(o.shadows), 4});
     it.push_back({"Étincelles et fumée : " + yn(o.particles), 5});
     it.push_back({"Lissage des bords : " + yn(o.antialias), 6});
-    it.push_back({"Ciel avec nuages et soleil : " + yn(o.sky), 18});
-    it.push_back({"Décor (tribunes, panneaux, arbres) : " + yn(o.scenery), 19});
-    it.push_back({"Textures HD (cockpit et sprites du dossier hd) : " + yn(o.hdTextures), 21});
+    it.push_back({"Ciel, nuages et soleil : " + yn(o.sky), 18});
+    it.push_back({"Décor autour des circuits : " + yn(o.scenery), 19});
+    it.push_back({"Densité du décor : " + std::to_string(o.density) + "  < >", 23});
+    it.push_back({"Textures HD : " + yn(o.hdTextures), 21});
     it.push_back({"Encouragements de la foule : " + yn(o.crowd), 20});
     it.push_back({"Volume de la foule : " + std::to_string(int(std::lround(o.crowdVolume * 100))) + " %  < >", 22});
     it.push_back({"Plein écran : " + yn(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP) + "  (F11)", 7});
@@ -833,7 +860,7 @@ int main(int argc, char **argv) {
         saveIniValue(ini, {"volume"}, b, "volume : 0 à 2");
         break;
       }
-      case 2: hd = !hd; applyMode(true); if (!hd) SDL_SetWindowTitle(win, "Stunt Car Racer " SCR_VERSION); saveFlag({"hd"}, hd, "affichage HD (touche F1)"); break;
+      case 2: hd = !hd; applyMode(true); if (!hd) SDL_SetWindowTitle(win, "Stunt Car Racer " SCR_VERSION); saveFlag({"hd"}, hd, "affichage HD (touche F8)"); break;
       case 3:
         highDetail = !highDetail; view->params.highDetail = highDetail;
         if (highDetail && !hd) { hd = true; applyMode(true); }
@@ -859,7 +886,7 @@ int main(int argc, char **argv) {
       case 16:
         for (int k = 0; k < 5; k++) {
           bindSc[k] = bindDef[k];
-          saveIniValue(ini, {bindKeys[k]}, SDL_GetScancodeName(bindSc[k]), "touche (menu d'options, F8)");
+          saveIniValue(ini, {bindKeys[k]}, SDL_GetScancodeName(bindSc[k]), "touche (menu d'options, F1)");
         }
         break;
       case 17: optOpen = false; break;
@@ -871,6 +898,12 @@ int main(int argc, char **argv) {
         hdImages = view->loadAssets(*m, o.hdTextures ? hdDir : "");
         saveFlag({"textures_hd", "images_hd", "hd_images"}, o.hdTextures, "textures HD : images du dossier hd (cockpit, sprites)");
         break;
+      case 23: {
+        o.density = dir == 0 ? o.density % 4 + 1 : std::clamp(o.density + (dir < 0 ? -1 : 1), 1, 4);
+        view->setDensity(o.density);
+        saveIniValue(ini, {"densite", "densité", "density"}, std::to_string(o.density), "densité du décor : 1 à 4 (arbres, panneaux, tribunes, voitures garées)");
+        break;
+      }
       case 22: {
         o.crowdVolume = std::clamp(std::round(o.crowdVolume * 10 + (dir < 0 ? -1 : 1)) / 10, 0.0, 2.0);
         char b[16]; std::snprintf(b, sizeof b, "%.1f", o.crowdVolume);
@@ -925,7 +958,7 @@ int main(int argc, char **argv) {
           if (typing == Typing::Pseudo && (std::isalnum(ch) || ch == ' ' || ch == '.' || ch == '-') && typed.size() < 12) typed += char(ch);
         }
       }
-      else if (ev.type == SDL_KEYDOWN && typing == Typing::None && !ev.key.repeat && ev.key.keysym.scancode == SDL_SCANCODE_F8 && optBind < 0) {
+      else if (ev.type == SDL_KEYDOWN && typing == Typing::None && !ev.key.repeat && ev.key.keysym.scancode == SDL_SCANCODE_F1 && optBind < 0) {
         optOpen = !optOpen; optSel = 0;
       }
       else if (ev.type == SDL_KEYDOWN && optOpen && typing == Typing::None) {   // menu d'options
@@ -936,7 +969,7 @@ int main(int argc, char **argv) {
         if (optBind >= 0) {   // nouvelle touche (Échap : annuler)
           if (sc != SDL_SCANCODE_ESCAPE && !ev.key.repeat) {
             bindSc[optBind] = sc;
-            saveIniValue(ini, {bindKeys[optBind]}, SDL_GetScancodeName(sc), "touche (menu d'options, F8)");
+            saveIniValue(ini, {bindKeys[optBind]}, SDL_GetScancodeName(sc), "touche (menu d'options, F1)");
           }
           optBind = -1;
         }
@@ -1019,7 +1052,7 @@ int main(int argc, char **argv) {
             if (hdDir.empty()) hdDir = findHdDir(o.hdDir);
             hdImages = view->loadAssets(*m, o.hdTextures ? hdDir : "");
           }
-          else if (sc == SDL_SCANCODE_F1) {
+          else if (sc == SDL_SCANCODE_F8) {
             hd = !hd;
             applyMode(true);
             if (!hd) SDL_SetWindowTitle(win, "Stunt Car Racer " SCR_VERSION);
@@ -1223,6 +1256,7 @@ int main(int argc, char **argv) {
         queueAudio();
         acc -= framePeriod; n++;
       }
+    if (swapPending && track < 0 && view && !(hd ? view->raceShown() : view->racing())) { swapPending = false; swapSet(); }
     {   // vibrations de la manette : choc ou réception brutale (hausse des dégâts $10939-$1093B)
       int d = m->b(0x10939) + m->b(0x1093a) + m->b(0x1093b);
       if (damageOf == m.get() && d > lastDamage && pad && o.usePad && o.rumble) {
@@ -1678,7 +1712,7 @@ int main(int argc, char **argv) {
         y += lineH;
       }
     };
-    // menu d'options (F8), même allure que le menu du multijoueur
+    // menu d'options (F1), même allure que le menu du multijoueur
     auto drawOptions = [&](int logicalW, int logicalH) {
       if (!optOpen) return;
       static std::map<std::string, std::tuple<SDL_Texture *, int, int>> cache;

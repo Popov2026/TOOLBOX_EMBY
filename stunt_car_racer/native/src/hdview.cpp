@@ -224,6 +224,9 @@ int HdView::loadAssets(Machine &m, const std::string &dir) {
   // dossier vide : images HD désactivées (sprites et cockpit du jeu, agrandis)
   for (int id = 0; id < 256; id++) m.watchSprite(id, false);
   int n = assets.load(dir);
+  // images du cockpit à l'échelle de l'écran : recalculées (textures coupées : plus rien de HD)
+  ckScaled_.clear(); ckFront_.clear(); ckBack_.clear(); ckData_ = ckFrontData_ = ckBackData_ = nullptr; ckW_ = 0;
+  ckRef_.clear(); ckRefFrames_ = 0; tubeTop_.clear(); crackHash_ = 0;
   crowdWav = !dir.empty() && crowd_.loadWav(dir + "/foule.wav");
   for (auto &[id, spr] : assets.sprites()) m.watchSprite(id);
   if (params.builtinFlames)
@@ -234,12 +237,17 @@ int HdView::loadAssets(Machine &m, const std::string &dir) {
 // image HD d'un sprite : celle du dossier hd/ (les flammes sans image sont dessinées par drawFlame)
 const HdSprite *HdView::spriteFor(int id, const Machine &) { return assets.sprite(id); }
 
+void HdView::setTracks(const Machine &m) {
+  tracks_ = decodeTracks(m.image(), m.trackSet());
+  scenery_.clear(); crowdTrack_ = -1; hint_ = -1;
+}
+
 void HdView::mixCrowd(int16_t *pcm, size_t n, int rate, double volume) {
   if (!params.scenery || !racing() || snaps_.size() < 2) return;
   const int track = snaps_.back().track & 7;
   if (track != crowdTrack_) {   // tribunes du circuit (même décor que celui qui est dessiné)
     auto it = scenery_.find(track);
-    if (it == scenery_.end()) it = scenery_.emplace(track, buildScenery(tracks_[track])).first;
+    if (it == scenery_.end()) it = scenery_.emplace(track, buildScenery(tracks_[track], params.density)).first;
     crowdSrc_.clear();
     for (const SceneObj &o : it->second)
       if (o.kind == SCENE_STAND) crowdSrc_.push_back({o.x - o.fx * 350, o.z - o.fz * 350, o.len / 2, o.fx, o.fz});   // public : milieu des gradins
@@ -554,7 +562,7 @@ void HdView::addCar(const OppPose &o, double hs, const Machine &m, bool closed) 
 // ------------------------------------------------------------------ décor autour du circuit
 void HdView::drawScenery(const Camera &c, int track, double hs) {
   auto it = scenery_.find(track & 7);
-  if (it == scenery_.end()) it = scenery_.emplace(track & 7, buildScenery(tracks_[track & 7])).first;
+  if (it == scenery_.end()) it = scenery_.emplace(track & 7, buildScenery(tracks_[track & 7], params.density)).first;
   const double gy = GROUND_RAW * hs;
   const double fwx = std::sin(c.yaw), fwz = std::cos(c.yaw);
   const double Lx = 0.5, Ly = 0.7, Lz = 0.55, Ll = std::sqrt(Lx * Lx + Ly * Ly + Lz * Lz);   // lumière (côté du soleil)
@@ -591,11 +599,57 @@ void HdView::drawScenery(const Camera &c, int track, double hs) {
   };
   for (const SceneObj &o : it->second) {
     const double dx = o.x - c.pos.x, dz = o.z - c.pos.z, dist = std::hypot(dx, dz);
-    const double rad = o.kind == SCENE_STAND ? 1100 : o.kind == SCENE_BOARD ? 400 : 260 * o.size;
-    if (dist > 42000) continue;
+    const double rad = o.kind == SCENE_STAND ? 1100 : o.kind == SCENE_BOARD ? 400 : o.kind == SCENE_CAR ? 160 : 260 * o.size;
+    if (dist > (o.kind == SCENE_CAR ? 22000 : 42000)) continue;
     const double along = dx * fwx + dz * fwz, side = std::fabs(dx * fwz - dz * fwx);
     if (along < -rad || side > along * 1.9 + rad * 1.5) continue;   // derrière la caméra ou hors du champ
     const uint32_t sd = o.seed;
+    if (o.kind == SCENE_CAR) {   // voiture garée : caisse, habitacle vitré, 4 roues, ombre
+      static const uint32_t BODY[8] = {0xffc0262au, 0xff2050b0u, 0xffe8e8e4u, 0xffe0b020u, 0xff2a7a3cu, 0xffa8acb0u, 0xff26282cu, 0xffd86018u};
+      const double k = o.size, hx = o.fx, hz = o.fz, sx = hz, sz = -hx;   // avant, côté
+      const uint32_t body = BODY[sd % 8], glass = 0xff34404cu;
+      const double L = 190 * k, Wd = 86 * k;
+      if (params.shadows && dist < 12000) {
+        Vec3 sh[4];
+        const double l2 = L * 0.55, w2 = Wd * 0.62;
+        for (int i = 0; i < 4; i++) {
+          const double a = (i == 0 || i == 3) ? l2 : -l2, b = (i < 2) ? w2 : -w2;
+          sh[i] = {o.x + hx * a + sx * b + 18 * k, gy + 1.5, o.z + hz * a + sz * b + 14 * k};
+        }
+        r3d_.polyAlpha(sh, 4, 0xff000000u, 0.3f);
+      }
+      if (dist < 14000)
+        for (int i = 0; i < 4; i++) {   // roues
+          const double a = (i & 1 ? 1 : -1) * L * 0.32, b = (i & 2 ? 1 : -1) * Wd * 0.44;
+          box(o.x + hx * a + sx * b, o.z + hz * a + sz * b, hx, hz, 17 * k, 9 * k, gy, gy + 34 * k, 0xff141414u);
+        }
+      // tronc de pyramide : bas (hl0, hd0) centré en d0 le long de la voiture, haut (hl1, hd1) en d1
+      auto prism = [&](double d0, double hl0, double hd0, double d1, double hl1, double hd1, double y0, double y1, uint32_t side, uint32_t top) {
+        Vec3 q[8];
+        for (int i = 0; i < 8; i++) {
+          const bool up = i & 4;
+          const double d = up ? d1 : d0, hl = up ? hl1 : hl0, hd = up ? hd1 : hd0;
+          const double sa = d + ((i & 1) ? hl : -hl), sb = (i & 2) ? hd : -hd;
+          q[i] = {o.x + hx * sa - hz * sb, up ? y1 : y0, o.z + hz * sa + hx * sb};
+        }
+        const int F[6][4] = {{0, 1, 3, 2}, {4, 6, 7, 5}, {0, 4, 5, 1}, {2, 3, 7, 6}, {0, 2, 6, 4}, {1, 5, 7, 3}};
+        for (int f = 0; f < 6; f++) { Vec3 pp[4] = {q[F[f][0]], q[F[f][1]], q[F[f][2]], q[F[f][3]]}; face(pp, 4, f == 1 ? top : side); }
+      };
+      prism(0, L / 2, Wd / 2, 0, L / 2 - 4 * k, Wd / 2 - 2 * k, gy + 14 * k, gy + 46 * k, body, body);   // caisse
+      prism(-L * 0.06, L * 0.27, Wd * 0.45, -L * 0.1, L * 0.17, Wd * 0.4, gy + 46 * k, gy + 82 * k, glass, body);   // habitacle vitré, toit
+      if (dist < 9000)
+        for (int sgn = -1; sgn <= 1; sgn += 2) {   // phares (avant) et feux (arrière)
+          for (int e = -1; e <= 1; e += 2) {
+            const double a = sgn * (L / 2 + 0.5), b = e * Wd * 0.33, w = Wd * 0.1;
+            const double px = o.x + hx * a - hz * b, pz = o.z + hz * a + hx * b;
+            Vec3 lq[4] = {{px - hz * w, gy + 32 * k, pz + hx * w}, {px + hz * w, gy + 32 * k, pz - hx * w},
+                          {px + hz * w, gy + 41 * k, pz - hx * w}, {px - hz * w, gy + 41 * k, pz + hx * w}};
+            if (sgn < 0) { std::swap(lq[0], lq[1]); std::swap(lq[2], lq[3]); }
+            face(lq, 4, sgn > 0 ? 0xfff4f0d8u : 0xffc01818u);
+          }
+        }
+      continue;
+    }
     if (o.kind == SCENE_PINE || o.kind == SCENE_TREE) {
       const double k = o.size;
       static const uint32_t GREENS[4] = {0xff2f6a2cu, 0xff3a7a30u, 0xff2a5c34u, 0xff4a8236u};
@@ -1129,6 +1183,7 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
       }
     held = tot > 200 && same * 100 >= tot * 85;
   }
+  held_ = held;
   if (!racing() && !held) {
     ckRefFrames_ = 0; ckRef_.clear();   // cockpit HD : nouvelle référence à la prochaine course
     // hors course : écran d'origine agrandi, centré

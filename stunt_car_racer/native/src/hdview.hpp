@@ -47,6 +47,7 @@ struct HdParams {
   bool shadows = true;                     // ombres sous les voitures (posées sur la route, même en l'air)
   bool particles = true;                   // étincelles et fumée aux chocs et réceptions brutales
   bool scenery = true;                     // décor autour des circuits : tribunes, panneaux, arbres
+  int density = 1;                         // densité du décor, 1 à 4 (arbres, panneaux, tribunes, voitures garées)
   bool sky = true;                         // ciel dégradé avec soleil et nuages (sinon couleur unie d'origine)
 };
 
@@ -58,6 +59,9 @@ class HdView {
   HdAssets assets;
   // charge les images de remplacement (dossier hd/) et demande à la machine de suivre ces sprites
   int loadAssets(Machine &m, const std::string &dir);
+  // circuits changés en cours de jeu (d'origine <-> TNT) : tracés et décor recalculés
+  void setTracks(const Machine &m);
+  void setDensity(int d) { if (d != params.density) { params.density = d; scenery_.clear(); crowdTrack_ = -1; } }
   // encouragements des tribunes (décor HD) ajoutés à une trame de son ; volume 0 à 2
   void mixCrowd(int16_t *pcm, size_t n, int rate, double volume);
   bool crowdWav = false;   // hd/foule.wav chargé   // nombre d'images où l'œil a été remonté au-dessus de la route
@@ -66,6 +70,7 @@ class HdView {
   void afterFrame(const Machine &m);
   // vrai si une course est en cours (physique active récemment)
   bool racing() const;
+  bool raceShown() const { return racing() || held_; }   // course en cours, ou fin de course encore affichée
   double now() const { return frame_; }    // trames émulées depuis le début
   double delay() const { return params.interpDelay * tickPeriod_; }
   // horloge de lecture : toujours croissante, rattrape en douceur l'instant visé (t - retard)
@@ -108,6 +113,7 @@ class HdView {
   // roues de l'adversaire : distance parcourue (unités du monde) -> angle de rotation
   double oppRoll_ = 0, oppRollStep_ = 0, oppRollContrast_ = 1;   // angle affiché, pas par image, netteté
   OppPose oppPrev_;
+  bool held_ = false;   // fin de course : scène figée encore affichée
   CrowdSound crowd_;
   std::vector<CrowdSound::Source> crowdSrc_; int crowdTrack_ = -1;
   double oppSquat_ = 0, oppSquatT_ = -1;   // suspensions de l'adversaire : compression, temps de jeu

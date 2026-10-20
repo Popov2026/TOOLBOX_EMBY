@@ -1,4 +1,4 @@
-Images HD de remplacement (mode HD, touche F1)
+Images HD de remplacement (mode HD, touche F8)
 ==============================================
 
 Déposez ici des images PNG (ou JPG) : en mode HD, elles remplacent les sprites du cockpit
@@ -38,7 +38,7 @@ Cockpit fixe (cadre, montants, tableau de bord)
                                Utilisez un son dont vous avez les droits (enregistrement personnel
                                ou bruitage libre de droits).
 
-Les textures HD se coupent dans le menu d'options (touche F8) ou avec textures_hd = 0 dans scr.ini.
+Les textures HD se coupent dans le menu d'options (touche F1) ou avec textures_hd = 0 dans scr.ini.
 
 Règles pour les sprites
   - même proportions que le sprite d'origine (planche complète) ;
@@ -75,5 +75,5 @@ hd.ini (facultatif)
                     ; cockpit (cockpit.png) : les roues passent derrière le cadre et le moteur
 
 Les flammes du boost utilisent les images sprite_06, 07, 08, 09, 49 et 50 de ce dossier quand
-l'option « Textures HD » est active (menu F8, textures_hd = 1 dans scr.ini). Sans ces images,
+l'option « Textures HD » est active (menu F1, textures_hd = 1 dans scr.ini). Sans ces images,
 ou avec les textures HD coupées, ce sont les sprites d'origine agrandis en haute définition.

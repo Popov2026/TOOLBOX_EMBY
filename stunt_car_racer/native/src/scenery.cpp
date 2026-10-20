@@ -67,7 +67,8 @@ struct Clearance {
 
 }  // namespace
 
-std::vector<SceneObj> buildScenery(const Track &t) {
+std::vector<SceneObj> buildScenery(const Track &t, int density) {
+  const int D = std::clamp(density, 1, 4);
   std::vector<SceneObj> out;
   const size_t n = t.secs.size();
   if (n < 4) return out;
@@ -105,14 +106,38 @@ std::vector<SceneObj> buildScenery(const Track &t) {
       }
     }
   };
-  alongside(SCENE_STAND, 6, 1100, 1500, 700, 700);
-  alongside(SCENE_BOARD, 14, 480, 520, 40, 260);
+  alongside(SCENE_STAND, 6 + 3 * (D - 1), 1100, 1500, 700, 700);
+  alongside(SCENE_BOARD, 14 * D, 480, 520, 40, 260);
+  // parkings : rangées de voitures garées derrière les tribunes (plus remplis avec la densité)
+  {
+    const size_t nStands = out.size();
+    for (size_t si = 0; si < nStands; si++) {
+      if (out[si].kind != SCENE_STAND) continue;
+      const SceneObj st = out[si];
+      const double ax = st.fz, az = -st.fx;   // le long de la tribune
+      const int rows = 1 + D / 2, cols = 6;
+      const double fill = 0.35 + 0.15 * D;   // part des places occupées
+      for (int r = 0; r < rows; r++)
+        for (int cI = 0; cI < cols; cI++) {
+          if (rng.uni() > fill) continue;
+          const double a = (cI - (cols - 1) / 2.0) * 230 + (rng.uni() - 0.5) * 30;
+          const double d = 1100 + r * 420;   // derrière le mur du fond de la tribune
+          const double x = st.x + ax * a - st.fx * d, z = st.z + az * a - st.fz * d;
+          if (cl.at(x, z) < 500 || !freeAt(x, z, 120)) continue;
+          taken.push_back({x, z, 120});
+          // voiture garée perpendiculaire à la tribune, nez d'un côté ou de l'autre selon la rangée
+          const double sgn = (r & 1) ? -1 : 1, ang = (rng.uni() - 0.5) * 0.12;
+          const double hx = st.fx * sgn * std::cos(ang) - ax * std::sin(ang), hz = st.fz * sgn * std::cos(ang) - az * std::sin(ang);
+          out.push_back({SCENE_CAR, x, z, hx, hz, 0, 0.9 + rng.uni() * 0.25, rng.next()});
+        }
+    }
+  }
   // arbres : bosquets autour du circuit (plus serrés dans certaines zones), jamais près de la route
   const double bx0 = cl.x0 + 2000, bz0 = cl.z0 + 2000, bw = cl.nx * cl.CELL - 4000, bd = cl.nz * cl.CELL - 4000;
   std::vector<Disk> groves;
-  for (int g = 0; g < 14; g++) groves.push_back({bx0 + rng.uni() * bw, bz0 + rng.uni() * bd, 2500 + rng.uni() * 3500});
+  for (int g = 0; g < 14 + 6 * (D - 1); g++) groves.push_back({bx0 + rng.uni() * bw, bz0 + rng.uni() * bd, 2500 + rng.uni() * 3500});
   int placed = 0;
-  for (int tries = 0; tries < 6000 && placed < 320; tries++) {
+  for (int tries = 0; tries < 6000 * D && placed < 320 * D; tries++) {
     double x, z;
     if (rng.uni() < 0.75) {   // dans un bosquet
       const Disk &g = groves[rng.next() % groves.size()];

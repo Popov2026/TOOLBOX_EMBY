@@ -80,7 +80,7 @@ disponible »).
      l'autre voiture, les vitesses se partagent au choc (on peut pousser une voiture ou être
      poussé), et un choc violent abîme la voiture comme une mauvaise réception. Chaque jeu calcule
      le choc pour sa voiture avec la position reçue des autres : avec du lag, le contact peut
-     paraître un peu décalé. Le jeu passe en HD (F1)
+     paraître un peu décalé. Le jeu passe en HD (F8)
      au départ, car le rendu d'origine ne sait dessiner qu'une seule voiture adverse.
      En haut à droite : tour, temps et classement en direct. Le nombre de tours est celui de
      l'organisateur (1 à 9 ; l'arrêt de l'entraînement d'origine après 3 tours est désactivé).
@@ -122,7 +122,7 @@ disponible »).
   jusqu'à environ 50 ms - le cas normal entre joueurs en France - la vitesse est normale. Au-delà,
   le jeu ralentit un peu (environ 87 % à 80 ms, 76 % à 120 ms) mais ne se désynchronise pas.
 
-  Le mode HD (F1) et les détails élevés (F5) fonctionnent aussi en multijoueur.
+  Le mode HD (F8) et les détails élevés (F5) fonctionnent aussi en multijoueur.
 
   Cadence des échanges (scr.ini) :
 
