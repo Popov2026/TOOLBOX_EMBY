@@ -29,8 +29,8 @@ Cockpit fixe (cadre, montants, tableau de bord)
                                la base du moteur ; mêmes proportions que cockpit.png, le reste
                                transparent. Elle passe sous le moteur (sprite 10) et les flammes.
   cockpit_fond.png             (facultatif) fond dessiné SOUS les roues et le moteur, mêmes proportions
-                               que cockpit.png : cache la route là où le cockpit est ouvert (bas des
-                               côtés, jour entre le moteur et le tube) sans masquer les roues.
+                               que cockpit.png : bouche par exemple le jour entre le moteur et le tube,
+                               sans masquer les roues.
 
   foule.wav                    (facultatif) son de foule joué en boucle par chaque tribune à la place
                                de la foule synthétisée : WAV PCM 16 bits, mono ou stéréo, quelques
