@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v61"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v62"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -57,6 +57,7 @@ struct Options {
   bool highDetail = false; // détails élevés au démarrage (touche F5)
   bool shadows = true, particles = true, antialias = true, sky = true, scenery = true;   // HD : ombres, étincelles et fumée, lissage, ciel, décor
   bool hdTextures = true;   // images HD du dossier hd/ (cockpit, sprites)
+  double crowdVolume = 0.4;   // volume de la foule (0 à 2, par rapport au volume du jeu)
   bool crowd = true;   // encouragements de la foule des tribunes (HD, décor)
   bool usePad = true, rumble = true;                         // manette, vibrations lors des chocs
   std::string keyNames[5] = {"Up", "Down", "Left", "Right", "Space"};   // touches : accélérer, freiner, gauche, droite, boost
@@ -124,6 +125,7 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "ciel" || key == "sky") o.sky = val != "0";
   else if (key == "decor" || key == "décor" || key == "scenery") o.scenery = val != "0";
   else if (key == "foule" || key == "crowd") o.crowd = val != "0";
+  else if (key == "volume_foule" || key == "crowd_volume") o.crowdVolume = std::clamp(d(), 0.0, 2.0);
   else if (key == "textures_hd" || key == "images_hd" || key == "hd_images") o.hdTextures = val != "0";
   else if (key == "manette" || key == "gamepad") o.usePad = val != "0";
   else if (key == "vibrations" || key == "rumble") o.rumble = val != "0";
@@ -559,7 +561,7 @@ int main(int argc, char **argv) {
     if (hd && o.crowd && !muted && view) {   // foule des tribunes (effet Doppler), ajoutée au son du jeu
       static std::vector<int16_t> mixed;
       mixed = pcm;
-      view->mixCrowd(mixed.data(), mixed.size(), AUDIO_RATE, o.volume);
+      view->mixCrowd(mixed.data(), mixed.size(), AUDIO_RATE, o.volume * o.crowdVolume);
       SDL_QueueAudio(audio, mixed.data(), Uint32(mixed.size() * 2));
       return;
     }
@@ -808,6 +810,7 @@ int main(int argc, char **argv) {
     it.push_back({"Décor (tribunes, panneaux, arbres) : " + yn(o.scenery), 19});
     it.push_back({"Textures HD (cockpit et sprites du dossier hd) : " + yn(o.hdTextures), 21});
     it.push_back({"Encouragements de la foule : " + yn(o.crowd), 20});
+    it.push_back({"Volume de la foule : " + std::to_string(int(std::lround(o.crowdVolume * 100))) + " %  < >", 22});
     it.push_back({"Plein écran : " + yn(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP) + "  (F11)", 7});
     it.push_back({haveTnt ? std::string("Circuits : ") + (soloSet ? "TNT" : "d'origine") + "  (F7)" : "Circuits TNT : fichier SCR-TNT absent", 8});
     it.push_back({"Manette : " + yn(o.usePad) + (pad ? "  (branchée)" : "  (aucune)"), 9});
@@ -868,6 +871,12 @@ int main(int argc, char **argv) {
         hdImages = view->loadAssets(*m, o.hdTextures ? hdDir : "");
         saveFlag({"textures_hd", "images_hd", "hd_images"}, o.hdTextures, "textures HD : images du dossier hd (cockpit, sprites)");
         break;
+      case 22: {
+        o.crowdVolume = std::clamp(std::round(o.crowdVolume * 10 + (dir < 0 ? -1 : 1)) / 10, 0.0, 2.0);
+        char b[16]; std::snprintf(b, sizeof b, "%.1f", o.crowdVolume);
+        saveIniValue(ini, {"volume_foule", "crowd_volume"}, b, "volume de la foule : 0 à 2 (1 = niveau d'origine de la v59)");
+        break;
+      }
       case 20: o.crowd = !o.crowd; saveFlag({"foule", "crowd"}, o.crowd, "encouragements de la foule devant les tribunes (HD, avec le décor)"); break;
       case 18: o.sky = !o.sky; view->params.sky = o.sky; saveFlag({"ciel", "sky"}, o.sky, "ciel dégradé avec nuages et soleil (HD)"); break;
     }

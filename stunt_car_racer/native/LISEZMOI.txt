@@ -22,7 +22,7 @@ Page préc./suiv. circuit précédent/suivant (mode entraînement), F7 circuits 
 F8 menu d'options, F12 quitter.
 
 Menu d'options (F8, ou bouton Start de la manette) : son et volume, mode HD, détails élevés,
-textures HD (images du dossier hd), ciel, décor, encouragements de la foule, ombres des voitures, étincelles et fumée, lissage des bords, plein écran, circuits d'origine /
+textures HD (images du dossier hd), ciel, décor, encouragements de la foule et leur volume, ombres des voitures, étincelles et fumée, lissage des bords, plein écran, circuits d'origine /
 TNT, manette (et vibrations lors des chocs), touches de conduite (accélérer, freiner, gauche,
 droite, boost : Entrée puis la nouvelle touche ; les flèches restent actives pour les menus).
 Chaque changement est enregistré aussitôt dans scr.ini. Le jeu est en pause pendant ce menu
