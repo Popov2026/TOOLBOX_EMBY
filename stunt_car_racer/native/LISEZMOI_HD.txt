@@ -29,6 +29,14 @@ Cockpit fixe (cadre, montants, tableau de bord)
                                la base du moteur ; mêmes proportions que cockpit.png, le reste
                                transparent. Elle passe sous le moteur (sprite 10) et les flammes.
 
+  foule.wav                    (facultatif) son de foule joué en boucle par chaque tribune à la place
+                               de la foule synthétisée : WAV PCM 16 bits, mono ou stéréo, quelques
+                               secondes ou plus (le début et la fin sont fondus l'un dans l'autre).
+                               Utilisez un son dont vous avez les droits (enregistrement personnel
+                               ou bruitage libre de droits).
+
+Les textures HD se coupent dans le menu d'options (touche F8) ou avec textures_hd = 0 dans scr.ini.
+
 Règles pour les sprites
   - même proportions que le sprite d'origine (planche complète) ;
   - le dessin doit remplir le cadre comme l'original : pas de grande marge vide autour

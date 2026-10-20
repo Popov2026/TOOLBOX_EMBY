@@ -22,7 +22,7 @@ Page préc./suiv. circuit précédent/suivant (mode entraînement), F7 circuits 
 F8 menu d'options, F12 quitter.
 
 Menu d'options (F8, ou bouton Start de la manette) : son et volume, mode HD, détails élevés,
-ciel, décor, ombres des voitures, étincelles et fumée, lissage des bords, plein écran, circuits d'origine /
+textures HD (images du dossier hd), ciel, décor, encouragements de la foule, ombres des voitures, étincelles et fumée, lissage des bords, plein écran, circuits d'origine /
 TNT, manette (et vibrations lors des chocs), touches de conduite (accélérer, freiner, gauche,
 droite, boost : Entrée puis la nouvelle touche ; les flèches restent actives pour les menus).
 Chaque changement est enregistré aussitôt dans scr.ini. Le jeu est en pause pendant ce menu
@@ -33,7 +33,14 @@ Mode HD : ciel dégradé avec soleil et nuages qui dérivent lentement, décor a
 réceptions brutales (les vôtres et celles des autres joueurs en course à plusieurs), bords
 lissés (anticrénelage). Chaque effet se coupe dans le menu d'options. La voiture adverse suit
 pendant les sauts la trajectoire calculée par le jeu d'origine (elle reste en l'air jusqu'à
-l'atterrissage) et fait des étincelles quand elle retombe brutalement.
+l'atterrissage) et fait des étincelles quand elle retombe brutalement ; ses suspensions
+encaissent les réceptions (la caisse s'enfonce puis remonte, les roues ne passent jamais sous
+la route). Après une grosse chute hors piste, la caméra ne descend plus sous le sol.
+
+Encouragements de la foule (mode HD, avec le décor) : chaque tribune a son public qui crie et
+applaudit ; on l'entend de plus en plus fort en s'approchant, avec l'effet Doppler (plus aigu
+en arrivant, plus grave en s'éloignant). Son fourni par défaut (synthétisé) ; pour utiliser
+votre propre enregistrement, placez un fichier foule.wav dans le dossier hd (voir LISEZMOI_HD.txt).
 
 Mises à jour : au démarrage, le jeu interroge le serveur online ; si une version plus récente
 est sortie, un bandeau le signale (« Nouvelle version vXX disponible »), ainsi que le menu

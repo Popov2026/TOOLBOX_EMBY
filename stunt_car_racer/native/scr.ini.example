@@ -15,6 +15,8 @@ particules = 1                # HD : étincelles et fumée lors des chocs et des
 lissage = 1                   # HD : lissage des bords (anticrénelage)
 ciel = 1                      # HD : ciel dégradé avec nuages qui dérivent et soleil (0 : ciel uni d'origine)
 decor = 1                     # HD : tribunes avec public, panneaux publicitaires et arbres autour des circuits
+foule = 1                     # HD : encouragements de la foule devant les tribunes (effet Doppler)
+textures_hd = 1               # HD : images du dossier hd (cockpit, sprites) ; 0 : graphismes d'origine agrandis
 manette = 1                   # 0 : manette ignorée
 vibrations = 1                # vibrations de la manette lors des chocs
 # touches de conduite (noms SDL : Up, Down, Left, Right, Space, W, A, S, D, Left Shift...) ;

@@ -221,7 +221,10 @@ double HdView::playTime(double t) {
 static const int FLAME_IDS[] = {6, 7, 49, 8, 9, 50};   // flammes du boost (gauche / droite)
 
 int HdView::loadAssets(Machine &m, const std::string &dir) {
-  int n = dir.empty() ? 0 : assets.load(dir);
+  // dossier vide : images HD désactivées (sprites et cockpit du jeu, agrandis)
+  for (int id = 0; id < 256; id++) m.watchSprite(id, false);
+  int n = assets.load(dir);
+  crowdWav = !dir.empty() && crowd_.loadWav(dir + "/foule.wav");
   for (auto &[id, spr] : assets.sprites()) m.watchSprite(id);
   if (params.builtinFlames)
     for (int id : FLAME_IDS) m.watchSprite(id);
@@ -230,6 +233,28 @@ int HdView::loadAssets(Machine &m, const std::string &dir) {
 
 // image HD d'un sprite : celle du dossier hd/ (les flammes sans image sont dessinées par drawFlame)
 const HdSprite *HdView::spriteFor(int id, const Machine &) { return assets.sprite(id); }
+
+void HdView::mixCrowd(int16_t *pcm, size_t n, int rate, double volume) {
+  if (!params.scenery || !racing() || snaps_.size() < 2) return;
+  const int track = snaps_.back().track & 7;
+  if (track != crowdTrack_) {   // tribunes du circuit (même décor que celui qui est dessiné)
+    auto it = scenery_.find(track);
+    if (it == scenery_.end()) it = scenery_.emplace(track, buildScenery(tracks_[track])).first;
+    crowdSrc_.clear();
+    for (const SceneObj &o : it->second)
+      if (o.kind == SCENE_STAND) crowdSrc_.push_back({o.x - o.fx * 350, o.z - o.fz * 350, o.len / 2, o.fx, o.fz});   // public : milieu des gradins
+    crowdTrack_ = track; crowd_.reset();
+  }
+  // auditeur : la voiture ; vitesse sur la dernière demi-seconde (50 trames / s)
+  const Snap &b = snaps_.back();
+  const Snap *a = &snaps_.front();
+  for (const Snap &s : snaps_) if (b.t - s.t >= 12) a = &s;
+  double vx = 0, vz = 0;
+  if (b.t > a->t && std::fabs(b.p.x - a->p.x) + std::fabs(b.p.z - a->p.z) < 3000 && a->track == b.track) {
+    vx = (b.p.x - a->p.x) / (b.t - a->t) * 50; vz = (b.p.z - a->p.z) / (b.t - a->t) * 50;
+  }
+  crowd_.mix(pcm, n, rate, volume, crowdSrc_, b.p.x, b.p.z, vx, vz);
+}
 
 bool HdView::racing() const { return !snaps_.empty() && frame_ - lastTickFrame_ < 40; }
 
@@ -356,6 +381,7 @@ void HdView::addFlames(const OppPose &o, double hs, int seed) {
   const double base = o.yRaw * hs, K = 0.55;
   auto W = [&](double x, double y, double z) {
     x *= K; y *= K; z *= K;
+    y -= o.squat * K;
     return Vec3{o.x + r.x * x + u.x * y + f.x * z, base + r.y * x + u.y * y + f.y * z, o.z + r.z * x + u.z * y + f.z * z};
   };
   uint32_t h = (flameTick_++ + uint32_t(seed) * 7919u) * 2654435761u;
@@ -455,11 +481,13 @@ void HdView::addCar(const OppPose &o, double hs, const Machine &m, bool closed) 
     x *= K; y *= K; z *= K;
     return Vec3{o.x + r.x * x + u.x * y + f.x * z, base + r.y * x + u.y * y + f.y * z, o.z + r.z * x + u.z * y + f.z * z};
   };
+  // caisse (châssis, cabine) : abaissée de la compression des suspensions, roues posées
+  auto WB = [&](double x, double y, double z) { return W(x, y - o.squat, z); };
   auto pal = [&](int i) { return m.paletteARGB(i); };
   const uint32_t red = pal(10), redLight = pal(11), pink = pal(12), black = pal(0), grey = pal(14), dark = pal(9);
   // boîte : 6 faces, couleurs dessus / côtés / avant-arrière
   auto box = [&](double x0, double x1, double y0, double y1, double z0, double z1, uint32_t top, uint32_t side, uint32_t end) {
-    Vec3 c[8] = {W(x0, y0, z0), W(x1, y0, z0), W(x1, y0, z1), W(x0, y0, z1), W(x0, y1, z0), W(x1, y1, z0), W(x1, y1, z1), W(x0, y1, z1)};
+    Vec3 c[8] = {WB(x0, y0, z0), WB(x1, y0, z0), WB(x1, y0, z1), WB(x0, y0, z1), WB(x0, y1, z0), WB(x1, y1, z0), WB(x1, y1, z1), WB(x0, y1, z1)};
     Vec3 q[6][4] = {{c[4], c[5], c[6], c[7]}, {c[0], c[3], c[7], c[4]}, {c[1], c[5], c[6], c[2]},
                     {c[0], c[4], c[5], c[1]}, {c[3], c[2], c[6], c[7]}, {c[0], c[1], c[2], c[3]}};
     uint32_t col[6] = {top, side, side, end, end, black};
@@ -498,7 +526,7 @@ void HdView::addCar(const OppPose &o, double hs, const Machine &m, bool closed) 
   // face peinte (détails élevés) : repère local o + s·ax + w·ay, étendue [s0,s1]×[w0,w1] en unités voiture
   auto paint = [&](const Vec3 *q, int n, uint32_t col, Vec3 ax, Vec3 ay, double s0, double s1, double w0, double w1) {
     if (!hd) { r3d_.poly(q, n, col); return; }
-    TexInfo t; t.kind = TEX_PAINT; t.o = W(0, 0, 0); t.u = ax; t.v = ay;
+    TexInfo t; t.kind = TEX_PAINT; t.o = WB(0, 0, 0); t.u = ax; t.v = ay;
     t.s0 = s0 * K; t.s1 = s1 * K; t.w0 = w0 * K; t.w1 = w1 * K;
     r3d_.polyTex(q, n, col, t);
   };
@@ -510,8 +538,8 @@ void HdView::addCar(const OppPose &o, double hs, const Machine &m, bool closed) 
   box(-44, 44, 12, 28, -110, 140, black, black, black);        // châssis sous la cabine
   {   // cabine en coin : arrière haut en trapèze (plus étroit en haut et incliné vers l'avant), avant bas
     const double x0 = -44, x1 = 44, xt = 37, yb = 28, zr = -120, zrt = -95, zf = 150, yr = 99, yf = 45;
-    Vec3 rb0 = W(x0, yb, zr), rb1 = W(x1, yb, zr), rt0 = W(-xt, yr, zrt), rt1 = W(xt, yr, zrt);
-    Vec3 fb0 = W(x0, yb, zf), fb1 = W(x1, yb, zf), ft0 = W(-xt, yf, zf), ft1 = W(xt, yf, zf);
+    Vec3 rb0 = WB(x0, yb, zr), rb1 = WB(x1, yb, zr), rt0 = WB(-xt, yr, zrt), rt1 = WB(xt, yr, zrt);
+    Vec3 fb0 = WB(x0, yb, zf), fb1 = WB(x1, yb, zf), ft0 = WB(-xt, yf, zf), ft1 = WB(xt, yf, zf);
     Vec3 rear[4] = {rb0, rb1, rt1, rt0}, front[4] = {fb0, ft0, ft1, fb1}, top[4] = {rt0, rt1, ft1, ft0};
     Vec3 left[4] = {rb0, rt0, ft0, fb0}, right[4] = {rb1, fb1, ft1, rt1}, bottom[4] = {rb0, fb0, fb1, rb1};
     paint(rear, 4, red, r, u, x0, x1, yb, yr); r3d_.poly(front, 4, red); paint(top, 4, pink, r, f, x0, x1, zrt, zf);
@@ -681,9 +709,10 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
   c.pos = {p.x + sy * P.eyeFwd + cyw * P.eyeSide, p.y * HSCALE / 0.5 + P.eyeUp, p.z + cyw * P.eyeFwd - sy * P.eyeSide};
   // suspension très comprimée (réception de saut) : l'œil ne doit jamais passer sous la route
   {
-    double yRaw = 0;
-    if (surfaceRaw(tracks_[track & 7], c.pos.x, c.pos.z, p.y * 2, yRaw))
-      if (c.pos.y < yRaw * HSCALE + P.minClearance) { eyeLift_ = std::max(eyeLift_, yRaw * HSCALE + P.minClearance - c.pos.y); clampCount++; }
+    // (ni sous le sol hors piste, après une grosse chute : on verrait le dessous du décor)
+    double yRaw = 0, floor = GROUND_RAW * HSCALE;
+    if (surfaceRaw(tracks_[track & 7], c.pos.x, c.pos.z, p.y * 2, yRaw)) floor = std::max(floor, yRaw * HSCALE);
+    if (c.pos.y < floor + P.minClearance) { eyeLift_ = std::max(eyeLift_, floor + P.minClearance - c.pos.y); clampCount++; }
   }
   c.pos.y += eyeLift_;
   eyeLift_ *= 0.85;   // la remontée de l'œil retombe progressivement (pas de saut de caméra)
@@ -1080,6 +1109,26 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
   if (viewSide != 0) { p.x += std::cos(p.yaw) * viewSide; p.z -= std::sin(p.yaw) * viewSide; }   // vue décalée sur le côté
   int track = snaps_.back().track;
   OppPose opp = opponentAt(T);
+  {   // suspensions de l'adversaire : les roues ne passent jamais sous la route (ni sous le sol hors
+      // piste) ; ce qui dépasse, et le choc de la réception, enfonce la caisse qui remonte ensuite
+    const double dt = oppSquatT_ < 0 ? 0 : std::clamp(T - oppSquatT_, 0.0, 4.0);
+    oppSquatT_ = T;
+    oppSquat_ *= std::pow(0.72, dt);
+    if (opp.valid) {
+      const int keepHint = hint_;
+      double s, floor = GROUND_RAW;
+      if (surfaceRaw(tracks_[track & 7], opp.x, opp.z, opp.yRaw, s) && s - opp.yRaw < 260) floor = s;
+      hint_ = keepHint;
+      const double pen = floor - opp.yRaw;
+      if (pen > 0) {
+        opp.yRaw = floor;
+        oppSquat_ = std::max(oppSquat_, std::min(14.0, std::max(0.0, pen - 10) * params.hScale / 0.55 * 0.6));
+      }
+      for (const Snap &sn : snaps_)   // réception d'un saut : compression selon la violence du choc
+        if (sn.oppImpact > 0 && sn.t <= T && T - sn.t < 2) oppSquat_ = std::max(oppSquat_, std::min(14.0, sn.oppImpact * 0.4));
+      opp.squat = oppSquat_;
+    }
+  }
   {   // particules (étincelles, fumée) : avancées selon le temps écoulé, en trames
     double dt = partT_ < 0 ? 0 : std::clamp(T - partT_, 0.0, 4.0);
     partT_ = T;

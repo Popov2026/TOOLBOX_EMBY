@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v58"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v59"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -57,6 +57,8 @@ struct Options {
   bool hdFlames = false;   // images de flammes du dossier hd/ (sinon : sprites d'origine agrandis)
   bool highDetail = false; // détails élevés au démarrage (touche F5)
   bool shadows = true, particles = true, antialias = true, sky = true, scenery = true;   // HD : ombres, étincelles et fumée, lissage, ciel, décor
+  bool hdTextures = true;   // images HD du dossier hd/ (cockpit, sprites)
+  bool crowd = true;   // encouragements de la foule des tribunes (HD, décor)
   bool usePad = true, rumble = true;                         // manette, vibrations lors des chocs
   std::string keyNames[5] = {"Up", "Down", "Left", "Right", "Space"};   // touches : accélérer, freiner, gauche, droite, boost
   // multijoueur (câble « Computer Link » par le réseau)
@@ -123,6 +125,8 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "lissage" || key == "antialias") o.antialias = val != "0";
   else if (key == "ciel" || key == "sky") o.sky = val != "0";
   else if (key == "decor" || key == "décor" || key == "scenery") o.scenery = val != "0";
+  else if (key == "foule" || key == "crowd") o.crowd = val != "0";
+  else if (key == "textures_hd" || key == "images_hd" || key == "hd_images") o.hdTextures = val != "0";
   else if (key == "manette" || key == "gamepad") o.usePad = val != "0";
   else if (key == "vibrations" || key == "rumble") o.rumble = val != "0";
   else if (key == "touche_accelerer") o.keyNames[0] = val;
@@ -484,7 +488,7 @@ int main(int argc, char **argv) {
     view->params.highDetail = highDetail;
     view->params.shadows = o.shadows; view->params.particles = o.particles; view->params.antialias = o.antialias; view->params.sky = o.sky; view->params.scenery = o.scenery;
     m->enableLayers(true);   // couches toujours suivies : F1 bascule sans délai
-    hdImages = view->loadAssets(*m, hdDir);
+    hdImages = view->loadAssets(*m, o.hdTextures ? hdDir : "");
     if (!view->assets.report.empty()) std::fprintf(stderr, "images HD (%s) :\n%s", hdDir.c_str(), view->assets.report.c_str());
   };
   try { newView(); } catch (std::exception &e) { fail(std::string("Erreur : ") + e.what()); return 1; }
@@ -553,7 +557,15 @@ int main(int argc, char **argv) {
     const auto &pcm = m->frameAudio();
     // file trop longue (émulation en avance) : on saute la trame pour garder une latence faible
     if (SDL_GetQueuedAudioSize(audio) > Uint32(AUDIO_RATE / 50 * 2 * 6)) return;
-    if (!pcm.empty()) SDL_QueueAudio(audio, pcm.data(), Uint32(pcm.size() * 2));
+    if (pcm.empty()) return;
+    if (hd && o.crowd && !muted && view) {   // foule des tribunes (effet Doppler), ajoutée au son du jeu
+      static std::vector<int16_t> mixed;
+      mixed = pcm;
+      view->mixCrowd(mixed.data(), mixed.size(), AUDIO_RATE, o.volume);
+      SDL_QueueAudio(audio, mixed.data(), Uint32(mixed.size() * 2));
+      return;
+    }
+    SDL_QueueAudio(audio, pcm.data(), Uint32(pcm.size() * 2));
   };
   // circuits du jeu en cours (d'origine ou TNT), pour la course à plusieurs et la grille
   std::vector<Track> trackList = decodeTracks(m->image(), m->trackSet());
@@ -796,6 +808,8 @@ int main(int argc, char **argv) {
     it.push_back({"Lissage des bords : " + yn(o.antialias), 6});
     it.push_back({"Ciel avec nuages et soleil : " + yn(o.sky), 18});
     it.push_back({"Décor (tribunes, panneaux, arbres) : " + yn(o.scenery), 19});
+    it.push_back({"Textures HD (cockpit et sprites du dossier hd) : " + yn(o.hdTextures), 21});
+    it.push_back({"Encouragements de la foule : " + yn(o.crowd), 20});
     it.push_back({"Plein écran : " + yn(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP) + "  (F11)", 7});
     it.push_back({haveTnt ? std::string("Circuits : ") + (soloSet ? "TNT" : "d'origine") + "  (F7)" : "Circuits TNT : fichier SCR-TNT absent", 8});
     it.push_back({"Manette : " + yn(o.usePad) + (pad ? "  (branchée)" : "  (aucune)"), 9});
@@ -849,6 +863,13 @@ int main(int argc, char **argv) {
         break;
       case 17: optOpen = false; break;
       case 19: o.scenery = !o.scenery; view->params.scenery = o.scenery; saveFlag({"decor", "décor", "scenery"}, o.scenery, "décor autour des circuits : tribunes, panneaux, arbres (HD)"); break;
+      case 21:
+        o.hdTextures = !o.hdTextures;
+        if (hdDir.empty()) hdDir = findHdDir(o.hdDir);
+        hdImages = view->loadAssets(*m, o.hdTextures ? hdDir : "");
+        saveFlag({"textures_hd", "images_hd", "hd_images"}, o.hdTextures, "textures HD : images du dossier hd (cockpit, sprites)");
+        break;
+      case 20: o.crowd = !o.crowd; saveFlag({"foule", "crowd"}, o.crowd, "encouragements de la foule devant les tribunes (HD, avec le décor)"); break;
       case 18: o.sky = !o.sky; view->params.sky = o.sky; saveFlag({"ciel", "sky"}, o.sky, "ciel dégradé avec nuages et soleil (HD)"); break;
     }
   };
@@ -988,7 +1009,7 @@ int main(int argc, char **argv) {
           }
           else if (sc == SDL_SCANCODE_F2) {   // recharge le dossier hd/ (images modifiées pendant le jeu)
             if (hdDir.empty()) hdDir = findHdDir(o.hdDir);
-            hdImages = view->loadAssets(*m, hdDir);
+            hdImages = view->loadAssets(*m, o.hdTextures ? hdDir : "");
           }
           else if (sc == SDL_SCANCODE_F1) {
             hd = !hd;

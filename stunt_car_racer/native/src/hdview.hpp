@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "crowd.hpp"
 #include "hdassets.hpp"
 #include "machine.hpp"
 #include "render3d.hpp"
@@ -24,6 +25,7 @@ struct OppPose {
   bool valid = false;
   double x = 0, yRaw = 0, z = 0;
   Vec3 right{1, 0, 0}, fwd{0, 0, 1};
+  double squat = 0;   // suspensions : enfoncement de la caisse sur les roues (unités voiture)
 };
 
 // réglages de la caméra, exprimés en pixels de l'écran d'origine (320×200)
@@ -55,7 +57,10 @@ class HdView {
   int clampCount = 0;
   HdAssets assets;
   // charge les images de remplacement (dossier hd/) et demande à la machine de suivre ces sprites
-  int loadAssets(Machine &m, const std::string &dir);   // nombre d'images où l'œil a été remonté au-dessus de la route
+  int loadAssets(Machine &m, const std::string &dir);
+  // encouragements des tribunes (décor HD) ajoutés à une trame de son ; volume 0 à 2
+  void mixCrowd(int16_t *pcm, size_t n, int rate, double volume);
+  bool crowdWav = false;   // hd/foule.wav chargé   // nombre d'images où l'œil a été remonté au-dessus de la route
 
   // à appeler après chaque trame émulée
   void afterFrame(const Machine &m);
@@ -103,6 +108,9 @@ class HdView {
   // roues de l'adversaire : distance parcourue (unités du monde) -> angle de rotation
   double oppRoll_ = 0, oppRollStep_ = 0, oppRollContrast_ = 1;   // angle affiché, pas par image, netteté
   OppPose oppPrev_;
+  CrowdSound crowd_;
+  std::vector<CrowdSound::Source> crowdSrc_; int crowdTrack_ = -1;
+  double oppSquat_ = 0, oppSquatT_ = -1;   // suspensions de l'adversaire : compression, temps de jeu
   struct GhostWheels { OppPose prev; double roll = 0; double impactStamp = -1; };   // roues (et chocs) de chaque autre joueur
   std::map<uint32_t, GhostWheels> ghostWheels_;
   bool oppHave_ = false;
