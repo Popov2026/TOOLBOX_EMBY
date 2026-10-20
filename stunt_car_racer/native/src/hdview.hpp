@@ -122,7 +122,11 @@ class HdView {
   void drawCrack(uint32_t *out, int W, int H, double s);
   static constexpr int CRACK_ROWS = 16;              // barre du haut de l'écran d'origine (fissure des dégâts)
   std::vector<uint8_t> crack_;                       // pixels de fissure de l'image d'origine
-  std::vector<double> tubeTop_, tubeBot_;            // tube du haut du cockpit HD, par colonne d'origine
+  std::vector<double> tubeTop_, tubeBot_;
+  // fissure HD : distance de chaque pixel de la bande du tube au tracé (et au liseré clair), recalculée
+  // quand la fissure change
+  uint64_t crackHash_ = 0; int crackW_ = 0, crackH_ = 0, crackY1_ = 0;
+  std::vector<float> crackD_, crackL_;            // tube du haut du cockpit HD, par colonne d'origine
   int craneHold_ = 0;                                // grue active (images restantes)
   int wheelFrozen_[2] = {-1, -1};                    // grue : image de roue figée (droite 0-2, gauche 3-5)
   void drawSprites(const Machine &m, uint32_t *out, int W, int H, double s, double ox, double T, int lo, int hi, bool front);

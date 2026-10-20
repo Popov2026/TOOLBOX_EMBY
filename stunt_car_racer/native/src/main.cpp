@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v59"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v60"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -54,7 +54,6 @@ struct Options {
   double volume = 0.8;
   int hdW = 1920, hdH = 1080;
   std::string hdDir;
-  bool hdFlames = false;   // images de flammes du dossier hd/ (sinon : sprites d'origine agrandis)
   bool highDetail = false; // détails élevés au démarrage (touche F5)
   bool shadows = true, particles = true, antialias = true, sky = true, scenery = true;   // HD : ombres, étincelles et fumée, lissage, ciel, décor
   bool hdTextures = true;   // images HD du dossier hd/ (cockpit, sprites)
@@ -98,7 +97,6 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "smooth") o.smooth = val != "0";
   else if (key == "hd") o.hd = val != "0";
   else if (key == "hddir") o.hdDir = val;
-  else if (key == "hdflammes" || key == "hdflames") o.hdFlames = val != "0";
   else if (key == "details" || key == "détails") o.highDetail = val != "0";
   else if (key == "relais" || key == "relay") o.relay = val;
   else if (key == "tnt") o.tntPath = val;
@@ -484,7 +482,7 @@ int main(int argc, char **argv) {
   int hdImages = 0;
   auto newView = [&] {
     view = std::make_unique<HdView>(*m);
-    view->params.flameImages = o.hdFlames;
+    view->params.flameImages = o.hdTextures;   // flammes HD avec les autres textures HD
     view->params.highDetail = highDetail;
     view->params.shadows = o.shadows; view->params.particles = o.particles; view->params.antialias = o.antialias; view->params.sky = o.sky; view->params.scenery = o.scenery;
     m->enableLayers(true);   // couches toujours suivies : F1 bascule sans délai
@@ -866,6 +864,7 @@ int main(int argc, char **argv) {
       case 21:
         o.hdTextures = !o.hdTextures;
         if (hdDir.empty()) hdDir = findHdDir(o.hdDir);
+        view->params.flameImages = o.hdTextures;
         hdImages = view->loadAssets(*m, o.hdTextures ? hdDir : "");
         saveFlag({"textures_hd", "images_hd", "hd_images"}, o.hdTextures, "textures HD : images du dossier hd (cockpit, sprites)");
         break;

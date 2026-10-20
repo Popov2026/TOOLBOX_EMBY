@@ -71,8 +71,6 @@ hd.ini (facultatif)
                     ; leurs pièces (37-48) -1, le reste 0. Un plan négatif est dessiné SOUS le
                     ; cockpit (cockpit.png) : les roues passent derrière le cadre et le moteur
 
-Les flammes du boost sont les sprites d'origine agrandis en haute définition : même forme,
-même place, mêmes couleurs, même animation, contours lissés et léger halo. Les images de
-flammes de ce dossier (sprite_06, 07, 08, 09, 49, 50) sont IGNORÉES, sauf avec la ligne
-hdflammes = 1 dans scr.ini. Les anciennes versions déposaient ici leurs propres flammes :
-vous pouvez supprimer ces fichiers.
+Les flammes du boost utilisent les images sprite_06, 07, 08, 09, 49 et 50 de ce dossier quand
+l'option « Textures HD » est active (menu F8, textures_hd = 1 dans scr.ini). Sans ces images,
+ou avec les textures HD coupées, ce sont les sprites d'origine agrandis en haute définition.

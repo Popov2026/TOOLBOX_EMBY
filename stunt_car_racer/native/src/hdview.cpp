@@ -995,7 +995,7 @@ void HdView::drawCockpitHd(const Machine &m, uint32_t *out, int W, int H, double
   // images à la taille de l'écran (de nouveau après F2 : images rechargées)
   if (ckW_ != W || ckH_ != H || ckData_ != ck.px.data() || ckFrontData_ != assets.cockpitFront.px.data() || ckScaled_.size() != size_t(W) * H) {
     ckW_ = W; ckH_ = H; ckData_ = ck.px.data(); ckFrontData_ = assets.cockpitFront.px.data();
-    tubeTop_.clear();
+    tubeTop_.clear(); crackHash_ = 0;
     scaleCockpit(ck, ckScaled_, W, H, s, ox);
     scaleCockpit(assets.cockpitFront, ckFront_, W, H, s, ox);
   }
@@ -1227,18 +1227,116 @@ void HdView::drawCrack(uint32_t *out, int W, int H, double s) {
       if (a >= 0) { tubeTop_[size_t(u)] = a * 200.0 / ck.h; tubeBot_[size_t(u)] = (b < 0 ? lim : b) * 200.0 / ck.h; }
     }
   }
-  const int yMax = std::min(H, int(32 * s));
-  for (int y = 0; y < yMax; y++) {
-    const double vo = (y + 0.5) / s;   // rangée de l'écran d'origine, dans le cockpit HD
+  // tracé de la fissure : pixels sombres du jeu (le trait), colonne par colonne
+  auto lum = [](uint32_t c) { return int((c >> 16) & 255) * 77 + int((c >> 8) & 255) * 150 + int(c & 255) * 29 >> 8; };
+  uint64_t h = 1469598103934665603ull ^ uint64_t(W) * 31 ^ uint64_t(H) * 131;
+  for (int i = 0; i < CRACK_ROWS * 320; i++)
+    if (crack_[size_t(i)] && lum(overlay_[size_t(i)]) < 80) h = (h ^ uint64_t(i + 1)) * 1099511628211ull;
+  if (h != crackHash_ || crackW_ != W || crackH_ != H) {
+    crackHash_ = h; crackW_ = W; crackH_ = H;
+    crackY1_ = std::min(H, int(32 * s));
+    crackD_.assign(size_t(W) * crackY1_, 1e9f); crackL_.assign(size_t(W) * crackY1_, 1e9f);
+    const double ox = (W - 320 * s) / 2, xa = 32, xb = 288, la = ox + xa * s, lb = ox + xb * s;
+    auto fx = [&](double u) { return u < xa ? u / xa * la : u >= xb ? lb + (u - xb) / (320 - xb) * (W - lb) : la + (u - xa) * s; };
+    // point (colonne u, rangée v de la barre d'origine) -> pixel HD posé sur le tube du cockpit HD
+    auto P = [&](double u, double v, double &X, double &Y) {
+      const int c = std::clamp(int(u), 0, 319);
+      const double t0 = tubeTop_[size_t(c)], t1 = tubeBot_[size_t(c)];
+      X = fx(u); Y = (t0 + std::clamp(v / CRACK_ROWS, 0.0, 1.0) * (t1 - t0)) * s;
+    };
+    std::vector<std::vector<std::pair<double, double>>> lines;   // tracés en pixels HD
+    {   // milieu du trait par colonne, lissé (pas d'escalier de pixels), coupé aux interruptions
+      std::vector<double> mid(320, -1);
+      for (int u = 0; u < 320; u++) {
+        if (tubeTop_[size_t(u)] < 0) continue;
+        double sv = 0; int n = 0;
+        for (int v = 0; v < CRACK_ROWS; v++)
+          if (crack_[size_t(v) * 320 + u] && lum(overlay_[size_t(v) * 320 + u]) < 80) { sv += v + 0.5; n++; }
+        if (n) mid[size_t(u)] = sv / n;
+      }
+      std::vector<std::pair<double, double>> cur;
+      for (int u = 0; u <= 320; u++) {
+        const bool have = u < 320 && mid[size_t(u)] >= 0;
+        if (!have) {
+          // trou d'une colonne : on continue le tracé ; plus long : nouveau tracé
+          if (u < 319 && mid[size_t(u + 1)] >= 0 && !cur.empty()) continue;
+          if (cur.size() > 1) lines.push_back(cur);
+          cur.clear();
+          continue;
+        }
+        double sv = 0, sw = 0;
+        for (int d = -3; d <= 3; d++) {
+          const int c = u + d;
+          if (c < 0 || c >= 320 || mid[size_t(c)] < 0) continue;
+          const double w = 4 - std::abs(d);
+          sv += mid[size_t(c)] * w; sw += w;
+        }
+        double X, Y;
+        P(u + 0.5, sv / sw, X, Y);
+        if (cur.empty()) { double X0, Y0; P(u, sv / sw, X0, Y0); cur.push_back({X0, Y0}); }
+        cur.push_back({X, Y});
+      }
+    }
+    // tracé irrégulier : segments recoupés tous les ~3 px et décalés (bruit à deux échelles)
+    auto hash = [](uint32_t x) { x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16; return (x >> 8) / double(1 << 24) - 0.5; };
+    const double k = s / 5.4;   // épaisseur à l'échelle de l'écran
+    uint32_t seed = 1;
+    auto stamp = [&](std::vector<float> &D, double ax, double ay, double bx, double by, double R) {
+      const int x0 = std::max(0, int(std::min(ax, bx) - R)), x1 = std::min(W - 1, int(std::max(ax, bx) + R) + 1);
+      const int y0 = std::max(0, int(std::min(ay, by) - R)), y1 = std::min(crackY1_ - 1, int(std::max(ay, by) + R) + 1);
+      const double dx = bx - ax, dy = by - ay, l2 = std::max(1e-9, dx * dx + dy * dy);
+      for (int y = y0; y <= y1; y++)
+        for (int x = x0; x <= x1; x++) {
+          const double px = x + 0.5 - ax, py = y + 0.5 - ay, t = std::clamp((px * dx + py * dy) / l2, 0.0, 1.0);
+          const float d = float(std::hypot(px - t * dx, py - t * dy));
+          float &o = D[size_t(y) * W + x];
+          if (d < o) o = d;
+        }
+    };
+    for (auto &ln : lines) {
+      std::vector<std::pair<double, double>> pts;
+      for (size_t i = 0; i + 1 < ln.size(); i++) {
+        const double ax = ln[i].first, ay = ln[i].second, bx = ln[i + 1].first, by = ln[i + 1].second;
+        const int nsub = std::max(1, int(std::hypot(bx - ax, by - ay) / (3 * k)));
+        for (int j = 0; j < nsub; j++) pts.push_back({ax + (bx - ax) * j / nsub, ay + (by - ay) * j / nsub});
+      }
+      pts.push_back(ln.back());
+      for (size_t i = 1; i + 1 < pts.size(); i++) {
+        const double n1 = hash(seed++) * 3.0 * k, n2 = hash(uint32_t(i / 3) * 977u + 7) * 3.2 * k;
+        pts[i].second += n1 + n2; pts[i].first += hash(seed++) * 0.8 * k;
+      }
+      for (size_t i = 0; i + 1 < pts.size(); i++) {
+        stamp(crackD_, pts[i].first, pts[i].second, pts[i + 1].first, pts[i + 1].second, 7 * k);
+        stamp(crackL_, pts[i].first, pts[i].second + 1.7 * k, pts[i + 1].first, pts[i + 1].second + 1.7 * k, 2 * k);
+        // petites ramifications aux cassures du tracé
+        if (hash(seed++) > 0.36) {
+          const double ang = (hash(seed++) > 0 ? 1 : -1) * (0.6 + hash(seed++) * 0.6) + 1.5708, len = (3 + (hash(seed++) + 0.5) * 6) * k;
+          stamp(crackD_, pts[i].first, pts[i].second, pts[i].first + std::cos(ang) * len * 0.5, pts[i].second + std::sin(ang) * len, 7 * k);
+        }
+      }
+    }
+  }
+  // rendu : creux sombre autour (enfoncement), fente noire nette au centre, liseré clair dessous
+  // (peinture écaillée) ; seulement sur le tube du cockpit HD
+  const double k = s / 5.4;
+  for (int y = 0; y < crackY1_; y++) {
     uint32_t *o = out + size_t(y) * W;
+    const float *D = &crackD_[size_t(y) * W], *Lh = &crackL_[size_t(y) * W];
     for (int x = 0; x < W; x++) {
+      const double d = D[x] / k, dl = Lh[x] / k;
+      if (d > 7 && dl > 2) continue;
       const int u = mapX_[x];
       if (u < 0 || tubeTop_[size_t(u)] < 0) continue;
-      const double t0 = tubeTop_[size_t(u)], t1 = tubeBot_[size_t(u)];
-      if (vo < t0 || vo >= t1) continue;
-      const int vs = std::clamp(int((vo - t0) / (t1 - t0) * 16), 0, CRACK_ROWS - 1);   // rangée de la barre d'origine
-      const size_t i = size_t(vs) * 320 + u;
-      if (crack_[i]) o[x] = overlay_[i];
+      const double vo = (y + 0.5) / s;
+      if (vo < tubeTop_[size_t(u)] || vo >= tubeBot_[size_t(u)]) continue;
+      double r = (o[x] >> 16) & 255, g = (o[x] >> 8) & 255, b = o[x] & 255;
+      const double shade = 1 - 0.55 * std::exp(-(d / 4.0) * (d / 4.0));     // creux
+      r *= shade; g *= shade; b *= shade;
+      const double hl = std::clamp(1.1 - dl / 0.9, 0.0, 1.0) * std::clamp((d - 0.9) / 0.6, 0.0, 1.0) * 0.55;   // liseré clair
+      r += (235 - r) * hl; g += (200 - g) * hl; b += (195 - b) * hl;
+      const double core = std::clamp(1.3 - d / 1.0, 0.0, 1.0);          // fente
+      r += (18 - r) * core; g += (6 - g) * core; b += (6 - b) * core;
+      o[x] = 0xff000000u | uint32_t(r) << 16 | uint32_t(g) << 8 | uint32_t(b);
     }
   }
 }
