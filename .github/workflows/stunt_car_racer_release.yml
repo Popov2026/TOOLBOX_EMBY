@@ -1,11 +1,12 @@
-# Stunt Car Racer : publication d'une release GitHub au push d'un tag scr-vNN.
-# Les zips (jeu Windows et serveur relais) sont pris dans le commit du tag, dossier
-# stunt_car_racer/release/ (commit porté seulement par le tag, pas par la branche).
+# Stunt Car Racer : publication d'une release GitHub quand stunt_car_racer/release/ change.
+# Le dossier contient les zips d'une version (jeu Windows StuntCarRacer-win64-vNN.zip et serveur
+# relais ServeurRelaisStuntCar-vNN.zip) et NOTES.md ; le tag scr-vNN est créé par la release.
 name: Stunt Car Racer release
 
 on:
   push:
-    tags: ["scr-v*"]
+    paths: ["stunt_car_racer/release/**"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -15,12 +16,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Sommes SHA256
-        run: cd stunt_car_racer/release && sha256sum *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Version et sommes SHA256
+        run: |
+          cd stunt_car_racer/release
+          v=$(ls StuntCarRacer-win64-v*.zip | sed -E 's/.*-v([0-9]+)\.zip/\1/')
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          sha256sum *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
-          name: Stunt Car Racer ${{ github.ref_name }}
+          tag_name: scr-v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: Stunt Car Racer v${{ env.VERSION }}
           body_path: stunt_car_racer/release/NOTES.md
+          make_latest: true
           files: |
             stunt_car_racer/release/*.zip
             stunt_car_racer/release/SHA256SUMS.txt
