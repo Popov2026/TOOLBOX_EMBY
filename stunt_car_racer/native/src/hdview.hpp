@@ -111,6 +111,12 @@ class HdView {
   void drawScenery(const Camera &c, int track, double hs);
   void drawCockpitHd(const Machine &m, uint32_t *out, int W, int H, double s, double ox);
   void drawCockpitFront(uint32_t *out, int W, int H);
+  void drawCrack(uint32_t *out, int W, int H, double s);
+  static constexpr int CRACK_ROWS = 16;              // barre du haut de l'écran d'origine (fissure des dégâts)
+  std::vector<uint8_t> crack_;                       // pixels de fissure de l'image d'origine
+  std::vector<double> tubeTop_, tubeBot_;            // tube du haut du cockpit HD, par colonne d'origine
+  int craneHold_ = 0;                                // grue active (images restantes)
+  int wheelFrozen_[2] = {-1, -1};                    // grue : image de roue figée (droite 0-2, gauche 3-5)
   void drawSprites(const Machine &m, uint32_t *out, int W, int H, double s, double ox, double T, int lo, int hi, bool front);
   int spriteLayer(int id) const;
   static void scaleCockpit(const HdImage &ck, std::vector<uint32_t> &dst, int W, int H, double s, double ox);   // closed : flanc gauche dessiné aussi

@@ -966,6 +966,7 @@ void HdView::drawCockpitHd(const Machine &m, uint32_t *out, int W, int H, double
   // images à la taille de l'écran (de nouveau après F2 : images rechargées)
   if (ckW_ != W || ckH_ != H || ckData_ != ck.px.data() || ckFrontData_ != assets.cockpitFront.px.data() || ckScaled_.size() != size_t(W) * H) {
     ckW_ = W; ckH_ = H; ckData_ = ck.px.data(); ckFrontData_ = assets.cockpitFront.px.data();
+    tubeTop_.clear();
     scaleCockpit(ck, ckScaled_, W, H, s, ox);
     scaleCockpit(assets.cockpitFront, ckFront_, W, H, s, ox);
   }
@@ -1017,6 +1018,19 @@ void HdView::drawCockpitHd(const Machine &m, uint32_t *out, int W, int H, double
     if (assets.sprite(e.id))
       for (int y = std::max(0, e.y); y < std::min(200, e.y + e.h); y++)
         for (int x = std::max(0, e.x); x < std::min(320, e.x + e.w); x++) hdSpr[y * 320 + x] = 1;
+  // fissure du cadre (dégâts) : pixels changés dans la bande du haut, hors sprites HD autres que la barre
+  // (23-28) ; redessinée sur le tube du cockpit HD par drawCrack, après les sprites
+  crack_.assign(64000, 0);
+  if (ref)
+    for (int v = 0; v < CRACK_ROWS; v++)
+      for (int u = 0; u < 320; u++) {
+        const size_t i = size_t(v) * 320 + u;
+        if (overlay_[i] && ckIdx_[i] != ckRef_[i]) crack_[i] = 1;
+      }
+  for (const SpriteDraw &e : visible_)
+    if (assets.sprite(e.id) && (e.id < 23 || e.id > 28))
+      for (int y = std::max(0, e.y); y < std::min(CRACK_ROWS, e.y + e.h); y++)
+        for (int x = std::max(0, e.x); x < std::min(320, e.x + e.w); x++) crack_[size_t(y) * 320 + x] = 0;
   for (int y = 0; y < H; y++) {
     const int v = mapY_[y];
     const uint32_t *src = &overlay_[size_t(v) * 320];
@@ -1031,7 +1045,7 @@ void HdView::drawCockpitHd(const Machine &m, uint32_t *out, int W, int H, double
       const int zk = zoneOf[v * 320 + u];
       bool lowres;
       if (zk) lowres = c && c != zones[zk - 1].bg && std::abs(luma(c) - luma(zones[zk - 1].bg)) > 30;   // chiffres, barre
-      else lowres = c && !hdSpr[v * 320 + u] && (ref ? ci[u] != rf[u] : (h >> 24) == 0);   // changé depuis le début (ou hors de l'image HD)
+      else lowres = c && !hdSpr[v * 320 + u] && v >= CRACK_ROWS && (ref ? ci[u] != rf[u] : (h >> 24) == 0);   // changé depuis le début (ou hors de l'image HD)
       if (h >> 24) {
         const uint32_t a = h >> 24, d = o[x];
         if (a >= 255) o[x] = h;
@@ -1118,6 +1132,11 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
     }
     for (int y = 0; y < H; y++) mapY_[y] = std::min(199, int((y + 0.5) / s));
   }
+  {   // grue : chaînes (19-22) vues il y a moins d'une seconde (elles ne sont pas dans toutes les images)
+    bool chains = false;
+    for (const SpriteDraw &e : visible_) chains |= e.id >= 19 && e.id <= 22;
+    craneHold_ = chains ? 60 : std::max(0, craneHold_ - 1);
+  }
   // ordre des sprites : celui du jeu, sauf priorité des images ; plan < 0 (roues) sous le cockpit
   std::stable_sort(visible_.begin(), visible_.end(), [&](const SpriteDraw &a, const SpriteDraw &b) { return spriteLayer(a.id) < spriteLayer(b.id); });
   if (!assets.sprites().empty()) drawSprites(m, out, W, H, s, ox, T, -1000, -1, false);
@@ -1134,6 +1153,45 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
   // sprites remplacés par les images du dossier hd/ : plan >= 0 au-dessus du cockpit
   if (assets.sprites().empty() && !params.builtinFlames) { drawCockpitFront(out, W, H); return; }
   drawSprites(m, out, W, H, s, ox, T, 0, 1000, true);
+  if (!assets.cockpit.px.empty()) drawCrack(out, W, H, s);
+}
+
+// fissure du cadre : la bande du haut de l'écran d'origine (barre de 0 à 16) est replacée sur le tube
+// du cockpit HD, colonne par colonne (haut et bas du tube relevés dans cockpit.png)
+void HdView::drawCrack(uint32_t *out, int W, int H, double s) {
+  const HdImage &ck = assets.cockpit;
+  if (crack_.size() != 64000 || ck.px.empty()) return;
+  bool any = false;
+  for (int i = 0; i < CRACK_ROWS * 320 && !any; i++) any = crack_[size_t(i)];
+  if (!any) return;
+  if (tubeTop_.size() != 320) {   // tube du haut : rangées opaques sous le haut de l'image, par colonne d'origine
+    tubeTop_.assign(320, -1); tubeBot_.assign(320, -1);
+    for (int u = 0; u < 320; u++) {
+      const int cx = std::min(ck.w - 1, int((u + 0.5) * ck.w / 320));
+      const int lim = std::min(ck.h, int(30.0 * ck.h / 200));
+      int a = -1, b = -1;
+      for (int y = 0; y < lim; y++) {
+        const bool op = (ck.px[size_t(y) * ck.w + cx] >> 24) > 128;
+        if (op && a < 0) a = y;
+        if (!op && a >= 0) { b = y; break; }
+      }
+      if (a >= 0) { tubeTop_[size_t(u)] = a * 200.0 / ck.h; tubeBot_[size_t(u)] = (b < 0 ? lim : b) * 200.0 / ck.h; }
+    }
+  }
+  const int yMax = std::min(H, int(32 * s));
+  for (int y = 0; y < yMax; y++) {
+    const double vo = (y + 0.5) / s;   // rangée de l'écran d'origine, dans le cockpit HD
+    uint32_t *o = out + size_t(y) * W;
+    for (int x = 0; x < W; x++) {
+      const int u = mapX_[x];
+      if (u < 0 || tubeTop_[size_t(u)] < 0) continue;
+      const double t0 = tubeTop_[size_t(u)], t1 = tubeBot_[size_t(u)];
+      if (vo < t0 || vo >= t1) continue;
+      const int vs = std::clamp(int((vo - t0) / (t1 - t0) * 16), 0, CRACK_ROWS - 1);   // rangée de la barre d'origine
+      const size_t i = size_t(vs) * 320 + u;
+      if (crack_[i]) o[x] = overlay_[i];
+    }
+  }
 }
 
 
@@ -1143,13 +1201,20 @@ void HdView::drawSprites(const Machine &m, uint32_t *out, int W, int H, double s
   const double xa = 32, xb = 288, la = ox + xa * s, lb = ox + xb * s;
   auto fx = [&](double u) { return u < xa ? u / xa * la : u >= xb ? lb + (u - xb) / (320 - xb) * (W - lb) : la + (u - xa) * s; };
   bool frontDone = !front;
+  const bool crane = craneHold_ > 0;   // voiture soulevée par la grue : les roues ne tournent pas
   for (const SpriteDraw &e : visible_) {
     const int lay = spriteLayer(e.id);
     if (lay < lo || lay > hi) continue;
     if (!frontDone && lay >= 1) { drawCockpitFront(out, W, H); frontDone = true; }   // après les roues, avant le moteur
     bool flameId = std::find(std::begin(FLAME_IDS), std::end(FLAME_IDS), e.id) != std::end(FLAME_IDS);
     // flammes : images du dossier hd/ seulement si demandé (d'anciennes versions y laissaient les leurs)
-    const HdSprite *spr = flameId && !params.flameImages ? nullptr : spriteFor(e.id, m);
+    int id = e.id;
+    if (id <= 5) {   // roues : pendant la grue, dernière image avant la grue
+      int &fz = wheelFrozen_[id <= 2 ? 0 : 1];
+      if (crane) { if (fz < 0) fz = id; id = fz; }
+      else fz = id;
+    }
+    const HdSprite *spr = flameId && !params.flameImages ? nullptr : spriteFor(id, m);
     if (!spr && flameId && params.builtinFlames) {
       // image d'animation choisie par le jeu (6/7/49 à gauche, 8/9/50 à droite), à sa place exacte
       drawFlame(e.id, fx(e.x), e.y * s, s, m, out, W, H);
