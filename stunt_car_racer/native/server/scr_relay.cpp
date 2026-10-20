@@ -40,6 +40,7 @@
 //                                   track T laps L\nm N état nom\n..." (état : lobby, loading, loaded,
 //                                   racing, finished:ms, out = abandon)
 //                       GEVENT (20) "START circuit tours n1 n2 ..." (ordre sur la grille) | "GO" | "END"
+//                                   | "VICTORY n" (seul encore en course, les autres éliminés)
 //                       PARAMS (16) "gravity=1 thrust=1 ... cadence=400" (réglages imposés, après l'inscription)
 //   ensuite, les trames de chaque joueur sont retransmises telles quelles à l'autre.
 #include <algorithm>
@@ -268,6 +269,7 @@ struct Group {
   std::vector<Sock> members;     // ordre d'arrivée ; le premier est l'organisateur
   std::string phase = "lobby";   // lobby, loading, racing
   int track = 0, laps = 3;
+  size_t starters = 0;           // joueurs au départ de la course en cours
   bool duel = false;             // course à deux (premier joueur disponible, ou « Affronter » dans une salle) :
                                  // chacun mène son jeu, circuit proposé et accepté par les deux (phase vote)
   double deadline = 0, firstFinish = 0, startedAt = 0;
@@ -367,7 +369,7 @@ void groupEnter(Client &c) {
 
 // départ de la course d'un groupe : grille tirée au sort, chargement
 void groupStart(const std::string &key, Group &g) {
-  g.phase = "loading"; g.deadline = now() + 30; g.firstFinish = 0;
+  g.phase = "loading"; g.deadline = now() + 30; g.firstFinish = 0; g.starters = g.members.size();
   for (Sock f : g.members) clients[f].gstate = "loading";
   // grille de départ (3 rangées de 2) : ordre tiré au sort à chaque course
   std::vector<uint32_t> grid;
@@ -442,6 +444,22 @@ void groupTick() {
     } else if (g.phase == "racing") {
       bool all = true;
       for (Sock f : g.members) all = all && (clients[f].gstate.rfind("finished", 0) == 0 || clients[f].gstate == "out");
+      // seul encore en course, tous les autres éliminés (aucun arrivé) : victoire
+      {
+        int racing = 0, out = 0, fin = 0; Sock last = NONE;
+        for (Sock f : g.members) {
+          const std::string &st = clients[f].gstate;
+          if (st == "racing") { racing++; last = f; } else if (st == "out") out++; else if (st.rfind("finished", 0) == 0) fin++;
+        }
+        if (racing == 1 && fin == 0 && g.starters >= 2 && out + (g.starters - g.members.size()) >= 1) {   // éliminés ou partis
+          Client &w = clients[last];
+          long ms = long((t - g.startedAt) * 1000);
+          w.gstate = "finished:" + std::to_string(ms);
+          groupSend(g, NF_GEVENT, "VICTORY " + std::to_string(w.id));
+          logf("%s : %s gagne, les autres joueurs sont éliminés", kv.first.c_str(), w.name.c_str());
+          all = true;
+        }
+      }
       // fin : tous arrivés ou abandonnés, ou 2 minutes après le premier, ou 30 minutes de course
       if (all || (g.firstFinish && t - g.firstFinish > 120) || t - g.startedAt > 1800) {
         g.phase = g.duel ? "vote" : "lobby";
@@ -636,6 +654,14 @@ void process(Client &c) {
       std::string m(4, '\0');
       for (int k = 0; k < 4; k++) m[size_t(k)] = char((c.id >> (24 - 8 * k)) & 255);
       for (Sock f : groups[c.gkey].members) if (f != c.fd) frame(clients[f], NF_HORN, m);
+    }
+    else if (type == NF_CHAT && c.inGroup && now() - c.lastChat > 0.3) {   // discussion de la course (à deux ou à plusieurs)
+      c.lastChat = now();
+      std::string text = cleanName(std::string(reinterpret_cast<const char *>(p), std::min<size_t>(n, 360)), 120);
+      if (text.empty()) { pos += 3 + n; continue; }
+      std::string msg = (c.name.empty() ? "Joueur " + std::to_string(c.id) : c.name) + "\t" + text;
+      for (Sock f : groups[c.gkey].members) if (f != c.fd) frame(clients[f], NF_CHAT, msg);
+      logf("%s, %s : %s", c.gkey.c_str(), c.name.c_str(), text.c_str());
     }
     else if (type == NF_CHAT && c.mode == Mode::Room && now() - c.lastChat > 0.3) {   // discussion de la salle
       c.lastChat = now();

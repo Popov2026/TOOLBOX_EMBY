@@ -69,7 +69,7 @@ class NetLink {
 
   // discussion : avec les joueurs de la salle privée (par le serveur), puis avec l'adversaire
   struct ChatLine { std::string from, text; double t; bool mine; };
-  bool canChat() const { return (relayRoom() && state_ == State::Waiting) || state_ == State::Connected; }
+  bool canChat() const { return (relayRoom() && state_ == State::Waiting) || state_ == State::Connected || groupIn_; }
   void sendChat(const std::string &text);
   void localNote(const std::string &text);   // message du jeu lui-même dans la discussion
   // klaxon : envoyé à l'adversaire (Computer Link) ou aux autres joueurs de la course ; reçu :

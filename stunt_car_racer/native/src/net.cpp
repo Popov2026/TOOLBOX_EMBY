@@ -468,6 +468,7 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
       from = cleanText(from, 24);
       if (from.empty()) from = "Adversaire";
       chat_.push_back({from, cleanText(s, 120), now(), false});
+      if (std::getenv("SCR_HORNLOG")) std::fprintf(stderr, "message reçu de %s : %s\n", from.c_str(), s.c_str());
       while (chat_.size() > 30) chat_.pop_front();
       break;
     }

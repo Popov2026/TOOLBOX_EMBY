@@ -1251,6 +1251,7 @@ int main(int argc, char **argv) {
           if (typing != Typing::None && typing != Typing::Chat) { typing = Typing::None; SDL_StopTextInput(); }
           if (!hd) { hd = true; applyMode(true); }   // les autres voitures ne sont visibles qu'en HD
           restartMachine(gr.track);
+          if (std::getenv("SCR_GRIDLOG")) std::fprintf(stderr, "départ : circuit demandé %d, chargé %d (%s)\n", gr.track, m->b(0x1112d), m->trackSet() ? "TNT" : "origine");
           // l'entraînement d'origine s'arrête après 3 tours ($10983 = 4 : fin quand le compteur $1090A
           // l'atteint) : désactivé, c'est la course à plusieurs qui décide de l'arrivée
           m->ram[0x10983] = 0xff;
@@ -1264,6 +1265,12 @@ int main(int argc, char **argv) {
           net.groupCommand("OUT"); gr.skip = false;
         } else if (ev == "GO") {
           gr.waitingGo = false; gr.racing = true; gr.goAt = NetLink::clock(); acc = 0;
+        } else if (ev.rfind("VICTORY", 0) == 0) {   // seul encore en course : victoire
+          uint32_t id = uint32_t(std::strtoul(ev.c_str() + 7, nullptr, 10));
+          if (id == net.groupMe() && gr.racing && !gr.finished) {
+            gr.finished = true; gr.finishSecs = NetLink::clock() - gr.goAt;
+            note = "VICTOIRE ! Les autres joueurs sont éliminés"; noteUntil = NetLink::clock() + 8;
+          }
         } else if (ev == "END") {
           gr.racing = false; gr.waitingGo = false;
         }
@@ -1322,6 +1329,11 @@ int main(int argc, char **argv) {
         queueAudio();
         acc -= framePeriod; n++;
       }
+    if (const char *ac = std::getenv("SCR_AUTOCHAT")) {   // test : message envoyé à la trame donnée « trame:texte »
+      static bool sent = false;
+      const char *c = std::strchr(ac, ':');
+      if (!sent && c && m->frames() >= uint32_t(std::atol(ac)) && net.canChat()) { sent = true; net.sendChat(c + 1); }
+    }
     if (swapPending && track < 0 && view && !(hd ? view->raceShown() : view->racing())) { swapPending = false; swapSet(); }
     {   // vibrations de la manette : choc ou réception brutale (hausse des dégâts $10939-$1093B)
       int d = m->b(0x10939) + m->b(0x1093a) + m->b(0x1093b);
