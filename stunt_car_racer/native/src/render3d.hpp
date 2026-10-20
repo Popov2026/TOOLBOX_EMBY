@@ -30,8 +30,24 @@ struct TexInfo {
   double contrast = 1;                       // roue : netteté du motif (baisse à grande vitesse)
 };
 
+class Renderer3D;
+// moteur sur la carte graphique (OpenGL) : dessine à la place de finish() la liste de polygones
+// préparée par Renderer3D ; renvoie faux en cas d'échec (le rendu se fait alors sur le processeur)
+class GpuBackend {
+ public:
+  virtual ~GpuBackend() = default;
+  virtual bool render(const Renderer3D &r, uint32_t *out) = 0;
+};
+
 class Renderer3D {
  public:
+  friend class Gpu3D;
+  // moteur OpenGL utilisé par tous les rendus (nullptr : processeur)
+  static void setGpu(GpuBackend *g) { gpu_ = g; }
+  static GpuBackend *gpu() { return gpu_; }
+  // textures de bruit (niveaux de mip-map, 256×256 au niveau 0) : 0 sol (grandes plaques), 1 sol
+  // (détail), 2 route, 3 murs, 4 nuages
+  static const std::vector<std::vector<float>> &mipLevels(int which);
   Renderer3D();
   void begin(int W, int H, const Camera &cam, uint32_t background);
   // polygone convexe en coordonnées monde (3 à 32 sommets)
@@ -57,7 +73,9 @@ class Renderer3D {
   Vec3 toCam(const Vec3 &p) const;
 
  private:
-  struct SPoly { int first, n; uint32_t color; float ia, ib, ic; float ymin, ymax; float fixedDepth; int tex; float alpha; };
+  struct SPoly { int first, n; uint32_t color; float ia, ib, ic; float ymin, ymax; float fixedDepth; int tex; float alpha; int cfirst, cn; };
+  std::vector<Vec3> cv_;   // sommets découpés au plan proche, repère caméra (moteur OpenGL)
+  static inline GpuBackend *gpu_ = nullptr;
   struct TexPlane { TexInfo t; Vec3 n; double d; };   // plan du polygone dans le monde : n·p = d
   void addClipped(const Vec3 *cam, int n, uint32_t color, float fixedDepth, int tex = -1, float alpha = 1.f);
   void fxaaBand(const uint32_t *src, int k, int n);

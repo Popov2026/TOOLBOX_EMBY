@@ -10,6 +10,7 @@ volume = 0.8                  # 0 à 2
 hd = 0                        # 1 : démarrer en mode HD (touche F8 pour basculer)
 details = 0                   # 1 : démarrer en détails élevés (touche F5 : sols et voiture texturés, roues rondes)
 hdres = 1920x1080             # définition du mode HD (16/9)
+rendu = opengl                # HD : 3D dessinée par la carte graphique (opengl) ou par le processeur (processeur)
 ombres = 1                    # HD : ombres sous les voitures
 particules = 1                # HD : étincelles et fumée lors des chocs et des réceptions brutales
 lissage = 1                   # HD : lissage des bords (anticrénelage)

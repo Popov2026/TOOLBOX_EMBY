@@ -39,6 +39,13 @@ l'atterrissage) et fait des étincelles quand elle retombe brutalement ; ses sus
 encaissent les réceptions (la caisse s'enfonce puis remonte, les roues ne passent jamais sous
 la route). Après une grosse chute hors piste, la caméra ne descend plus sous le sol.
 
+Rendu 3D (menu d'options, « Rendu 3D » ; rendu = opengl ou processeur dans scr.ini) : en mode HD,
+la 3D (route, décor, voitures, ciel, ombres, lissage) est dessinée par la carte graphique avec
+OpenGL 3.3, ce qui soulage le processeur ; le cockpit et les images HD sont posés ensuite comme
+avant. Si la carte graphique ne gère pas OpenGL 3.3 (pilote ancien), le jeu dessine tout seul sur le
+processeur, comme les versions précédentes. Le titre de la fenêtre indique « OpenGL » quand la carte
+graphique est utilisée.
+
 Son du moteur (menu d'options, « Son du moteur ») : « d'origine » ou « V8 réaliste ». Le V8 est
 synthétisé par le jeu : vilebrequin croisé (le « glouglou » irrégulier d'un V8 américain),
 ralenti grave et coupleux de gros arbre à cames (régime qui « pompe », explosions inégales),

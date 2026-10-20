@@ -17,7 +17,7 @@ void Renderer3D::begin(int W, int H, const Camera &cam, uint32_t background) {
   cyw_ = std::cos(cam.yaw); syw_ = std::sin(cam.yaw);
   cp_ = std::cos(cam.pitch); sp_ = std::sin(cam.pitch);
   cr_ = std::cos(cam.roll); sr_ = std::sin(cam.roll);
-  polys_.clear(); trans_.clear(); sx_.clear(); sy_.clear(); texs_.clear();
+  polys_.clear(); trans_.clear(); sx_.clear(); sy_.clear(); texs_.clear(); cv_.clear();
   // matrice de rotation monde -> caméra (colonnes = images des axes du monde)
   for (int c = 0; c < 3; c++) {
     Vec3 e{cam.pos.x + (c == 0), cam.pos.y + (c == 1), cam.pos.z + (c == 2)};
@@ -171,6 +171,16 @@ const MipTex &wallDetail() { static const MipTex t({{64, 0.06f}, {8, 0.07f}}, 4)
 // nuages : grandes masses découpées (octaves du plus grand au plus fin)
 const MipTex &cloudTex() { static const MipTex t({{128, 0.55f}, {64, 0.28f}, {32, 0.15f}, {16, 0.08f}, {8, 0.04f}}, 7); return t; }
 }  // namespace
+
+const std::vector<std::vector<float>> &Renderer3D::mipLevels(int which) {
+  switch (which) {
+    case 0: return groundMacro().lv;
+    case 1: return groundDetail().lv;
+    case 2: return roadDetail().lv;
+    case 3: return wallDetail().lv;
+    default: return cloudTex().lv;
+  }
+}
 
 void Renderer3D::warmTextures() { groundMacro(); groundDetail(); roadDetail(); wallDetail(); cloudTex(); }
 
@@ -435,7 +445,9 @@ void Renderer3D::addClipped(const Vec3 *in, int n, uint32_t color, float fixedDe
     ia = float(nx / (f * d)); ib = float(-ny / (fy * d));
     ic = float((nz - nx * cam_.cx / f + ny * cam_.cy / fy) / d);
   }
-  (alpha < 1.f ? trans_ : polys_).push_back({first, k, color, ia, ib, ic, ymin, ymax, fixedDepth, tex, alpha});
+  const int cfirst = int(cv_.size());
+  cv_.insert(cv_.end(), out, out + m);
+  (alpha < 1.f ? trans_ : polys_).push_back({first, k, color, ia, ib, ic, ymin, ymax, fixedDepth, tex, alpha, cfirst, m});
 }
 
 // lignes y ≡ k (mod n) : les lignes entrelacées équilibrent la charge entre cœurs (le sol texturé
@@ -565,6 +577,7 @@ void Renderer3D::shadeBand(uint32_t *out, int k, int n) {
 }
 
 void Renderer3D::finish(uint32_t *out) {
+  if (gpu_ && gpu_->render(*this, out)) return;   // carte graphique (OpenGL)
   int n = std::min(threads_, H_);
   if (n <= 1) rasterBand(out, 0, 1);
   else {

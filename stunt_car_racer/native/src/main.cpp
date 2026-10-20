@@ -30,11 +30,12 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v69"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v70"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
 #include "sound.hpp"
+#include "gpu3d.hpp"
 #include "machine.hpp"
 #include "net.hpp"
 #include "track.hpp"
@@ -63,7 +64,8 @@ struct Options {
   bool crowd = true;   // encouragements de la foule des tribunes (HD, décor)
   bool usePad = true, rumble = true;                         // manette, vibrations lors des chocs
   std::string keyNames[6] = {"Up", "Down", "Left", "Right", "Space", "K"};   // touches : accélérer, freiner, gauche, droite, boost, klaxon
-  bool engineV8 = false;   // son du moteur : V8 réaliste à la place du son d'origine
+  bool engineV8 = false;
+  bool openGl = true;   // rendu 3D HD sur la carte graphique (OpenGL) ; sinon sur le processeur   // son du moteur : V8 réaliste à la place du son d'origine
   // multijoueur (câble « Computer Link » par le réseau)
   std::string relay;       // serveur relais : adresse[:port]
   std::string tntPath;     // circuits TNT : fichier SCR-TNT ou archive .lha (sinon cherché à côté du jeu)
@@ -140,6 +142,7 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "touche_boost") o.keyNames[4] = val;
   else if (key == "touche_klaxon") o.keyNames[5] = val;
   else if (key == "moteur_v8" || key == "engine_v8") o.engineV8 = val != "0";
+  else if (key == "rendu" || key == "renderer") o.openGl = !(val == "processeur" || val == "cpu" || val == "0");
   else if (key == "disk") o.disk = val;
   else std::fprintf(stderr, "option inconnue : %s\n", key.c_str());
 }
@@ -515,6 +518,16 @@ int main(int argc, char **argv) {
   SDL_Window *win = SDL_CreateWindow("Stunt Car Racer " SCR_VERSION, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 320 * o.scale,
                                      200 * o.scale, SDL_WINDOW_RESIZABLE | (o.fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0));
   SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, o.smooth ? "1" : "0");
+  // rendu 3D sur la carte graphique (OpenGL 3.3, contexte dans une fenêtre cachée) ; en cas d'échec,
+  // rendu sur le processeur comme avant
+  Gpu3D gpu;
+  std::string gpuErr;
+  auto setupGpu = [&] {
+    if (o.openGl && !gpu.ok() && gpuErr.empty() && !gpu.init(gpuErr))
+      std::fprintf(stderr, "OpenGL indisponible : %s (rendu sur le processeur)\n", gpuErr.c_str());
+    Renderer3D::setGpu(o.openGl && gpu.ok() ? &gpu : nullptr);
+  };
+  setupGpu();
   SDL_Renderer *ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
   if (!ren) ren = SDL_CreateRenderer(win, -1, 0);
   SDL_Texture *tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 320, 200);
@@ -873,6 +886,7 @@ int main(int argc, char **argv) {
     it.push_back({"Volume : " + std::to_string(int(std::lround(o.volume * 100))) + " %  < >", 1});
     it.push_back({"Affichage HD : " + yn(hd) + "  (F8)", 2});
     it.push_back({"Détails élevés : " + yn(highDetail) + "  (F5)", 3});
+    it.push_back({std::string("Rendu 3D : ") + (!o.openGl ? "processeur" : gpu.ok() ? "carte graphique (OpenGL)" : "OpenGL indisponible"), 26});
     it.push_back({"Ombres des voitures : " + yn(o.shadows), 4});
     it.push_back({"Étincelles et fumée : " + yn(o.particles), 5});
     it.push_back({"Lissage des bords : " + yn(o.antialias), 6});
@@ -950,6 +964,12 @@ int main(int argc, char **argv) {
         saveIniValue(ini, {"densite", "densité", "density"}, std::to_string(o.density), "densité du décor : 1 à 4 (arbres, panneaux, tribunes, voitures garées)");
         break;
       }
+      case 26:
+        o.openGl = !o.openGl; setupGpu();
+        saveIniValue(ini, {"rendu", "renderer"}, o.openGl ? "opengl" : "processeur", "rendu 3D HD : opengl (carte graphique) ou processeur");
+        note = !o.openGl ? "Rendu 3D sur le processeur" : gpu.ok() ? "Rendu 3D sur la carte graphique : " + gpu.name() : "OpenGL indisponible : " + gpuErr;
+        noteUntil = NetLink::clock() + 6;
+        break;
       case 24: o.engineV8 = !o.engineV8; saveFlag({"moteur_v8", "engine_v8"}, o.engineV8, "son du moteur : 1 = V8 réaliste, 0 = son d'origine"); break;
       case 22: {
         o.crowdVolume = std::clamp(std::round(o.crowdVolume * 10 + (dir < 0 ? -1 : 1)) / 10, 0.0, 2.0);
@@ -1927,8 +1947,8 @@ int main(int argc, char **argv) {
       double el = double(SDL_GetPerformanceCounter() - fpsT0) / double(freq);
       if (el >= 1) {
         char title[400];
-        std::snprintf(title, sizeof title, "Stunt Car Racer " SCR_VERSION " - HD %dx%d%s - %.0f i/s%s%s", o.hdW,
-                      o.hdH, highDetail ? " - détails élevés (F5)" : "", fpsN / el,
+        std::snprintf(title, sizeof title, "Stunt Car Racer " SCR_VERSION " - HD %dx%d%s%s - %.0f i/s%s%s", o.hdW,
+                      o.hdH, Renderer3D::gpu() ? " - OpenGL" : "", highDetail ? " - détails élevés (F5)" : "", fpsN / el,
                       net.active() ? " - " : "", net.active() ? net.status().c_str() : "");
         SDL_SetWindowTitle(win, title);
         if (fpsLog) std::fprintf(stderr, "%s\n", title);
