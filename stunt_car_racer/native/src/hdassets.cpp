@@ -84,7 +84,8 @@ int HdAssets::load(const std::string &dir) {
     }
     if (s.frames.empty() || id < 0 || id > 255) continue;
     s.additive = !anyAlpha;
-    s.layer = id == 10 ? 1 : (id == 6 || id == 7 || id == 8 || id == 9 || id == 49 || id == 50) ? 2 : 0;   // moteur sur les roues, flammes sur le moteur
+    // moteur (10) et bas des gros tuyaux (11, 12) sur les roues, flammes sur le moteur
+    s.layer = id == 10 || id == 11 || id == 12 ? 1 : (id == 6 || id == 7 || id == 8 || id == 9 || id == 49 || id == 50) ? 2 : 0;
     sprites_[id] = std::move(s);
   }
   // réglages

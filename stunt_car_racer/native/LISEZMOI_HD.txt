@@ -57,7 +57,8 @@ hd.ini (facultatif)
   pad_bottom = 0    ; largeur) : pad_top, pad_bottom, pad_left, pad_right — par exemple des
                     ; flammes recalées plus haut que l'emplacement d'origine
   layer = 1         ; ordre de dessin : plus grand = par-dessus. Par défaut : flammes 2,
-                    ; moteur (sprite 10) 1, le reste 0 (le moteur passe devant les roues)
+                    ; moteur (sprite 10) et bas des gros tuyaux (11, 12) 1, le reste 0 : le moteur
+                    ; passe devant les roues
 
 Les flammes du boost sont les sprites d'origine agrandis en haute définition : même forme,
 même place, mêmes couleurs, même animation, contours lissés et léger halo. Les images de
