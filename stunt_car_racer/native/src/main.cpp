@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v68"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v69"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -708,6 +708,7 @@ int main(int argc, char **argv) {
     bool menu = false;        // menu du groupe ouvert hors du « Computer Link »
     bool finished = false;
     bool out = false;         // abandon : voiture détruite (« wrecked »)
+    bool victoryHold = false; // victoire (autres éliminés) : écran gardé jusqu'à un appui du joueur
     int wreckFrames = 0;
     int track = 0, laps = 3;
     double goAt = 0, finishSecs = 0, lapOffset = 0, lastRel = -1, total = 0;
@@ -979,7 +980,7 @@ int main(int argc, char **argv) {
       if (cancelUntil > 0 && t > cancelUntil) { cancelUntil = -1; m->setKey(0x01, false); }
       // menu du groupe : entre les courses, et dès que ce joueur a franchi l'arrivée (il attend les autres ;
       // le jeu d'origine peut finir l'entraînement de son côté et laisser un écran noir derrière)
-      gr.menu = net.inGroup() && (!gr.racing || gr.finished) && !gr.waitingGo;
+      gr.menu = net.inGroup() && (!gr.racing || gr.finished) && !gr.waitingGo && !gr.victoryHold;
       bool open = (m->linkHeld() && cancelUntil < 0 && !net.connected()) || gr.menu;
       if (open && !menuOpen && !gr.menu) {   // le joueur vient de choisir « Computer Link » ou « Online Multiplayer »
         menuSel = 0;
@@ -1003,6 +1004,11 @@ int main(int argc, char **argv) {
           if (typing == Typing::Chat && ch >= 32 && typed.size() < 110) typed += char(ch);
           if (typing == Typing::Pseudo && (std::isalnum(ch) || ch == ' ' || ch == '.' || ch == '-') && typed.size() < 12) typed += char(ch);
         }
+      }
+      else if (ev.type == SDL_KEYDOWN && gr.victoryHold && !ev.key.repeat &&
+               (ev.key.keysym.scancode == SDL_SCANCODE_RETURN || ev.key.keysym.scancode == SDL_SCANCODE_KP_ENTER ||
+                ev.key.keysym.scancode == SDL_SCANCODE_SPACE || ev.key.keysym.scancode == SDL_SCANCODE_ESCAPE)) {
+        gr.victoryHold = false;   // victoire vue : menu de la course (revanche)
       }
       else if (ev.type == SDL_KEYDOWN && typing == Typing::None && !ev.key.repeat && ev.key.keysym.scancode == SDL_SCANCODE_F1 && optBind < 0) {
         optOpen = !optOpen; optSel = 0;
@@ -1183,6 +1189,10 @@ int main(int argc, char **argv) {
       j.down |= ay > 12000 || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_DOWN) ||
                 SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 8000;
       j.fire |= SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A) || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_X);
+      static bool prevA = true;   // victoire : bouton A pour continuer
+      const bool aBtn = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A);
+      if (gr.victoryHold && aBtn && !prevA) gr.victoryHold = false;
+      prevA = aBtn;
       static bool prevY = false;   // klaxon : bouton Y
       const bool y = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_Y);
       if (y && !prevY && !optOpen && !menuOpen) { horn.trigger(0.8); if (net.canHorn()) net.sendHorn(); }
@@ -1268,8 +1278,7 @@ int main(int argc, char **argv) {
         } else if (ev.rfind("VICTORY", 0) == 0) {   // seul encore en course : victoire
           uint32_t id = uint32_t(std::strtoul(ev.c_str() + 7, nullptr, 10));
           if (id == net.groupMe() && gr.racing && !gr.finished) {
-            gr.finished = true; gr.finishSecs = NetLink::clock() - gr.goAt;
-            note = "VICTOIRE ! Les autres joueurs sont éliminés"; noteUntil = NetLink::clock() + 8;
+            gr.finished = true; gr.finishSecs = NetLink::clock() - gr.goAt; gr.victoryHold = true;
           }
         } else if (ev == "END") {
           gr.racing = false; gr.waitingGo = false;
@@ -1525,7 +1534,8 @@ int main(int argc, char **argv) {
       static double statusSince = 0;
       std::string st = net.status();
       if (st != lastStatus) { lastStatus = st; statusSince = tNow; }
-      if (menuOpen) bannerMsg.clear();   // le menu affiche lui-même l'état
+      if (gr.victoryHold) bannerMsg = "VICTOIRE ! Les autres joueurs sont éliminés - Entrée pour continuer";
+      else if (menuOpen) bannerMsg.clear();   // le menu affiche lui-même l'état
       else if (NetLink::clock() < noteUntil) bannerMsg = note;
       else if (!st.empty() && (net.state() != NetLink::State::Connected || tNow - statusSince < 6))
         bannerMsg = st + (net.state() == NetLink::State::Failed ? "   (F10 : effacer)" : "");

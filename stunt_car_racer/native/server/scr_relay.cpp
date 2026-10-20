@@ -55,6 +55,7 @@
 #include <cstring>
 #include <ctime>
 #include <map>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -109,7 +110,7 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v68"
+#define SCR_RELAY_VERSION "v69"
 
 namespace {
 
@@ -270,6 +271,7 @@ struct Group {
   std::string phase = "lobby";   // lobby, loading, racing
   int track = 0, laps = 3;
   size_t starters = 0;           // joueurs au départ de la course en cours
+  std::vector<int> bag; int bagSize = 0;   // course à deux : circuits pas encore proposés
   bool duel = false;             // course à deux (premier joueur disponible, ou « Affronter » dans une salle) :
                                  // chacun mène son jeu, circuit proposé et accepté par les deux (phase vote)
   double deadline = 0, firstFinish = 0, startedAt = 0;
@@ -300,13 +302,23 @@ void groupState(const std::string &room, bool force = false) {
 void matchAuto(Client &c);
 void duelDissolve(const std::string &key);
 
-// circuit tiré au sort pour une course à deux : 8 d'origine, ou 16 si tous ont les circuits TNT
-int duelDraw(const Group &g, int avoid) {
+// circuit tiré au sort pour une course à deux : 8 d'origine, ou 16 si tous ont les circuits TNT ;
+// tirage « sans remise » (sac mélangé) : chaque circuit est proposé une fois avant qu'un circuit revienne
+std::mt19937 &rng() {
+  static std::mt19937 g(unsigned(std::random_device{}()) ^ unsigned(std::time(nullptr)) ^ unsigned(std::clock()));
+  return g;
+}
+int duelDraw(Group &g, int avoid) {
   bool tnt = !g.members.empty();
   for (Sock f : g.members) { auto it = clients.find(f); tnt = tnt && it != clients.end() && it->second.tnt; }
   const int n = tnt ? 16 : 8;
-  int t = avoid;
-  while (t == avoid) t = std::rand() % n;
+  if (g.bagSize != n) { g.bag.clear(); g.bagSize = n; }
+  if (g.bag.empty()) {
+    for (int k = 0; k < n; k++) if (k != avoid) g.bag.push_back(k);
+    std::shuffle(g.bag.begin(), g.bag.end(), rng());
+  }
+  const int t = g.bag.back();
+  g.bag.pop_back();
   return t;
 }
 

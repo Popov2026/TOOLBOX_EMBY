@@ -1276,9 +1276,20 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
     for (int y = 0; y < H; y++) mapY_[y] = std::min(199, int((y + 0.5) / s));
   }
   {   // grue : chaînes (19-22) vues il y a moins d'une seconde (elles ne sont pas dans toutes les images)
+    // bouts de chaîne restés au-dessus du moteur (y >= 120) sans le reste de la chaîne : la grue est
+    // partie (course à plusieurs : le jeu les laisse dessinés) ; ni dessinés, ni comptés pour la grue
+    bool upper = false;
+    for (const SpriteDraw &e : visible_) upper |= e.id >= 19 && e.id <= 22 && e.y < 120;
+    if (!upper)
+      visible_.erase(std::remove_if(visible_.begin(), visible_.end(), [](const SpriteDraw &e) { return e.id >= 19 && e.id <= 22; }), visible_.end());
     bool chains = false;
     for (const SpriteDraw &e : visible_) chains |= e.id >= 19 && e.id <= 22;
     craneHold_ = chains ? 60 : std::max(0, craneHold_ - 1);
+  }
+  if (std::getenv("SCR_SPRLOG")) {   // test : sprites visibles (quand la liste change)
+    static std::string last; std::string l;
+    for (const SpriteDraw &e : visible_) l += std::to_string(e.id) + "@" + std::to_string(e.x) + "," + std::to_string(e.y) + " ";
+    if (l != last) { last = l; std::fprintf(stderr, "sprites t=%.0f : %s\n", T, l.c_str()); }
   }
   // ordre des sprites : celui du jeu, sauf priorité des images ; plan < 0 (roues) sous le cockpit
   std::stable_sort(visible_.begin(), visible_.end(), [&](const SpriteDraw &a, const SpriteDraw &b) { return spriteLayer(a.id) < spriteLayer(b.id); });
