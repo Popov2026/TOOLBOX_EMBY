@@ -65,6 +65,8 @@ disponible »).
          accepté. « Autre circuit » refuse : un autre circuit est proposé, à accepter de nouveau
          par les deux. Grille : un à gauche, un à droite, la grue amène chaque voiture de son côté
          (comme la course à plusieurs ci-dessous : flammes du boost, chocs, classement en direct).
+         Circuits tirés sans répétition : chacun est proposé une fois avant qu'un circuit
+         revienne. Discussion pendant la course à deux : F9 ou « Écrire un message ».
          Après l'arrivée, un nouveau circuit est proposé pour la revanche ; « Quitter la course »
          (ou Échap) vous déconnecte, et l'autre joueur attend un nouvel adversaire ;
        * « Salle privée (code) » : tapez un code (lettres ou chiffres ; vide = le jeu en invente
@@ -91,6 +93,9 @@ disponible »).
      au départ, car le rendu d'origine ne sait dessiner qu'une seule voiture adverse.
      En haut à droite : tour, temps et classement en direct. Le nombre de tours est celui de
      l'organisateur (1 à 9 ; l'arrêt de l'entraînement d'origine après 3 tours est désactivé).
+     Si tous les autres joueurs sont éliminés (voiture détruite) ou partis, le dernier encore en
+     course gagne : « VICTOIRE ! » reste affiché jusqu'à ce qu'il appuie sur Entrée (ou le bouton A
+     de la manette), puis le menu de la course s'ouvre.
      Dès qu'un joueur a franchi l'arrivée, le menu du groupe s'ouvre chez lui (classement en
      direct). Voiture détruite (« wrecked ») : le joueur abandonne, le menu du groupe s'ouvre chez
      lui et « abandon » s'affiche à côté de son nom. À la fin (tous arrivés ou abandonnés, ou deux
