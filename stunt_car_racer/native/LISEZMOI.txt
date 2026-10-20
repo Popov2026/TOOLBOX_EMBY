@@ -41,7 +41,8 @@ la route). Après une grosse chute hors piste, la caméra ne descend plus sous l
 
 Son du moteur (menu d'options, « Son du moteur ») : « d'origine » ou « V8 réaliste ». Le V8 est
 synthétisé par le jeu : vilebrequin croisé (le « glouglou » irrégulier d'un V8 américain),
-échappements résonants, régime qui suit celui du jeu avec une boîte à 4 rapports simulée,
+ralenti grave et coupleux de gros arbre à cames (régime qui « pompe », explosions inégales),
+échappements résonants, régime qui suit directement celui du jeu (sans passage de vitesse),
 grondement plus fort à l'accélération et au boost, moteur qui s'emballe roues en l'air. Seul le
 son du moteur d'origine est remplacé, les autres bruitages du jeu restent.
 

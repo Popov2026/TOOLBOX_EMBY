@@ -7,18 +7,19 @@
 namespace scr {
 
 // V8 à vilebrequin croisé : 4 explosions par tour, écart irrégulier entre les deux rangées de
-// cylindres (le « glouglou » du V8), échappements résonants, boîte à 4 rapports simulée à partir du
-// régime du jeu ($10A1E : environ 270 au ralenti, 2 500 à pleine vitesse, au-delà roues en l'air)
+// cylindres (le « glouglou » du V8), ralenti « gros arbre à cames », échappements résonants ; régime
+// pris directement sur celui du jeu ($10A1E : environ 270 au ralenti, 2 500 à pleine vitesse, au-delà
+// roues en l'air), sans boîte de vitesses
 class EngineV8 {
 public:
   // ajoute le moteur à une trame (mono, 16 bits) ; gameRev = $10A1E, throttle = accélérateur appuyé
   void mix(int16_t *pcm, size_t n, int rate, double gameRev, bool throttle, bool boost, double volume);
-  void reset() { rpm_ = 900; gear_ = 0; }
+  void reset() { rpm_ = 750; }
 
 private:
   struct Reso { double a1 = 0, a2 = 0, x1 = 0, x2 = 0, y1 = 0, y2 = 0, g = 0; void set(double f, double q, double rate); double run(double x); };
-  double rpm_ = 900, load_ = 0, phase_ = 0, shift_ = 0;
-  int gear_ = 0, cyl_ = 0, rate_ = 0;
+  double rpm_ = 750, load_ = 0, phase_ = 0, t_ = 0;
+  int cyl_ = 0, rate_ = 0;
   uint32_t rng_ = 0x2468ace1u;
   double excite_ = 0, noise_ = 0, lp_ = 0, hp_ = 0, hpIn_ = 0;
   Reso r_[4];

@@ -108,7 +108,7 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v66"
+#define SCR_RELAY_VERSION "v67"
 
 namespace {
 

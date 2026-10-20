@@ -27,22 +27,23 @@ void EngineV8::mix(int16_t *pcm, size_t n, int rate, double gameRev, bool thrott
     r_[0].set(105, 2.2, rate); r_[1].set(310, 3.0, rate); r_[2].set(880, 3.5, rate); r_[3].set(2300, 2.0, rate);
   }
   const double dt = double(n) / rate;
-  // régime : vitesse du jeu -> boîte à 4 rapports (montée et descente avec hystérésis)
+  // régime : suit directement celui du jeu (pas de boîte de vitesses) ; roues en l'air : il s'emballe
   const double s = std::max(0.0, (gameRev - 270) / 2280);
-  static const double UP[3] = {0.22, 0.45, 0.70}, RATIO[4] = {26000, 14000, 9500, 7200};
-  if (gear_ < 3 && s > UP[gear_]) { gear_++; shift_ = 0.12; }
-  if (gear_ > 0 && s < UP[gear_ - 1] - 0.04) gear_--;
-  double target = std::max(850.0, s * RATIO[gear_]);
-  if (s > 1.08) target = std::min(7600.0, 6200 + (s - 1.08) * 3000);   // roues en l'air : le moteur s'emballe
-  if (shift_ > 0) { shift_ -= dt; target *= 0.97; }                    // passage de rapport : coupure brève
-  target = std::min(target, 7600.0);
-  rpm_ += (target - rpm_) * std::min(1.0, dt * (shift_ > 0 ? 14 : 7));
+  double target = 750 + std::min(s, 1.0) * 6200;
+  if (s > 1.08) target = std::min(7500.0, 6950 + (s - 1.08) * 2000);
+  rpm_ += (target - rpm_) * std::min(1.0, dt * 6);
   load_ += ((throttle ? 1.0 : 0.15) + (boost ? 0.35 : 0) - load_) * std::min(1.0, dt * 6);
-  // ordre d'allumage du V8 croisé : intensité inégale d'une explosion à l'autre (deux rangées)
-  static const double PAT[8] = {1.0, 0.78, 0.93, 1.06, 0.82, 0.97, 0.74, 0.9};
-  const double fire = rpm_ / 60 * 4;   // explosions par seconde
-  const double drive = 1.0 + 1.2 * load_;
-  const double low = 1.0, mid = 0.65, high = 0.25 + 0.35 * load_, rasp = 0.08 + 0.22 * load_;
+  // ralenti d'un V8 à gros arbre à cames : régime qui « pompe », explosions très inégales (le
+  // « bloub-bloub »), ralenti grave ; l'effet s'efface en montant dans les tours
+  const double idle = std::clamp(1 - (rpm_ - 750) / 1300, 0.0, 1.0);
+  t_ += dt;
+  const double rpmNow = rpm_ + idle * 55 * std::sin(2 * PI * 1.3 * t_) + idle * 25 * std::sin(2 * PI * 0.47 * t_ + 1);
+  r_[0].set(78 + (rpm_ - 750) * 0.012, 2.4, rate);
+  static const double PAT[8] = {1.0, 0.78, 0.93, 1.06, 0.82, 0.97, 0.74, 0.9};    // V8 croisé, en régime
+  static const double LOPE[8] = {1.3, 0.45, 1.15, 0.9, 1.35, 0.5, 0.8, 1.05};    // ralenti « came »
+  const double fire = rpmNow / 60 * 4;   // explosions par seconde
+  const double drive = 1.0 + 1.2 * load_ + 0.5 * idle;
+  const double low = 1.0 + 0.6 * idle, mid = 0.65, high = (0.25 + 0.35 * load_) * (1 - 0.5 * idle), rasp = (0.08 + 0.22 * load_) * (1 - 0.6 * idle);
   const double decay = std::exp(-1.0 / (0.0007 * rate)), ndecay = std::exp(-1.0 / (0.0022 * rate));
   const double lpa = 1 - std::exp(-2 * PI * 7000 / rate);
   const double gain = volume * (0.35 + 0.25 * load_) * 3.2;
@@ -52,11 +53,12 @@ void EngineV8::mix(int16_t *pcm, size_t n, int rate, double gameRev, bool thrott
       phase_ -= 1;
       rng_ = rng_ * 1664525u + 1013904223u;
       const double jit = 0.92 + 0.16 * ((rng_ >> 8) & 0xffff) / 65535.0;
-      excite_ += PAT[cyl_] * jit;
-      noise_ += 0.35 * PAT[cyl_] * jit;
+      const double amp = PAT[cyl_] * (1 - idle) + LOPE[cyl_] * idle;
+      excite_ += amp * jit;
+      noise_ += 0.35 * amp * jit;
       cyl_ = (cyl_ + 1) & 7;
       // petites variations du temps entre deux explosions (moteur « vivant » au ralenti)
-      phase_ += (((rng_ >> 20) & 255) / 255.0 - 0.5) * 0.06 * std::max(0.0, 1 - rpm_ / 3000);
+      phase_ += (((rng_ >> 20) & 255) / 255.0 - 0.5) * (0.04 + 0.16 * idle);
     }
     rng_ = rng_ * 1664525u + 1013904223u;
     const double wn = ((rng_ >> 9) & 0xffff) / 32768.0 - 1;
