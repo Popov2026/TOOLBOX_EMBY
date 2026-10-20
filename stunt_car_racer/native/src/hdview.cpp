@@ -1010,6 +1010,13 @@ void HdView::drawCockpitHd(const Machine &m, uint32_t *out, int W, int H, double
     int best = -1;
     for (auto &[c, n] : cnt) if (n > best) { best = n; z.bg = c; }
   }
+  // emplacements des sprites remplacés par une image HD : rien de l'image d'origine n'y est remis
+  static uint8_t hdSpr[320 * 200];
+  std::memset(hdSpr, 0, sizeof hdSpr);
+  for (const SpriteDraw &e : visible_)
+    if (assets.sprite(e.id))
+      for (int y = std::max(0, e.y); y < std::min(200, e.y + e.h); y++)
+        for (int x = std::max(0, e.x); x < std::min(320, e.x + e.w); x++) hdSpr[y * 320 + x] = 1;
   for (int y = 0; y < H; y++) {
     const int v = mapY_[y];
     const uint32_t *src = &overlay_[size_t(v) * 320];
@@ -1024,7 +1031,7 @@ void HdView::drawCockpitHd(const Machine &m, uint32_t *out, int W, int H, double
       const int zk = zoneOf[v * 320 + u];
       bool lowres;
       if (zk) lowres = c && c != zones[zk - 1].bg && std::abs(luma(c) - luma(zones[zk - 1].bg)) > 30;   // chiffres, barre
-      else lowres = c && (ref ? ci[u] != rf[u] : (h >> 24) == 0);   // changé depuis le début (ou hors de l'image HD)
+      else lowres = c && !hdSpr[v * 320 + u] && (ref ? ci[u] != rf[u] : (h >> 24) == 0);   // changé depuis le début (ou hors de l'image HD)
       if (h >> 24) {
         const uint32_t a = h >> 24, d = o[x];
         if (a >= 255) o[x] = h;
@@ -1111,6 +1118,9 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
     }
     for (int y = 0; y < H; y++) mapY_[y] = std::min(199, int((y + 0.5) / s));
   }
+  // ordre des sprites : celui du jeu, sauf priorité des images ; plan < 0 (roues) sous le cockpit
+  std::stable_sort(visible_.begin(), visible_.end(), [&](const SpriteDraw &a, const SpriteDraw &b) { return spriteLayer(a.id) < spriteLayer(b.id); });
+  if (!assets.sprites().empty()) drawSprites(m, out, W, H, s, ox, T, -1000, -1, false);
   if (!assets.cockpit.px.empty()) drawCockpitHd(m, out, W, H, s, ox);
   else
     for (int y = 0; y < H; y++) {
@@ -1121,26 +1131,22 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
         if (u >= 0 && src[u]) o[x] = src[u];
       }
     }
-  // sprites remplacés par les images du dossier hd/, dans l'ordre où le jeu les a dessinés
+  // sprites remplacés par les images du dossier hd/ : plan >= 0 au-dessus du cockpit
   if (assets.sprites().empty() && !params.builtinFlames) { drawCockpitFront(out, W, H); return; }
+  drawSprites(m, out, W, H, s, ox, T, 0, 1000, true);
+}
+
+
+// sprites remplacés par les images du dossier hd/ (ordre du jeu, sauf priorité des images), de plan
+// lo à hi ; front : la partie avant du cockpit passe avant le premier sprite de plan >= 1
+void HdView::drawSprites(const Machine &m, uint32_t *out, int W, int H, double s, double ox, double T, int lo, int hi, bool front) {
   const double xa = 32, xb = 288, la = ox + xa * s, lb = ox + xb * s;
   auto fx = [&](double u) { return u < xa ? u / xa * la : u >= xb ? lb + (u - xb) / (320 - xb) * (W - lb) : la + (u - xa) * s; };
-  // ordre : celui du jeu, sauf priorité donnée par les images (moteur au-dessus des roues, flammes au-dessus du moteur)
-  std::stable_sort(visible_.begin(), visible_.end(), [&](const SpriteDraw &a, const SpriteDraw &b) {
-    auto lay = [&](int id) {
-      const HdSprite *p = assets.sprite(id);
-      if (p) return p->layer;
-      return std::find(std::begin(FLAME_IDS), std::end(FLAME_IDS), id) != std::end(FLAME_IDS) ? 2 : 0;
-    };
-    return lay(a.id) < lay(b.id);
-  });
-  bool frontDone = false;
+  bool frontDone = !front;
   for (const SpriteDraw &e : visible_) {
-    if (!frontDone) {   // partie avant du cockpit : après les roues, avant le moteur et les flammes
-      const HdSprite *p = assets.sprite(e.id);
-      const bool fl = std::find(std::begin(FLAME_IDS), std::end(FLAME_IDS), e.id) != std::end(FLAME_IDS);
-      if ((p ? p->layer : fl ? 2 : 0) >= 1) { drawCockpitFront(out, W, H); frontDone = true; }
-    }
+    const int lay = spriteLayer(e.id);
+    if (lay < lo || lay > hi) continue;
+    if (!frontDone && lay >= 1) { drawCockpitFront(out, W, H); frontDone = true; }   // après les roues, avant le moteur
     bool flameId = std::find(std::begin(FLAME_IDS), std::end(FLAME_IDS), e.id) != std::end(FLAME_IDS);
     // flammes : images du dossier hd/ seulement si demandé (d'anciennes versions y laissaient les leurs)
     const HdSprite *spr = flameId && !params.flameImages ? nullptr : spriteFor(e.id, m);
@@ -1168,6 +1174,12 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
                    ny0 + h + spr->dy * s, out, W, H, baked ? 0 : side * 0.55 * wk, wk);
   }
   if (!frontDone) drawCockpitFront(out, W, H);
+}
+
+// plan d'un sprite remplacé : réglage de l'image (layer), sinon flammes 2, le reste 0
+int HdView::spriteLayer(int id) const {
+  if (const HdSprite *p = assets.sprite(id)) return p->layer;
+  return std::find(std::begin(FLAME_IDS), std::end(FLAME_IDS), id) != std::end(FLAME_IDS) ? 2 : 0;
 }
 
 // partie avant du cockpit (hd/cockpit_avant.png), mélangée par-dessus l'image

@@ -111,6 +111,8 @@ class HdView {
   void drawScenery(const Camera &c, int track, double hs);
   void drawCockpitHd(const Machine &m, uint32_t *out, int W, int H, double s, double ox);
   void drawCockpitFront(uint32_t *out, int W, int H);
+  void drawSprites(const Machine &m, uint32_t *out, int W, int H, double s, double ox, double T, int lo, int hi, bool front);
+  int spriteLayer(int id) const;
   static void scaleCockpit(const HdImage &ck, std::vector<uint32_t> &dst, int W, int H, double s, double ox);   // closed : flanc gauche dessiné aussi
   void addFlames(const OppPose &o, double hs, int seed);   // flammes du boost d'une voiture fantôme
   void addShadow(const OppPose &o, double hs, int track);   // ombre portée sur la route (ou le sol)
