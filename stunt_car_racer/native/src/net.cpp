@@ -432,6 +432,11 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
       }
       break;
     }
+    case NF_HORN: {   // klaxon d'un autre joueur
+      uint32_t id = n >= 4 ? (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | p[3] : 0;
+      if (horns_.size() < 8) horns_.push_back(id);
+      break;
+    }
     case NF_GEVENT:
       groupEvents_.emplace_back(reinterpret_cast<const char *>(p), n);
       if (groupEvents_.back().rfind("START", 0) == 0) ghosts_.clear();
@@ -517,6 +522,18 @@ void NetLink::localNote(const std::string &text) {
   while (chat_.size() > 30) chat_.pop_front();
 }
 
+void NetLink::sendHorn() {
+  if (!canHorn()) return;
+  frame(NF_HORN, std::string());
+  flush();
+}
+
+bool NetLink::takeHorn(uint32_t &from) {
+  if (horns_.empty()) return false;
+  from = horns_.front(); horns_.pop_front();
+  return true;
+}
+
 void NetLink::sendChat(const std::string &text) {
   if (!canChat() || text.empty()) return;
   std::string t = text.substr(0, 120);
@@ -591,6 +608,7 @@ void NetLink::poll() {
         setsockopt(tcp_, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char *>(&on), sizeof on);
         std::string j = room_.empty() ? "AUTO" : "SALLE";
         j.push_back('\0'); j += room_; j.push_back('\0'); j += version_; j.push_back('\0'); j += name_;
+        j.push_back('\0'); j += tnt_ ? "tnt" : "";   // circuits TNT présents
         frame(NF_JOIN2, j);
         state_ = State::Waiting; info_ = "WAIT"; lastRx_ = t;
       } else startSession();

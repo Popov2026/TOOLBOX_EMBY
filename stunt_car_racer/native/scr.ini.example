@@ -28,6 +28,8 @@ vibrations = 1                # vibrations de la manette lors des chocs
 # touche_gauche = Left
 # touche_droite = Right
 # touche_boost = Space
+# touche_klaxon = K            # klaxon en multijoueur (aussi le bouton Y de la manette)
+moteur_v8 = 0                 # 1 : son du moteur V8 réaliste à la place du son d'origine (menu d'options)
 # hddir = hd                  # dossier des images de remplacement (défaut : hd à côté de scr.exe)
 # (les flammes HD suivent l option textures_hd)
 #                              (par défaut : sprites d'origine agrandis, les images de flammes sont ignorées)

@@ -28,7 +28,7 @@ constexpr int NET_DISCOVERY_PORT = 27421; // UDP : annonces de parties en résea
 
 enum NetFrame : uint8_t { NF_HELLO = 1, NF_DATA = 2, NF_PING = 3, NF_PONG = 4, NF_BYE = 5, NF_JOIN = 10, NF_INFO = 11,
                           NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16, NF_CHAT = 17,
-                          NF_GSTATE = 18, NF_GCMD = 19, NF_GEVENT = 20, NF_GPOS = 21 };
+                          NF_GSTATE = 18, NF_GCMD = 19, NF_GEVENT = 20, NF_GPOS = 21, NF_HORN = 22 };
 
 class NetLink {
  public:
@@ -72,6 +72,12 @@ class NetLink {
   bool canChat() const { return (relayRoom() && state_ == State::Waiting) || state_ == State::Connected; }
   void sendChat(const std::string &text);
   void localNote(const std::string &text);   // message du jeu lui-même dans la discussion
+  // klaxon : envoyé à l'adversaire (Computer Link) ou aux autres joueurs de la course ; reçu :
+  // numéro du joueur (course à plusieurs) ou 0 (adversaire du Computer Link)
+  bool canHorn() const { return state_ == State::Connected || groupIn_; }
+  void sendHorn();
+  bool takeHorn(uint32_t &from);
+  void setTnt(bool on) { tnt_ = on; }   // circuits TNT présents : annoncé au serveur (tirage des courses à deux)
   const std::deque<ChatLine> &chat() const { return chat_; }
   static double clock() { return now(); }
 
@@ -132,6 +138,8 @@ class NetLink {
   uint32_t id_ = 0;                  // identifiant de ce jeu dans les annonces
   std::vector<Peer> peers_;
   std::deque<ChatLine> chat_;
+  std::deque<uint32_t> horns_;
+  bool tnt_ = false;
   bool groupIn_ = false;
   std::vector<GroupMember> groupMembers_;
   uint32_t groupMe_ = 0, groupHost_ = 0;

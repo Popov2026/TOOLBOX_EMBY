@@ -73,6 +73,7 @@ class Machine {
   void setAudioRate(int hz) { audioRate_ = hz; }
   const std::vector<int16_t> &frameAudio() const { return audio_; }
   void setVolume(double v) { volume_ = v; }
+  void setYmMute(int mask) { ym2149_.setMute(mask); }   // voix de la puce son coupées (bits A, B, C)
   void setJoystick(const Joystick &j);
   void setKey(int scancode, bool down);
   void screenARGB(uint32_t *out) const;     // 320×200

@@ -64,6 +64,7 @@ void YM2149::render(float *out, int n, int rate) {
       step();
       float v = 0;
       for (int c = 0; c < 3; c++) {
+        if (mute_ & (1 << c)) continue;
         bool toneOn = !(r_[7] & (1 << c)), noiseOn = !(r_[7] & (8 << c));
         bool on = (toneOut_[c] || !toneOn) && (noiseOut_ || !noiseOn);
         if (!on) continue;

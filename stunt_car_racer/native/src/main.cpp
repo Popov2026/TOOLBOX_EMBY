@@ -30,10 +30,11 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v64"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v65"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
+#include "sound.hpp"
 #include "machine.hpp"
 #include "net.hpp"
 #include "track.hpp"
@@ -61,7 +62,8 @@ struct Options {
   double crowdVolume = 0.4;   // volume de la foule (0 à 2, par rapport au volume du jeu)
   bool crowd = true;   // encouragements de la foule des tribunes (HD, décor)
   bool usePad = true, rumble = true;                         // manette, vibrations lors des chocs
-  std::string keyNames[5] = {"Up", "Down", "Left", "Right", "Space"};   // touches : accélérer, freiner, gauche, droite, boost
+  std::string keyNames[6] = {"Up", "Down", "Left", "Right", "Space", "K"};   // touches : accélérer, freiner, gauche, droite, boost, klaxon
+  bool engineV8 = false;   // son du moteur : V8 réaliste à la place du son d'origine
   // multijoueur (câble « Computer Link » par le réseau)
   std::string relay;       // serveur relais : adresse[:port]
   std::string tntPath;     // circuits TNT : fichier SCR-TNT ou archive .lha (sinon cherché à côté du jeu)
@@ -136,6 +138,8 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "touche_gauche") o.keyNames[2] = val;
   else if (key == "touche_droite") o.keyNames[3] = val;
   else if (key == "touche_boost") o.keyNames[4] = val;
+  else if (key == "touche_klaxon") o.keyNames[5] = val;
+  else if (key == "moteur_v8" || key == "engine_v8") o.engineV8 = val != "0";
   else if (key == "disk") o.disk = val;
   else std::fprintf(stderr, "option inconnue : %s\n", key.c_str());
 }
@@ -439,6 +443,7 @@ int main(int argc, char **argv) {
 
   // --- multijoueur : le câble série du jeu passe par le réseau
   NetLink net;
+  net.setTnt(haveTnt);   // courses à deux en ligne : circuits TNT au tirage si les deux joueurs les ont
   {
     // empreinte du programme du jeu seulement ; les réglages de physique (scr.ini) sont envoyés en
     // texte et l'esclave adopte ceux du maître pendant la partie
@@ -554,9 +559,24 @@ int main(int argc, char **argv) {
     m->setVolume(muted ? 0.0 : o.volume);
   };
   setupAudio();
+  EngineV8 v8;
+  Horn horn;
+  bool throttleNow = false, boostNow = false;
   auto queueAudio = [&] {
     if (!audio) return;
     const auto &pcm = m->frameAudio();
+    // son du moteur V8 (les voix B et C de la puce son, le moteur d'origine, sont coupées en course)
+    const bool v8on = o.engineV8 && !muted && view && view->racing();
+    m->setYmMute(v8on ? 6 : 0);
+    if (!pcm.empty() && (v8on || horn.active())) {
+      static std::vector<int16_t> mixed;
+      mixed = pcm;
+      if (v8on) v8.mix(mixed.data(), mixed.size(), AUDIO_RATE, m->w(0x10a1e), throttleNow, boostNow, o.volume);
+      if (!muted) horn.mix(mixed.data(), mixed.size(), AUDIO_RATE, o.volume);
+      if (hd && o.crowd && !muted && view) view->mixCrowd(mixed.data(), mixed.size(), AUDIO_RATE, o.volume * o.crowdVolume);
+      if (SDL_GetQueuedAudioSize(audio) <= Uint32(AUDIO_RATE / 50 * 2 * 6)) SDL_QueueAudio(audio, mixed.data(), Uint32(mixed.size() * 2));
+      return;
+    }
     // file trop longue (émulation en avance) : on saute la trame pour garder une latence faible
     if (SDL_GetQueuedAudioSize(audio) > Uint32(AUDIO_RATE / 50 * 2 * 6)) return;
     if (pcm.empty()) return;
@@ -816,13 +836,13 @@ int main(int argc, char **argv) {
   // --- menu d'options (F1, ou bouton Start de la manette) : réglages enregistrés aussitôt dans scr.ini ;
   // le jeu est en pause pendant ce menu, sauf en multijoueur
   bool optOpen = false;
-  int optSel = 0, optBind = -1;   // optBind : touche en attente (0 accélérer ... 4 boost)
+  int optSel = 0, optBind = -1;   // optBind : touche en attente (0 accélérer ... 4 boost, 5 klaxon)
   bool prevLeft = false, prevRight = false, prevStart = false;
-  SDL_Scancode bindSc[5];
-  static const SDL_Scancode bindDef[5] = {SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT, SDL_SCANCODE_SPACE};
-  static const char *const bindKeys[5] = {"touche_accelerer", "touche_freiner", "touche_gauche", "touche_droite", "touche_boost"};
-  static const char *const bindLabels[5] = {"Accélérer", "Freiner", "Gauche", "Droite", "Boost"};
-  for (int k = 0; k < 5; k++) {
+  SDL_Scancode bindSc[6];
+  static const SDL_Scancode bindDef[6] = {SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT, SDL_SCANCODE_SPACE, SDL_SCANCODE_K};
+  static const char *const bindKeys[6] = {"touche_accelerer", "touche_freiner", "touche_gauche", "touche_droite", "touche_boost", "touche_klaxon"};
+  static const char *const bindLabels[6] = {"Accélérer", "Freiner", "Gauche", "Droite", "Boost", "Klaxon"};
+  for (int k = 0; k < 6; k++) {
     bindSc[k] = SDL_GetScancodeFromName(o.keyNames[k].c_str());
     if (bindSc[k] == SDL_SCANCODE_UNKNOWN) bindSc[k] = bindDef[k];
   }
@@ -853,12 +873,13 @@ int main(int argc, char **argv) {
     it.push_back({"Textures HD : " + yn(o.hdTextures), 21});
     it.push_back({"Encouragements de la foule : " + yn(o.crowd), 20});
     it.push_back({"Volume de la foule : " + std::to_string(int(std::lround(o.crowdVolume * 100))) + " %  < >", 22});
+    it.push_back({std::string("Son du moteur : ") + (o.engineV8 ? "V8 réaliste" : "d'origine"), 24});
     it.push_back({"Plein écran : " + yn(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP) + "  (F11)", 7});
     it.push_back({haveTnt ? std::string("Circuits : ") + (soloSet ? "TNT" : "d'origine") + "  (F7)" : "Circuits TNT : fichier SCR-TNT absent", 8});
     it.push_back({"Manette : " + yn(o.usePad) + (pad ? "  (branchée)" : "  (aucune)"), 9});
     it.push_back({"Vibrations aux chocs : " + yn(o.rumble), 10});
-    for (int k = 0; k < 5; k++)
-      it.push_back({std::string("Touche ") + bindLabels[k] + " : " + (optBind == k ? "appuyez sur une touche..." : keyLabel(bindSc[k])), 11 + k});
+    for (int k = 0; k < 6; k++)
+      it.push_back({std::string("Touche ") + bindLabels[k] + " : " + (optBind == k ? "appuyez sur une touche..." : keyLabel(bindSc[k])), k < 5 ? 11 + k : 25});
     it.push_back({"Touches par défaut", 16});
     it.push_back({"Fermer", 17});
     return it;
@@ -898,8 +919,9 @@ int main(int argc, char **argv) {
       case 9: o.usePad = !o.usePad; saveFlag({"manette", "gamepad"}, o.usePad, "manette"); break;
       case 10: o.rumble = !o.rumble; saveFlag({"vibrations", "rumble"}, o.rumble, "vibrations de la manette lors des chocs"); break;
       case 11: case 12: case 13: case 14: case 15: if (dir == 0) optBind = id - 11; break;
+      case 25: if (dir == 0) optBind = 5; break;
       case 16:
-        for (int k = 0; k < 5; k++) {
+        for (int k = 0; k < 6; k++) {
           bindSc[k] = bindDef[k];
           saveIniValue(ini, {bindKeys[k]}, SDL_GetScancodeName(bindSc[k]), "touche (menu d'options, F1)");
         }
@@ -919,6 +941,7 @@ int main(int argc, char **argv) {
         saveIniValue(ini, {"densite", "densité", "density"}, std::to_string(o.density), "densité du décor : 1 à 4 (arbres, panneaux, tribunes, voitures garées)");
         break;
       }
+      case 24: o.engineV8 = !o.engineV8; saveFlag({"moteur_v8", "engine_v8"}, o.engineV8, "son du moteur : 1 = V8 réaliste, 0 = son d'origine"); break;
       case 22: {
         o.crowdVolume = std::clamp(std::round(o.crowdVolume * 10 + (dir < 0 ? -1 : 1)) / 10, 0.0, 2.0);
         char b[16]; std::snprintf(b, sizeof b, "%.1f", o.crowdVolume);
@@ -1059,6 +1082,10 @@ int main(int argc, char **argv) {
         if (down && !ev.key.repeat && sc == SDL_SCANCODE_F10) net.close("déconnexion");   // multijoueur : couper
         if (down && !ev.key.repeat) {
           if (sc == SDL_SCANCODE_F12) running = false;
+          else if (sc == bindSc[5] && typing == Typing::None && !optOpen && !menuOpen) {   // klaxon (aussi chez les autres joueurs)
+            horn.trigger(0.8);
+            if (net.canHorn()) net.sendHorn();
+          }
           else if (sc == SDL_SCANCODE_F3) {   // couper / rétablir le son
             muted = !muted;
             m->setVolume(muted ? 0.0 : o.volume);
@@ -1134,6 +1161,7 @@ int main(int argc, char **argv) {
     // (la direction semblait alors bloquée pendant le boost) ; Maj et Alt n'ont pas ce problème
     j.fire = keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL] || keys[SDL_SCANCODE_LSHIFT] ||
              keys[SDL_SCANCODE_RSHIFT] || keys[SDL_SCANCODE_LALT] || keys[SDL_SCANCODE_RALT] || keys[bindSc[4]];
+    throttleNow = j.up; boostNow = j.fire;
     // en multijoueur, les menus lisent le joystick à travers le lien : un appui bref pourrait être manqué
     double tNow = double(SDL_GetPerformanceCounter()) / double(SDL_GetPerformanceFrequency());
     bool padStart = false;
@@ -1147,6 +1175,10 @@ int main(int argc, char **argv) {
       j.down |= ay > 12000 || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_DOWN) ||
                 SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 8000;
       j.fire |= SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A) || SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_X);
+      static bool prevY = false;   // klaxon : bouton Y
+      const bool y = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_Y);
+      if (y && !prevY && !optOpen && !menuOpen) { horn.trigger(0.8); if (net.canHorn()) net.sendHorn(); }
+      prevY = y;
     }
     if (padStart && !prevStart && typing == Typing::None && optBind < 0) { optOpen = !optOpen; optSel = 0; }
     prevStart = padStart;
@@ -1174,6 +1206,17 @@ int main(int argc, char **argv) {
     }
     m->setJoystick(j);
     net.poll();   // aussi entre les trames (connexion, annonces), pas seulement pendant l'émulation
+    {   // klaxons des autres joueurs : plus fort quand la voiture est proche (course à plusieurs)
+      uint32_t from;
+      while (net.takeHorn(from)) {
+        double g = 0.7;
+        if (from && view)
+          for (auto &gh : view->ghosts)
+            if (gh.id == from) g = std::max(0.08, 0.9 / (1 + (gh.dist / 2500) * (gh.dist / 2500)));
+        horn.trigger(g);
+        if (std::getenv("SCR_HORNLOG")) std::fprintf(stderr, "klaxon reçu de %u (volume %.2f)\n", from, g);
+      }
+    }
     {   // course à plusieurs : départ (machine relancée sur le circuit), top départ, fin
       std::string ev;
       while (net.takeGroupEvent(ev)) {

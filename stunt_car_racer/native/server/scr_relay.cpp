@@ -21,7 +21,7 @@
 // Tous les joueurs connectés à ce serveur jouent avec les mêmes réglages.
 //
 // Protocole (trames : type 1 octet, longueur 2 octets gros-boutiste, données) :
-//   client -> serveur : JOIN2 (12) "AUTO|SALLE \0 code \0 version \0 nom"
+//   client -> serveur : JOIN2 (12) "AUTO|SALLE \0 code \0 version \0 nom \0 tnt" (tnt : circuits TNT présents)
 //                       PICK (14) "numéro"  (salle privée : choix de l'adversaire)
 //                       CHAT (17) "texte"   (salle privée : à tous les joueurs libres de la salle,
 //                                            reçu « nom\ttexte » ; en partie : retransmis à l'adversaire)
@@ -30,6 +30,8 @@
 //                                 | "ACCEPT" | "REJECT"   (course à deux : circuit proposé accepté / autre circuit)
 //                       GPOS (21) position de la voiture (binaire), retransmise aux autres membres
 //                                 précédée du numéro du joueur (4 octets)
+//                       HORN (22) ""        (klaxon : à l'adversaire, ou aux autres membres de la course,
+//                                            reçu précédé du numéro du joueur sur 4 octets)
 //                       PROBE (15) ""       (test du serveur par le jeu : réponse INFO "SERVER joueurs parties;réglages;version=vNN")
 //                       JOIN (10) "code\0version"  (ancienne version : appariement par code)
 //   serveur -> client : INFO (11) "WAIT" | "PAIRED 1" (maître) | "PAIRED 2" | "GONE" | "BUSY" | "ERR message"
@@ -106,12 +108,12 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v64"
+#define SCR_RELAY_VERSION "v65"
 
 namespace {
 
 constexpr uint8_t NF_JOIN = 10, NF_INFO = 11, NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16, NF_CHAT = 17,
-                  NF_GSTATE = 18, NF_GCMD = 19, NF_GEVENT = 20, NF_GPOS = 21;
+                  NF_GSTATE = 18, NF_GCMD = 19, NF_GEVENT = 20, NF_GPOS = 21, NF_HORN = 22;
 constexpr size_t GROUP_MAX = 6;
 constexpr size_t MAX_CLIENTS = 512, MAX_PER_IP = 16, MAX_BUFFER = 1 << 20;
 const Sock NONE = Sock(-1);
@@ -174,6 +176,8 @@ struct Client {
   double closingSince = 0;
   double since = 0, lastRx = 0, pairedAt = 0, lastChat = 0;
   bool inGroup = false;          // course à plusieurs
+  bool tnt = false;              // le jeu a les circuits TNT (tirage des courses à deux parmi 16)
+  double lastHorn = 0;
   std::string gkey;              // groupe : code de la salle, ou « DUEL n » (course à deux par appariement)
   std::string gstate = "lobby";  // lobby, loading, loaded, racing, finished:ms, out (voiture détruite)
   uint64_t rxBytes = 0, rxMark = 0;
@@ -294,6 +298,16 @@ void groupState(const std::string &room, bool force = false) {
 void matchAuto(Client &c);
 void duelDissolve(const std::string &key);
 
+// circuit tiré au sort pour une course à deux : 8 d'origine, ou 16 si tous ont les circuits TNT
+int duelDraw(const Group &g, int avoid) {
+  bool tnt = !g.members.empty();
+  for (Sock f : g.members) { auto it = clients.find(f); tnt = tnt && it != clients.end() && it->second.tnt; }
+  const int n = tnt ? 16 : 8;
+  int t = avoid;
+  while (t == avoid) t = std::rand() % n;
+  return t;
+}
+
 void groupLeave(Client &c) {
   if (!c.inGroup) return;
   c.inGroup = false;
@@ -331,8 +345,9 @@ void duelCreate(Client &a, Client &b) {
   const std::string key = "DUEL" + std::to_string(a.id);
   Group &g = groups[key];
   g = Group();
-  g.duel = true; g.phase = "vote"; g.track = std::rand() % 8; g.laps = 3;
+  g.duel = true; g.phase = "vote"; g.laps = 3;
   for (Client *m : {&a, &b}) { m->inGroup = true; m->gkey = key; m->gstate = "vote"; g.members.push_back(m->fd); }
+  g.track = duelDraw(g, -1);
   totalGames++;
   logf("course à deux : %s contre %s (circuit %d proposé)", who(a).c_str(), who(b).c_str(), g.track + 1);
   groupState(key, true);
@@ -388,9 +403,7 @@ void groupCmd(Client &c, const std::string &cmd) {
     if (all) groupStart(key, g);
   } else if (cmd == "REJECT") {   // « Autre circuit » : nouveau tirage, les deux doivent de nouveau accepter
     if (!g.duel || g.phase != "vote") return;
-    int t = g.track;
-    while (t == g.track) t = std::rand() % 8;
-    g.track = t;
+    g.track = duelDraw(g, g.track);
     for (Sock f : g.members) clients[f].gstate = "vote";
     logf("%s : %s demande un autre circuit (circuit %d proposé)", key.c_str(), c.name.c_str(), g.track + 1);
   } else if (cmd == "LOADED") {
@@ -432,7 +445,7 @@ void groupTick() {
       // fin : tous arrivés ou abandonnés, ou 2 minutes après le premier, ou 30 minutes de course
       if (all || (g.firstFinish && t - g.firstFinish > 120) || t - g.startedAt > 1800) {
         g.phase = g.duel ? "vote" : "lobby";
-        if (g.duel) { int nt = g.track; while (nt == g.track) nt = std::rand() % 8; g.track = nt; }   // revanche : autre circuit proposé
+        if (g.duel) g.track = duelDraw(g, g.track);   // revanche : autre circuit proposé
         groupSend(g, NF_GEVENT, "END");
         groupState(kv.first, true);
         for (Sock f : g.members) if (clients[f].gstate.rfind("finished", 0) != 0 && clients[f].gstate != "out") clients[f].gstate = g.duel ? "vote" : "lobby";
@@ -576,8 +589,10 @@ void process(Client &c) {
     const uint8_t *p = c.in.data() + pos + 3;
     if (!c.joined) {
       auto f = fields(p, n);
-      if (type == NF_JOIN2 && f.size() >= 3)
+      if (type == NF_JOIN2 && f.size() >= 3) {
+        c.tnt = f.size() > 4 && f[4] == "tnt";   // circuits TNT présents chez ce joueur
         onJoin(c, f[0] == "SALLE" ? Mode::Room : Mode::Auto, f[1], f[2], f.size() > 3 ? f[3] : "");
+      }
       else if (type == NF_JOIN) onJoin(c, Mode::Code, f[0], f.size() > 1 ? f[1] : "", "");
       else if (type == NF_PROBE) {   // le jeu vérifie que le serveur répond
         size_t players = 0, games = 0;
@@ -598,6 +613,12 @@ void process(Client &c) {
       for (int k = 0; k < 4; k++) m[size_t(k)] = char((c.id >> (24 - 8 * k)) & 255);
       m.append(reinterpret_cast<const char *>(p), n);
       for (Sock f : groups[c.gkey].members) if (f != c.fd) frame(clients[f], NF_GPOS, m);
+    }
+    else if (type == NF_HORN && c.inGroup && now() - c.lastHorn > 0.25) {   // klaxon : aux autres membres
+      c.lastHorn = now();
+      std::string m(4, '\0');
+      for (int k = 0; k < 4; k++) m[size_t(k)] = char((c.id >> (24 - 8 * k)) & 255);
+      for (Sock f : groups[c.gkey].members) if (f != c.fd) frame(clients[f], NF_HORN, m);
     }
     else if (type == NF_CHAT && c.mode == Mode::Room && now() - c.lastChat > 0.3) {   // discussion de la salle
       c.lastChat = now();

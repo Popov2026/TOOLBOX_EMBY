@@ -39,6 +39,16 @@ l'atterrissage) et fait des étincelles quand elle retombe brutalement ; ses sus
 encaissent les réceptions (la caisse s'enfonce puis remonte, les roues ne passent jamais sous
 la route). Après une grosse chute hors piste, la caméra ne descend plus sous le sol.
 
+Son du moteur (menu d'options, « Son du moteur ») : « d'origine » ou « V8 réaliste ». Le V8 est
+synthétisé par le jeu : vilebrequin croisé (le « glouglou » irrégulier d'un V8 américain),
+échappements résonants, régime qui suit celui du jeu avec une boîte à 4 rapports simulée,
+grondement plus fort à l'accélération et au boost, moteur qui s'emballe roues en l'air. Seul le
+son du moteur d'origine est remplacé, les autres bruitages du jeu restent.
+
+Klaxon (touche K, réglable dans le menu d'options ; bouton Y de la manette) : en multijoueur
+(course à deux, course à plusieurs, Computer Link), les autres joueurs l'entendent aussi, plus
+ou moins fort selon la distance de votre voiture. Seul, vous êtes le seul à l'entendre.
+
 Encouragements de la foule (mode HD, avec le décor) : chaque tribune a son public qui crie et
 applaudit ; on l'entend de plus en plus fort en s'approchant, avec l'effet Doppler (plus aigu
 en arrivant, plus grave en s'éloignant). Son fourni par défaut (synthétisé) ; pour utiliser

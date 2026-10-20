@@ -60,7 +60,8 @@ disponible »).
        * « Premier joueur disponible » : le serveur vous met en COURSE À DEUX avec le premier
          joueur qui attend (ou vous fait attendre le suivant). Pas de Computer Link : chacun mène
          son propre jeu, sans attendre que l'autre valide ses menus. Un circuit est tiré au sort
-         et proposé aux deux : « Accepter ce circuit » ; la course part dès que les deux ont
+         (parmi les 8 d'origine, ou les 16 avec les circuits TNT si les deux joueurs les ont) et
+         proposé aux deux : « Accepter ce circuit » ; la course part dès que les deux ont
          accepté. « Autre circuit » refuse : un autre circuit est proposé, à accepter de nouveau
          par les deux. Grille : un à gauche, un à droite, la grue amène chaque voiture de son côté
          (comme la course à plusieurs ci-dessous : flammes du boost, chocs, classement en direct).
@@ -95,6 +96,8 @@ disponible »).
      lui et « abandon » s'affiche à côté de son nom. À la fin (tous arrivés ou abandonnés, ou deux
      minutes après le premier arrivé), le menu affiche les
      temps et l'organisateur peut relancer une course. « Quitter la course à plusieurs » (ou Échap) ramène au titre du jeu.
+     Klaxon : touche K (ou bouton Y de la manette) pour narguer les autres : ils l'entendent,
+     plus fort quand votre voiture est proche (aussi en Computer Link).
      Discussion : dans la salle privée, « Écrire un message (F9) » (ou la touche F9) : le message va
      à tous les joueurs présents dans la salle ; les derniers s'affichent dans le menu. Une fois la
      partie lancée, F9 écrit à l'adversaire (aussi en réseau local) ; ses messages apparaissent en
