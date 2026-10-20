@@ -162,10 +162,13 @@ class HdView {
   const HdSprite *spriteFor(int id, const Machine &m);
   std::vector<int> mapX_, mapY_;
   // cockpit HD (hd/cockpit.png) : image agrandie à l'écran, cockpit d'origine au début de la course
-  std::vector<uint32_t> ckScaled_, ckFront_;
+  std::vector<uint32_t> ckScaled_, ckFront_, ckBack_;
   std::vector<uint8_t> ckRef_, ckIdx_;   // cockpit de référence et cockpit actuel, en index de palette
   int ckW_ = 0, ckH_ = 0, ckRefFrames_ = 0;
-  const uint32_t *ckData_ = nullptr, *ckFrontData_ = nullptr;
+  const uint32_t *ckData_ = nullptr, *ckFrontData_ = nullptr, *ckBackData_ = nullptr;
+  void scaleCockpitImages(int W, int H, double s, double ox);
+  void drawPanelText(uint32_t *out, int W, int H);
+  static void blendImage(const std::vector<uint32_t> &img, uint32_t *out, size_t n);
   int mapW_ = 0, mapH_ = 0;
 };
 

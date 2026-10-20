@@ -57,6 +57,7 @@ class HdAssets {
   std::string report;        // résumé du chargement (fichiers, erreurs)
   HdImage cockpit;           // cockpit fixe (vide : celui du jeu)
   HdImage cockpitFront;      // partie du cockpit au-dessus des roues (facultatif)
+  HdImage cockpitBack;       // fond sous les roues et le moteur (facultatif) : cache la route
 
   // dessine l'image (instant t en secondes) dans le rectangle [x0,x1)x[y0,y1) de out (W×H)
   // shear : décalage horizontal du haut de l'image, en fraction de la largeur (0 = droit)

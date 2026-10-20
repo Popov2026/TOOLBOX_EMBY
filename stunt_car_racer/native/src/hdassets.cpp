@@ -47,6 +47,7 @@ int HdAssets::load(const std::string &dir) {
   report.clear();
   cockpit = HdImage();
   cockpitFront = HdImage();
+  cockpitBack = HdImage();
   std::error_code ec;
   fs::path base = fs::u8path(dir);
   if (!fs::is_directory(base, ec)) return 0;
@@ -69,6 +70,13 @@ int HdAssets::load(const std::string &dir) {
     bool a;
     if (fs::exists(base / n, ec) && cockpitFront.px.empty()) {
       if (loadImage(base / n, cockpitFront, a)) report += std::string("cockpit (avant) : ") + n + "\n";
+      else report += std::string("illisible : ") + n + "\n";
+    }
+  }
+  for (const char *n : {"cockpit_fond.png", "cockpit_fond.jpg"}) {   // fond sous les roues et le moteur
+    bool a;
+    if (fs::exists(base / n, ec) && cockpitBack.px.empty()) {
+      if (loadImage(base / n, cockpitBack, a)) report += std::string("cockpit (fond) : ") + n + "\n";
       else report += std::string("illisible : ") + n + "\n";
     }
   }
