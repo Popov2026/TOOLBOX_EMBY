@@ -28,7 +28,7 @@ Lignes de commande utiles :
     python emby_toolbox_dpg.pyw --mkv-selftest   tests du moteur de renommage
 """
 
-APP_VERSION = "2026.10.5"
+APP_VERSION = "2026.10.6"
 
 import dearpygui.dearpygui as dpg
 import threading, queue, json, os, sys, subprocess, time, socket
@@ -5286,6 +5286,15 @@ def _init_doublons():
         return (tr.get("variant") or tr.get("lang") or "?",
                 (tr.get("codec") or "?").upper(), _ch_num(tr.get("channels")))
 
+    def _ch_txt(ch):
+        n = _ch_num(ch)
+        return {1: "1.0", 2: "2.0", 3: "2.1", 6: "5.1", 7: "6.1", 8: "7.1"}.get(n, f"{n}ch" if n else "")
+
+    def track_label_short(tr):
+        """'VFF AC3 5.1' (canaux au format habituel)."""
+        v, c, _ = track_sig(tr)
+        return " ".join(x for x in (v, c, _ch_txt(tr.get("channels"))) if x)
+
     def track_label(tr):
         v, c, ch = track_sig(tr)
         return f"{v} {c} {ch}ch" if ch else f"{v} {c}"
@@ -5590,7 +5599,7 @@ def _init_doublons():
         if same_audio:
             summary = _L("Pistes audio identiques (étiquettes) : ",
                          "Identical audio tracks (labels): ") + \
-                " + ".join(track_label(tr) for tr in mds[order[0].get("Id", "")]["audio_tracks"])
+                " + ".join(track_label_short(tr) for tr in mds[order[0].get("Id", "")]["audio_tracks"])
         else:
             summary = _L("Pistes audio différentes : ", "Different audio tracks: ") + \
                 "  ·  ".join(f"#{num[i]} {langsets[i]}" for i in mds)
@@ -7447,7 +7456,7 @@ def _init_doublons():
                     dpg.add_spacer(width=20)
                     dpg.add_text(f"[{sl} {sc}%]", color=sc_col)
                     dpg.add_spacer(width=10)
-                    dpg.add_button(label=t("open_all"), width=80,
+                    dpg.add_button(label=t("open_all"), width=0,
                         user_data=all_wp,
                         callback=lambda s,a,u: open_all_now(u))
                     tip("Ouvre tous les fichiers du groupe et dispose les fenetres\n"
@@ -7466,7 +7475,7 @@ def _init_doublons():
                            "multiple simultaneous instances (multi-session).\n"
                            "VLC: Preferences > Interface > uncheck 'Allow only one instance'.\n"
                            "MPC-BE: Options > Player > 'Allow multiple instances'.")
-                    dpg.add_button(label=t("compare"), width=70,
+                    dpg.add_button(label=t("compare"), width=0,
                         user_data=items,
                         callback=lambda s,a,u: compare_popup(u))
                     tip("Affiche les metadonnees des fichiers cote a cote\n(resolution, codec, bitrate, pistes audio...)\nLes differences sont surlignees en jaune.",
@@ -7476,7 +7485,7 @@ def _init_doublons():
                         callback=lambda s,a,u: compare_audio_popup(u))
                     tip("Compare les pistes audio de toutes les versions cote a cote\n(langue, codec, canaux, titre).\nLes lignes qui different sont surlignees.",
                         en="Compares the audio tracks of all versions side by side\n(language, codec, channels, title).\nDiffering rows are highlighted.")
-                    dpg.add_button(label=_L("Analyser son", "Analyse sound"), width=95,
+                    dpg.add_button(label=_L("Analyser son", "Analyse sound"), width=0,
                         user_data=(key, items),
                         callback=lambda s,a,u: start_audio_analysis(u[0], u[1]))
                     tip("Analyse approfondie (ffmpeg) : compare le SON reel des pistes\n"
@@ -7538,13 +7547,19 @@ def _init_doublons():
                                policy=dpg.mvTable_SizingStretchProp):
                     dpg.add_table_column(label=t("col_file"),   width_stretch=True, init_width_or_weight=0.32)
                     dpg.add_table_column(label=t("col_qual"),   width_fixed=True,   init_width_or_weight=125)
-                    dpg.add_table_column(label=t("col_folder"), width_stretch=True, init_width_or_weight=0.38)
+                    dpg.add_table_column(label=t("col_folder"), width_stretch=True, init_width_or_weight=0.28)
+                    dpg.add_table_column(label=_L("Pistes audio", "Audio tracks"),
+                                         width_stretch=True, init_width_or_weight=0.24)
                     dpg.add_table_column(label=t("col_dur"),    width_fixed=True,   init_width_or_weight=70)
                     dpg.add_table_column(label=t("col_size"),   width_fixed=True,   init_width_or_weight=68)
                     dpg.add_table_column(label=_L("Suggestion", "Suggestion"),
                                          width_fixed=True, init_width_or_weight=135)
                     dpg.add_table_column(label=t("col_actions"),width_fixed=True,   init_width_or_weight=245)
 
+                    # pistes audio : identiques dans toutes les versions ?
+                    _g_sigs=[sorted(track_sig(tr) for tr in get_rich_metadata(it).get("audio_tracks", []))
+                             for it in items]
+                    _audio_same_all = len({tuple(x) for x in _g_sigs}) == 1
                     # valeurs du groupe pour surligner durées/tailles identiques
                     _g_durs=[get_rich_metadata(it)["duration_s"] for it in items]
                     _g_szs =[(get_rich_metadata(it)["size_bytes"] or get_api_size(it)) for it in items]
@@ -7571,7 +7586,9 @@ def _init_doublons():
                                         else _L("SUPPRIMER ?", "DELETE ?")), (233,69,96)),
                             "check":  (_L("À VÉRIFIER", "TO CHECK"), (240,160,0)),
                         }.get(_sv, ("", (136,136,136)))
-                        _tracks = " | ".join(track_label(tr) for tr in md.get("audio_tracks", [])) or "?"
+                        _tracks = "  ·  ".join(track_label_short(tr)
+                                               for tr in md.get("audio_tracks", [])) or "?"
+                        _tr_col = (120,220,140) if _audio_same_all else (255,220,100)
                         for path in get_all_sources(item):
                             wp=to_win(path,prefix,unc) or path
                             fname=Path(path).name if path else "-"
@@ -7581,11 +7598,20 @@ def _init_doublons():
                                 dpg.add_button(label=f" #{_n}  {fname}", width=-1,
                                     user_data=wp,
                                     callback=lambda s,a,u: open_file(u, get_player()))
-                                with dpg.tooltip(dpg.last_item()):
-                                    dpg.add_text(_L("Pistes audio : ", "Audio tracks: ") + _tracks,
-                                                 wrap=420)
                                 dpg.add_text(qual, color=(170,221,255))
                                 dpg.add_text(fd)
+                                dpg.add_text(_tracks, color=_tr_col, wrap=0)
+                                with dpg.tooltip(dpg.last_item()):
+                                    dpg.add_text("\n".join(
+                                        f"{i_+1}. {track_label_short(tr)}"
+                                        + (f"   ({tr['title']})" if tr.get("title") else "")
+                                        for i_, tr in enumerate(md.get("audio_tracks", [])))
+                                        or "?", wrap=460)
+                                    dpg.add_text(_L("Vert : mêmes pistes dans toutes les versions du "
+                                                    "groupe.  Jaune : pistes différentes.",
+                                                    "Green: same tracks in every version of the "
+                                                    "group.  Yellow: different tracks."),
+                                                 color=(136,136,170), wrap=460)
                                 dpg.add_text(dur, color=_dur_col)
                                 dpg.add_text(sz, color=_sz_col)
                                 dpg.add_text(_stxt, color=_scol)
@@ -8353,7 +8379,7 @@ def _init_doublons():
         # Ligne 5b : suggestions de suppression des clones
         with dpg.group(horizontal=True):
             b = dpg.add_button(label=_L("Suggestions de suppression", "Deletion suggestions"),
-                               tag="dbl_btn_sugg", width=200,
+                               tag="dbl_btn_sugg", width=0,
                                callback=lambda s,a,u: show_suggestions_window())
             try:
                 dpg.bind_item_theme(b, "th_btn_ok")

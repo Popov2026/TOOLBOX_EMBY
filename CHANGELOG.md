@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026.10.6
+
+### Français
+- **Doublons – colonne « Pistes audio »** dans les lignes des films, entre
+  « Dossier NAS » et « Durée » : `VFF AC3 5.1 · ENG DTS 5.1` (canaux au format
+  5.1 / 7.1 / 2.0). Vert = mêmes pistes dans toutes les versions du groupe,
+  jaune = pistes différentes ; détail piste par piste au survol.
+- Boutons « Ouvrir tout », « Comparer », « Analyser son » et « Suggestions de
+  suppression » à la largeur de leur libellé (ils étaient tronqués).
+
+### English
+- **Duplicates – "Audio tracks" column** in the movie rows, between "NAS
+  folder" and "Duration": `VFF AC3 5.1 · ENG DTS 5.1` (channels as 5.1 / 7.1 /
+  2.0). Green = same tracks in every version of the group, yellow = different
+  tracks; track-by-track detail on hover.
+- "Open all", "Compare", "Analyse sound" and "Deletion suggestions" buttons
+  sized to their label (they were truncated).
+
 ## 2026.10.5
 
 ### Français
