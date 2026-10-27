@@ -28,7 +28,7 @@ Lignes de commande utiles :
     python emby_toolbox_dpg.pyw --mkv-selftest   tests du moteur de renommage
 """
 
-APP_VERSION = "2026.10.4"
+APP_VERSION = "2026.10.5"
 
 import dearpygui.dearpygui as dpg
 import threading, queue, json, os, sys, subprocess, time, socket
@@ -5952,7 +5952,7 @@ def _init_doublons():
         title = (items[0].get("Name", "?") if items else "?")
         _set_status(_L(f"Analyse du son : {title}...", f"Analysing sound: {title}..."),
                     (240,160,0))
-        render_results()
+        rerender_keep()
 
         def worker():
             try:
@@ -5973,14 +5973,14 @@ def _init_doublons():
                     _set_status(_L("Analyse du son impossible", "Sound analysis failed"),
                                 (233,69,96))
                     modal_err(_L("Analyse du son", "Sound analysis"), msg)
-                render_results()
+                rerender_keep()
             ui(done)
         threading.Thread(target=worker, daemon=True).start()
 
     def on_pref_lang(s, v, u):
         G["pref_lang"] = {"VFF": "VFF", "VFQ": "VFQ"}.get(v, "")
         save_dbl_prefs()
-        render_results()
+        rerender_keep()
 
     # ── Fenetre « Suggestions de suppression » (tous les groupes) ──────
     def show_suggestions_window():
@@ -6112,7 +6112,7 @@ def _init_doublons():
                     def done():
                         if dpg.does_item_exist(tag):
                             dpg.delete_item(tag)
-                        render_results()
+                        rerender_keep()
                         show_suggestions_window()
                         if errs:
                             modal_err(_L("Vérification du son", "Sound check"),
@@ -6256,7 +6256,7 @@ def _init_doublons():
                             (233,69,96) if errs else (46,204,113))
                 if errs:
                     modal_err(_L("Erreurs de suppression", "Deletion errors"), "\n".join(errs[:30]))
-                render_results()
+                rerender_keep()
             ui(done)
         threading.Thread(target=worker, daemon=True).start()
 
@@ -7036,7 +7036,7 @@ def _init_doublons():
                                 # Feedback via le bandeau de statut (pas de modale empilée)
                                 msg = "Fichier supprimé" if delete_file else "Retiré de la librairie"
                                 _set_status(f"OK - {msg} : {_nm}", (46,204,113))
-                                render_results()
+                                rerender_keep()
                             ui(on_ok)
                         except urllib.error.HTTPError as e:
                             if e.code == 401:
@@ -7806,7 +7806,7 @@ def _init_doublons():
             reclassify()
 
     def do_ignore(key, title):
-        G["ignored"].add(key); save_ignored(G["ignored"]); render_results()
+        G["ignored"].add(key); save_ignored(G["ignored"]); rerender_keep()
 
     def do_reset_ignored():
         G["ignored"].clear(); save_ignored(G["ignored"]); render_results()
@@ -8468,11 +8468,35 @@ def _init_doublons():
         except Exception:
             pass
 
+    # Redessiner la liste SANS perdre sa position de defilement (actions faites
+    # dans un groupe : analyse du son, suppression, ignorer...). La position est
+    # reappliquee sur quelques images, le temps que la nouvelle liste soit
+    # mesuree (sinon le defilement est borne a 0).
+    _scroll_keep = {"y": 0.0, "frames": 0}
+
+    def rerender_keep():
+        try:
+            y = dpg.get_y_scroll("dbl_results_area")
+        except Exception:
+            y = 0.0
+        render_results()
+        _scroll_keep["y"] = y
+        _scroll_keep["frames"] = 8
+
+    def _restore_scroll():
+        if _scroll_keep["frames"] > 0:
+            _scroll_keep["frames"] -= 1
+            try:
+                dpg.set_y_scroll("dbl_results_area", _scroll_keep["y"])
+            except Exception:
+                _scroll_keep["frames"] = 0
+
     def _tick():
         nonlocal _render_timer
         if _render_timer > 0 and time.time() >= _render_timer:
             _render_timer = 0.0
             render_results()
+        _restore_scroll()
         _update_delete_spinner()
 
     def _set_lang(code):

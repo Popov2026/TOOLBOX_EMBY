@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026.10.5
+
+### Français
+- **Doublons – la liste ne remonte plus en haut** après « Analyser son »,
+  une suppression, « Ignorer » ou un changement de langue préférée : la
+  position de défilement est conservée. (Les clics s'exécutent pendant le
+  dessin de l'écran ; le redessin de la liste ramenait le défilement vers le
+  haut.) Les changements de filtre, de tri ou de page repartent toujours du
+  haut.
+
+### English
+- **Duplicates – the list no longer jumps to the top** after "Analyse sound",
+  a deletion, "Ignore" or a preferred-language change: the scroll position is
+  kept. (Clicks run while the screen is drawn; redrawing the list pulled the
+  scroll position up.) Filter, sort and page changes still start from the top.
+
 ## 2026.10.4
 
 ### Français
