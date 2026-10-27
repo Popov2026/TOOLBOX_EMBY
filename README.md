@@ -82,8 +82,10 @@ sans redémarrer. Le choix est mémorisé.
     **VFQ étiquetée VFF** (ou l'inverse) : même étiquette mais doublages
     différents, ou étiquettes différentes mais même doublage ;
   - **fichier audio comparatif** par film (`comparaisons_audio\*.m4a`, bouton
-    **Écouter**) : 3 répliques, chacune jouée dans la 1re version (1 bip) puis
-    dans la 2e (2 bips), pour trancher à l'oreille ;
+    **Écouter**) : 3 répliques ; pour chacune, les deux versions sont
+    **mixées**, la 2e décalée d'**1 seconde** (1re plutôt à gauche, 2e plutôt à
+    droite) : même doublage = la même voix en écho, doublages différents = deux
+    voix différentes ;
   - fenêtre **Suggestions de suppression** : tous les clones du scan, cases à
     cocher (sûrs cochés), suppression groupée après confirmation.
 - Sauvegarde / rechargement du scan (hors ligne), export **HTML** ou **CSV**,
@@ -284,8 +286,9 @@ restart. The choice is remembered.
     (or the reverse): same label but different dubs, or different labels but
     same dub;
   - **comparison audio file** per movie (`comparaisons_audio\*.m4a`, **Listen**
-    button): 3 lines, each played in the 1st version (1 beep) then in the 2nd
-    (2 beeps), to decide by ear;
+    button): 3 lines; for each, both versions are **mixed**, the 2nd delayed by
+    **1 second** (1st mostly left, 2nd mostly right): same dub = the same voice
+    echoed, different dubs = two different voices;
   - **Deletion suggestions** window: every clone of the scan, checkboxes (safe
     ones ticked), batch deletion after confirmation.
 - Save / reload the scan (offline), **HTML** or **CSV** export, Emby library

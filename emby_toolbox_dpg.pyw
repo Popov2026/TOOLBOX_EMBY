@@ -28,7 +28,7 @@ Lignes de commande utiles :
     python emby_toolbox_dpg.pyw --mkv-selftest   tests du moteur de renommage
 """
 
-APP_VERSION = "2026.10.2"
+APP_VERSION = "2026.10.3"
 
 import dearpygui.dearpygui as dpg
 import threading, queue, json, os, sys, subprocess, time, socket
@@ -5749,9 +5749,13 @@ def _init_doublons():
 
     COMPARE_DIR = APP_DIR / "comparaisons_audio"
 
+    COMPARE_DELAY_S = 1.0   # decalage de la 2e version dans le mixage
+
     def make_comparison_audio(ffmpeg, items, a, b, r, paths, clip=8.0):
-        """Fichier .m4a : pour chaque extrait, 1 bip + replique de la version A,
-        puis 2 bips + la MEME replique dans la version B. Retourne le chemin."""
+        """Fichier .m4a : pour chaque replique, 1 bip puis les DEUX versions
+        MIXEES, la 2e decalee de COMPARE_DELAY_S (1 s). Version 1 plutot a
+        gauche, version 2 plutot a droite. Meme doublage = la meme voix en
+        echo ; doublages differents = deux voix differentes."""
         import tempfile
         by_id = {it.get("Id", ""): it for it in items}
         num = {it.get("Id", ""): i + 1 for i, it in enumerate(items)}
@@ -5762,6 +5766,7 @@ def _init_doublons():
         out = COMPARE_DIR / (f"{safe} - #{num[a]} {r['va']} vs #{num[b]} {r['vb']} "
                              f"(piste {r['ia'] + 1} vs {r['ib'] + 1}).m4a")
         fmt = ["-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le"]
+        dms = int(COMPARE_DELAY_S * 1000)
         with tempfile.TemporaryDirectory(prefix="emby_cmp_") as tmp:
             tmp = Path(tmp)
             def gen(name, src):
@@ -5772,28 +5777,34 @@ def _init_doublons():
                     raise RuntimeError(rr.stderr.decode("utf-8", "replace")[:200])
                 return p
             bip = gen("bip.wav", "sine=frequency=880:duration=0.15")
-            gap = gen("gap.wav", "anullsrc=r=44100:cl=stereo:d=0.12")
-            pause = gen("pause.wav", "anullsrc=r=44100:cl=stereo:d=0.7")
-            fin = gen("fin.wav", "anullsrc=r=44100:cl=stereo:d=1.6")
+            pause = gen("pause.wav", "anullsrc=r=44100:cl=stereo:d=0.5")
+            fin = gen("fin.wav", "anullsrc=r=44100:cl=stereo:d=1.8")
             parts = []
             for n_seg, (t_a, t_b) in enumerate(r["segs"]):
-                for who, pth, ti, t0 in (("a", paths[a], r["ia"], t_a),
-                                         ("b", paths[b], r["ib"], t_b)):
-                    p = tmp / f"s{n_seg}{who}.wav"
-                    rr = _run_ffmpeg([ffmpeg, "-nostdin", "-v", "error", "-y",
-                                      "-ss", f"{max(0.0, t0):.2f}", "-i", pth,
-                                      "-map", f"0:a:{ti}", "-t", f"{clip:.2f}",
-                                      "-af", "afade=t=in:d=0.08,dynaudnorm"] + fmt + [str(p)])
-                    if rr.returncode != 0:
-                        raise RuntimeError(rr.stderr.decode("utf-8", "replace")[:200])
-                    beeps = [bip] if who == "a" else [bip, gap, bip]
-                    parts += beeps + [pause, p] + ([pause] if who == "a" else [fin])
+                p = tmp / f"mix{n_seg}.wav"
+                # chaque version : mono (pistes 5.1 descendues), normalisee,
+                # puis placee a gauche (v1) / a droite (v2, retardee de 1 s)
+                one = "afade=t=in:d=0.08,dynaudnorm,aformat=channel_layouts=mono"
+                flt = (f"[0:a:{r['ia']}]{one},pan=stereo|c0=c0|c1=0.35*c0[v1];"
+                       f"[1:a:{r['ib']}]{one},pan=stereo|c0=0.35*c0|c1=c0,"
+                       f"adelay={dms}|{dms}[v2];"
+                       f"[v1][v2]amix=inputs=2:duration=longest:dropout_transition=0,"
+                       f"volume=2[out]")
+                rr = _run_ffmpeg([ffmpeg, "-nostdin", "-v", "error", "-y",
+                                  "-ss", f"{max(0.0, t_a):.2f}", "-t", f"{clip:.2f}",
+                                  "-i", paths[a],
+                                  "-ss", f"{max(0.0, t_b):.2f}", "-t", f"{clip:.2f}",
+                                  "-i", paths[b],
+                                  "-filter_complex", flt, "-map", "[out]"] + fmt + [str(p)])
+                if rr.returncode != 0:
+                    raise RuntimeError(rr.stderr.decode("utf-8", "replace")[:200])
+                parts += [bip, pause, p, fin]
             lst = tmp / "liste.txt"
             lst.write_text("".join(f"file '{p.as_posix()}'\n" for p in parts), "utf-8")
             rr = _run_ffmpeg([ffmpeg, "-nostdin", "-v", "error", "-y", "-f", "concat",
                               "-safe", "0", "-i", str(lst), "-c:a", "aac", "-b:a", "160k",
-                              "-metadata", f"title={title} - #{num[a]} {r['va']} vs "
-                                           f"#{num[b]} {r['vb']}", str(out)])
+                              "-metadata", f"title={title} - #{num[a]} {r['va']} (gauche) + "
+                                           f"#{num[b]} {r['vb']} (droite, +1 s)", str(out)])
             if rr.returncode != 0:
                 raise RuntimeError(rr.stderr.decode("utf-8", "replace")[:200])
         return str(out)
@@ -5818,12 +5829,18 @@ def _init_doublons():
                                    callback=lambda s, a, u: play_comparison(u))
                     with dpg.tooltip(dpg.last_item()):
                         dpg.add_text(_L(
-                            "Fichier audio comparatif : 3 répliques. Pour chacune :\n"
-                            "1 bip = la 1re version, puis 2 bips = la même réplique\n"
-                            "dans la 2e version.\n" + str(_AUDIO_FILES.get(fk, "")),
-                            "Comparison audio file: 3 lines. For each one:\n"
-                            "1 beep = the 1st version, then 2 beeps = the same line\n"
-                            "in the 2nd version.\n" + str(_AUDIO_FILES.get(fk, ""))),
+                            "Fichier audio comparatif : 3 répliques, chacune après un bip.\n"
+                            "Les deux versions sont MIXÉES : la 1re (plutôt à gauche),\n"
+                            "puis la 2e (plutôt à droite) décalée d'1 seconde.\n"
+                            "Même doublage = la même voix en écho.\n"
+                            "Doublages différents = deux voix différentes.\n"
+                            + str(_AUDIO_FILES.get(fk, "")),
+                            "Comparison audio file: 3 lines, each after a beep.\n"
+                            "Both versions are MIXED: the 1st (mostly left), then the\n"
+                            "2nd (mostly right) delayed by 1 second.\n"
+                            "Same dub = the same voice echoed.\n"
+                            "Different dubs = two different voices.\n"
+                            + str(_AUDIO_FILES.get(fk, ""))),
                             wrap=460)
                 dpg.add_text(txt_, color=col_)
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026.10.3
+
+### Français
+- **Fichier audio comparatif mixé :** les deux versions ne sont plus jouées
+  l'une après l'autre mais **superposées**, la 2e décalée d'**1 seconde** (1re
+  plutôt à gauche, 2e plutôt à droite). Même doublage = la même voix en écho ;
+  doublages différents = deux voix différentes. 3 répliques, chacune après un
+  bip.
+
+### English
+- **Mixed comparison audio file:** the two versions are no longer played one
+  after the other but **overlaid**, the 2nd delayed by **1 second** (1st mostly
+  left, 2nd mostly right). Same dub = the same voice echoed; different dubs =
+  two different voices. 3 lines, each after a beep.
+
 ## 2026.10.2
 
 ### Français
