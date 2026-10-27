@@ -28,7 +28,7 @@ Lignes de commande utiles :
     python emby_toolbox_dpg.pyw --mkv-selftest   tests du moteur de renommage
 """
 
-APP_VERSION = "2026.10.3"
+APP_VERSION = "2026.10.4"
 
 import dearpygui.dearpygui as dpg
 import threading, queue, json, os, sys, subprocess, time, socket
@@ -5330,9 +5330,18 @@ def _init_doublons():
                 for tr in _fr_tracks(md_x):
                     if tr["variant"] != lang:
                         continue
-                    best = max((r["sim"] for r in rows if r["ia"] == tr["index"]),
-                               default=None)
-                    if best is None or best < SND_DIFF:
+                    dec = [r["sim"] for r in rows
+                           if r["ia"] == tr["index"] and not r.get("no_speech")]
+                    if not dec:
+                        # pas assez de dialogue entendu : on retombe sur les
+                        # etiquettes, sans jamais conclure « sur »
+                        uncertain = True
+                        if lang not in lk and not (fr_k and (lang == "VF" or "VF" in fr_k)):
+                            if not (pref and lang != pref and pref in fr_k):
+                                return False, approx, uncertain
+                        continue
+                    best = max(dec)
+                    if best < SND_DIFF:
                         # doublage different (ex. VFF etiquetee mais VFQ en realite)
                         if not (pref and lang != pref and pref in fr_k):
                             return False, approx, uncertain
@@ -5424,11 +5433,21 @@ def _init_doublons():
                     continue
                 rows = pair_rows(a, b)
                 seen = set()
-                for r in sorted(rows, key=lambda r: -r["sim"]):
+                for r in sorted(rows, key=lambda r: (bool(r.get("no_speech")), -r["sim"])):
                     if r["ia"] in seen:
                         continue
                     seen.add(r["ia"])
-                    st, fr, en, col = _snd_status(r["va"], r["vb"], r["sim"])
+                    if r.get("no_speech"):
+                        st, fr, en, col = ("unsure",
+                            f"pas assez de dialogue entendu ({r.get('speech_s', 0)} s dans "
+                            "les 3 zones analysées) : comparaison impossible",
+                            f"not enough dialogue heard ({r.get('speech_s', 0)} s in the "
+                            "3 analysed zones): cannot compare", (240, 160, 0))
+                    else:
+                        st, fr, en, col = _snd_status(r["va"], r["vb"], r["sim"])
+                        if r.get("speech_s"):
+                            fr += f" - {r['speech_s']} s de dialogue"
+                            en += f" - {r['speech_s']} s of dialogue"
                     txt = (f"#{num[a]} {r['va']} ({r['la']})  ↔  #{num[b]} {r['vb']} "
                            f"({r['lb']}) : " + _L(fr, en))
                     fk = (a, r["ia"], b, r["ib"])
@@ -5489,7 +5508,11 @@ def _init_doublons():
             better_audio = []
             for lang in item_langs(mx):
                 ax, ak = _best_audio(mx, lang), _best_audio(mk, lang)
-                if ax and ak and _audio_q(ax)[:2] > _audio_q(ak)[:2]:
+                # « meilleur son » = plus de canaux, ou un vrai saut de qualite a
+                # canaux egaux (DTS > AC3, TrueHD > DTS ; pas EAC3 > AC3)
+                if ax and ak and (_audio_q(ax)[0] > _audio_q(ak)[0] or (
+                        _audio_q(ax)[0] == _audio_q(ak)[0]
+                        and _audio_q(ax)[1] - _audio_q(ak)[1] >= 2)):
                     better_audio.append(f"{track_label(ax)} > {track_label(ak)}")
             vq_txt = (f"{mx['res_label'].split(' ')[0]} {mx['vcodec']}"
                       + (" HDR" if mx["hdr"] else ""))
@@ -5507,7 +5530,8 @@ def _init_doublons():
             fr_x = _fr_tracks(mx)
             other_ok = {s_ for s_ in sigs[iid] if s_[0] not in _FR} <= set(sigs[best_k])
             snd_ok = bool(rows) and bool(fr_x) and all(
-                max((r["sim"] for r in rows if r["ia"] == tr["index"]), default=0) >= SND_SAME
+                max((r["sim"] for r in rows if r["ia"] == tr["index"]
+                     and not r.get("no_speech")), default=0) >= SND_SAME
                 for tr in fr_x)
             sure = snd_ok and other_ok and not unsure_k
             labels_same = set(sigs[iid]) <= set(sigs[best_k]) and not approx_k
@@ -5544,7 +5568,7 @@ def _init_doublons():
                 uniq = item_langs(mk) - item_langs(top)
                 rows = pair_rows(k, keepers[0])
                 diff_dub = [r for r in (rows or []) if r["sim"] < SND_DIFF
-                            and r["va"] == r["vb"]]
+                            and r["va"] == r["vb"] and not r.get("no_speech")]
                 if diff_dub:
                     why_u = _L(f"son de sa {diff_dub[0]['va']} différent de celle de "
                                f"#{num[keepers[0]]} ({diff_dub[0]['sim']:.0%}) : autre doublage",
@@ -5600,34 +5624,87 @@ def _init_doublons():
         sd = math.sqrt(sum((x - mu) ** 2 for x in xs) / n) or 1.0
         return [(x - mu) / sd for x in xs]
 
-    def _audio_envelopes(ffmpeg, path, ti, start, dur, tempo=1.0):
-        """Enveloppes d'energie de la bande de la voix (300-3400 Hz) :
-        grossiere (100 ms, pour trouver le decalage) et fine (10 ms, pour
-        distinguer deux doublages qui partagent musique et effets)."""
-        ck = (path, ti, int(start), int(dur), round(tempo, 4))
+    def _voice_filter(ch, center=True):
+        """Filtre ffmpeg : canal CENTRAL (dialogues) pour une piste 5.1/7.1,
+        sinon mixage mono ; puis bande de la voix."""
+        src = "pan=mono|c0=FC" if (center and ch >= 6) else "aformat=channel_layouts=mono"
+        return src + ",highpass=f=100,lowpass=f=3400"
+
+    def _decode_voice(ffmpeg, path, ti, ch, start, dur, tempo=1.0):
+        """PCM 8 kHz mono de la voix d'une piste (canal central si 5.1)."""
+        ck = (path, ti, round(start, 2), round(dur, 2), round(tempo, 4))
         if ck in _AUDIO_ENV:
             return _AUDIO_ENV[ck]
-        import array, math
-        af = "highpass=f=300,lowpass=f=3400"
-        if abs(tempo - 1.0) > 1e-3:
-            af += f",atempo={tempo:.6f}"
-        r = _run_ffmpeg([ffmpeg, "-nostdin", "-v", "error", "-ss", f"{start:.2f}", "-i", path,
-                         "-map", f"0:a:{ti}", "-t", f"{dur:.2f}", "-af", af, "-ac", "1",
-                         "-ar", "8000", "-f", "s16le", "-"])
-        if r.returncode != 0 or len(r.stdout) < 32000:
-            raise RuntimeError((r.stderr or b"").decode("utf-8", "replace")[:200]
-                               or "audio illisible")
-        pcm = array.array("h")
-        pcm.frombytes(r.stdout[: len(r.stdout) // 2 * 2])
-        if sys.byteorder == "big":
-            pcm.byteswap()
-        e10 = [sum(x * x for x in pcm[i:i + 80]) / 80.0
-               for i in range(0, len(pcm) - 79, 80)]
+        import array
+        last = ""
+        for center in ((True, False) if ch >= 6 else (False,)):
+            af = _voice_filter(ch, center)
+            if abs(tempo - 1.0) > 1e-3:
+                af += f",atempo={tempo:.6f}"
+            r = _run_ffmpeg([ffmpeg, "-nostdin", "-v", "error", "-ss", f"{start:.2f}",
+                             "-i", path, "-map", f"0:a:{ti}", "-t", f"{dur:.2f}", "-af", af,
+                             "-ar", "8000", "-f", "s16le", "-"])
+            if r.returncode == 0 and len(r.stdout) >= 32000:
+                pcm = array.array("h")
+                pcm.frombytes(r.stdout[: len(r.stdout) // 2 * 2])
+                if sys.byteorder == "big":
+                    pcm.byteswap()
+                _AUDIO_ENV[ck] = (pcm, center)
+                return _AUDIO_ENV[ck]
+            last = (r.stderr or b"").decode("utf-8", "replace")[:200]
+        raise RuntimeError(last or "audio illisible")
+
+    def _voice_features(pcm):
+        """Par trame de 10 ms : enveloppe d'energie (dB normalisee, fine et
+        grossiere a 100 ms) et detection de PAROLE : trame voisee = energie
+        nettement au-dessus du fond ET peu de passages par zero (son tonal,
+        pas un bruit large bande comme un bruitage), regroupee en syllabes
+        de 40 a 400 ms."""
+        import math
+        e10, z10 = [], []
+        for i in range(0, len(pcm) - 79, 80):
+            fr_ = pcm[i:i + 80]
+            e10.append(sum(x * x for x in fr_) / 80.0)
+            z10.append(sum(1 for p, q in zip(fr_, fr_[1:]) if (p < 0) != (q < 0)))
+        srt = sorted(e10)
+        floor = srt[len(srt) // 5] if srt else 0.0
+        top = srt[int(len(srt) * 0.98)] if srt else 0.0
+        thr = max(floor * 6.0, top * 0.01, 1e4)
+        voiced = [e > thr and z <= 20 for e, z in zip(e10, z10)]
+        # syllabes : suites voisees de 4 a 40 trames
+        onset = [False] * len(voiced)
+        i = 0
+        while i < len(voiced):
+            if voiced[i]:
+                j = i
+                while j < len(voiced) and voiced[j]:
+                    j += 1
+                if 4 <= j - i <= 40:
+                    onset[i] = True
+                i = j
+            else:
+                i += 1
         e100 = [sum(e10[i:i + 10]) / 10.0 for i in range(0, len(e10) - 9, 10)]
-        fine = _norm([10 * math.log10(e + 1.0) for e in e10])
-        coarse = _norm([10 * math.log10(e + 1.0) for e in e100])
-        _AUDIO_ENV[ck] = (coarse, fine)
-        return _AUDIO_ENV[ck]
+        return {"fine": _norm([10 * math.log10(e + 1.0) for e in e10]),
+                "coarse": _norm([10 * math.log10(e + 1.0) for e in e100]),
+                "voiced": voiced, "onset": onset}
+
+    def _speech_score(f, s, w):
+        """Score de parole d'une fenetre [s, s+w) : part de trames voisees x
+        rythme syllabique (2 a 8 syllabes/s typique d'un dialogue). 0 si ce
+        n'est pas de la parole."""
+        v = sum(f["voiced"][s:s + w]) / w
+        rate = sum(f["onset"][s:s + w]) / (w / 100.0)
+        if v < 0.15 or rate < 1.0 or rate > 9.0:
+            return 0.0
+        return v * min(rate, 6.0) / 6.0
+
+    def _local_corr(a, b):
+        n = min(len(a), len(b))
+        if n < 50:
+            return -1.0
+        a, b = _norm(a[:n]), _norm(b[:n])
+        return sum(p * q for p, q in zip(a, b)) / n
 
     def _corr_at(a, b, lag):
         """Correlation de a[i] avec b[i - lag] (lag > 0 : b est en avance)."""
@@ -5641,40 +5718,42 @@ def _init_doublons():
         """Correlation maximale entre deux enveloppes (decalage +/- max_lag)."""
         return max(0.0, min(1.0, max(_corr_at(a, b, l) for l in range(-max_lag, max_lag + 1))))
 
-    def _match_envelopes(ea, eb):
-        """(similarite, decalage fin en 10 ms) : decalage grossier +/- 30 s,
-        puis affinage +/- 150 ms sur l'enveloppe fine."""
-        ca, fa = ea
-        cb, fb = eb
-        cl = max(range(-300, 301), key=lambda l: _corr_at(ca, cb, l))
-        fl = max(range(cl * 10 - 15, cl * 10 + 16), key=lambda l: _corr_at(fa, fb, l))
-        return max(0.0, min(1.0, _corr_at(fa, fb, fl))), fl
-
-    def _pick_segments(fa, fb, fl, n=3, win=800):
-        """Debuts (index fins de A) de n extraits de 8 s : la ou il y a de la
-        voix, de preference la ou les deux versions different le plus."""
-        cands = []
-        for s in range(0, len(fa) - win, 100):
+    def _compare_region(fa, fb):
+        """Aligne deux zones (decalage grossier +/- 30 s puis fin a 10 ms) et
+        compare le son UNIQUEMENT pendant la parole (fenetres de 4 s).
+        Retourne (sims des fenetres parlees, decalage fin, fenetres 8 s
+        candidates [(score, debut)])."""
+        cl = max(range(-300, 301), key=lambda l: _corr_at(fa["coarse"], fb["coarse"], l))
+        fl = max(range(cl * 10 - 15, cl * 10 + 16),
+                 key=lambda l: _corr_at(fa["fine"], fb["fine"], l))
+        n_a, n_b = len(fa["fine"]), len(fb["fine"])
+        sims = []
+        for s in range(0, n_a - 400, 100):
             sb = s - fl
-            if sb < 0 or sb + win > len(fb):
+            if sb < 0 or sb + 400 > n_b:
                 continue
-            seg_a, seg_b = fa[s:s + win], fb[sb:sb + win]
-            loud = sum(seg_a) / win
-            loc = sum(p * q for p, q in zip(seg_a, seg_b)) / win
-            cands.append((loud + (1.0 - loc), s))
-        picked = []
-        for _sc, s in sorted(cands, reverse=True):
-            if all(abs(s - p) >= win for p in picked):
-                picked.append(s)
-            if len(picked) == n:
-                break
-        return sorted(picked)
+            if _speech_score(fa, s, 400) <= 0 and _speech_score(fb, sb, 400) <= 0:
+                continue           # pas de parole : bruitages/musique communs
+            sims.append(_local_corr(fa["fine"][s:s + 400], fb["fine"][sb:sb + 400]))
+        cands = []
+        for s in range(0, n_a - 800, 100):
+            sb = s - fl
+            if sb < 0 or sb + 800 > n_b:
+                continue
+            sc = _speech_score(fa, s, 800)
+            if sc > 0:
+                cands.append((sc, s))
+        return sims, fl, cands
+
+    SPEECH_MIN_WIN = 3      # fenetres parlees de 4 s minimum pour conclure
 
     def analyze_group_audio(items, progress=None):
         """Compare le son reel de TOUTES les pistes francaises de chaque
-        version a celles des autres versions (90 s au milieu du film, bande
-        de la voix), puis genere un fichier audio comparatif par piste.
+        version a celles des autres versions, PENDANT LES DIALOGUES seulement
+        (canal central des pistes 5.1, detection de la parole, 3 zones du
+        film), puis genere un fichier audio comparatif par piste.
         Remplit _AUDIO_CMP et _AUDIO_FILES. Retourne (ok, message)."""
+        import statistics
         ffmpeg = find_ffmpeg()
         if not ffmpeg:
             return False, _L("ffmpeg introuvable : installez FFmpeg (ffmpeg.exe à côté "
@@ -5692,19 +5771,18 @@ def _init_doublons():
             return False, _L("Moins de deux versions avec une piste française : rien à comparer.",
                              "Fewer than two versions with a French track: nothing to compare.")
         pairs = [(a, b) for i, a in enumerate(ids) for b in ids[i + 1:]]
-        dur = 90
+        zone = 60.0
         for n_pair, (a, b) in enumerate(pairs, 1):
             da = mds[a]["duration_s"] or 0
             db = mds[b]["duration_s"] or 0
-            start_a = max(30, min(900, int(da * 0.25))) if da else 300
             ratio = (db / da) if da and db else 1.0
             pal = (abs(ratio - 23.976 / 25) < 0.006 or abs(ratio - 25 / 23.976) < 0.006)
             if pal:
-                # rapport EXACT (les durees Emby sont arrondies a la seconde :
-                # 0,2 % d'erreur suffit a desaligner l'enveloppe fine sur 90 s)
+                # rapport EXACT (les durees Emby sont arrondies a la seconde)
                 ratio = 23.976 / 25 if ratio < 1 else 25 / 23.976
             tempo = ratio if pal else 1.0
-            start_b = start_a * ratio if pal else start_a
+            ref = da or 3600
+            starts_a = [max(20.0, min(ref - zone - 5, ref * p)) for p in (0.2, 0.45, 0.7)]
             note = ""
             if pal:
                 note = _L("vitesses différentes (PAL 25 i/s / 23,976 i/s), compensées pour "
@@ -5718,23 +5796,41 @@ def _init_doublons():
             rows = []
             for ta in _fr_tracks(mds[a]):
                 for tb in _fr_tracks(mds[b]):
+                    sims, cands, centers = [], [], []
                     try:
-                        ea = _audio_envelopes(ffmpeg, paths[a], ta["index"], start_a, dur)
-                        eb = _audio_envelopes(ffmpeg, paths[b], tb["index"], start_b,
-                                              dur * tempo, tempo)
+                        for st_a in starts_a:
+                            st_b = st_a * ratio if pal else st_a
+                            pa, ca = _decode_voice(ffmpeg, paths[a], ta["index"],
+                                                   _ch_num(ta["channels"]), st_a, zone)
+                            pb, cb = _decode_voice(ffmpeg, paths[b], tb["index"],
+                                                   _ch_num(tb["channels"]), st_b,
+                                                   zone * tempo, tempo)
+                            centers.append(ca and cb)
+                            s_, fl, c_ = _compare_region(_voice_features(pa), _voice_features(pb))
+                            sims += s_
+                            cands += [(sc, st_a + s * 0.01, st_b + (s - fl) * 0.01 * tempo)
+                                      for sc, s in c_]
                     except Exception as e:
                         return False, _L(f"Analyse impossible : {e}", f"Analysis failed: {e}")
-                    sim, fl = _match_envelopes(ea, eb)
-                    segs = [(start_a + s * 0.01, start_b + (s - fl) * 0.01 * tempo)
-                            for s in _pick_segments(ea[1], eb[1], fl)]
+                    no_speech = len(sims) < SPEECH_MIN_WIN
+                    sim = statistics.median(sims) if sims else 0.0
+                    segs = []
+                    for sc, t_a, t_b in sorted(cands, reverse=True):
+                        if all(abs(t_a - x) >= 8.0 for x, _ in segs):
+                            segs.append((t_a, t_b))
+                        if len(segs) == 3:
+                            break
                     rows.append({"ia": ta["index"], "ib": tb["index"],
                                  "va": ta["variant"], "vb": tb["variant"],
                                  "la": track_label(ta), "lb": track_label(tb),
-                                 "sim": sim, "lag": fl / 100.0, "segs": segs})
+                                 "cha": _ch_num(ta["channels"]), "chb": _ch_num(tb["channels"]),
+                                 "sim": max(0.0, min(1.0, sim)), "lag": 0.0,
+                                 "speech_s": len(sims), "no_speech": no_speech,
+                                 "center": all(centers), "segs": sorted(segs)})
             _AUDIO_CMP[(a, b)] = {"rows": rows, "note": note}
             # un fichier comparatif par piste francaise de A (meilleure correspondance)
             seen = set()
-            for r in sorted(rows, key=lambda r: -r["sim"]):
+            for r in sorted(rows, key=lambda r: (r["no_speech"], -r["sim"])):
                 if r["ia"] in seen or not r["segs"]:
                     continue
                 seen.add(r["ia"])
@@ -5784,9 +5880,12 @@ def _init_doublons():
                 p = tmp / f"mix{n_seg}.wav"
                 # chaque version : mono (pistes 5.1 descendues), normalisee,
                 # puis placee a gauche (v1) / a droite (v2, retardee de 1 s)
-                one = "afade=t=in:d=0.08,dynaudnorm,aformat=channel_layouts=mono"
-                flt = (f"[0:a:{r['ia']}]{one},pan=stereo|c0=c0|c1=0.35*c0[v1];"
-                       f"[1:a:{r['ib']}]{one},pan=stereo|c0=0.35*c0|c1=c0,"
+                def one(ch):
+                    src_ = ("pan=mono|c0=FC" if ch >= 6 and r.get("center", True)
+                            else "aformat=channel_layouts=mono")
+                    return f"afade=t=in:d=0.08,{src_},dynaudnorm"
+                flt = (f"[0:a:{r['ia']}]{one(r.get('cha', 2))},pan=stereo|c0=c0|c1=0.35*c0[v1];"
+                       f"[1:a:{r['ib']}]{one(r.get('chb', 2))},pan=stereo|c0=0.35*c0|c1=c0,"
                        f"adelay={dms}|{dms}[v2];"
                        f"[v1][v2]amix=inputs=2:duration=longest:dropout_transition=0,"
                        f"volume=2[out]")

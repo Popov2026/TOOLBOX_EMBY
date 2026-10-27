@@ -77,8 +77,9 @@ sans redémarrer. Le choix est mémorisé.
     vérifié identique (même doublage) ; sur les seules étiquettes, le verdict
     est au mieux *probable* ;
   - **Analyser son** (ffmpeg) : compare entre elles toutes les pistes
-    **françaises** de chaque version (90 s au milieu du film, bande de la
-    voix). Reconnaît un clone même réencodé, décalé ou en PAL, et signale une
+    **françaises** de chaque version, **uniquement pendant les dialogues**
+    (canal central des pistes 5.1, détection de la parole, 3 zones du film :
+    les bruitages et la musique, communs à toutes les versions, sont écartés). Reconnaît un clone même réencodé, décalé ou en PAL, et signale une
     **VFQ étiquetée VFF** (ou l'inverse) : même étiquette mais doublages
     différents, ou étiquettes différentes mais même doublage ;
   - **fichier audio comparatif** par film (`comparaisons_audio\*.m4a`, bouton
@@ -281,7 +282,9 @@ restart. The choice is remembered.
   - **DELETE (safe)** requires the **sound of the French tracks** to be checked
     identical (same dub); on labels alone the verdict is at best *likely*;
   - **Analyse sound** (ffmpeg): compares every **French** track of each version
-    with the others (90 s in the middle of the movie, voice band). Recognises a
+    with the others, **only during dialogue** (centre channel of 5.1 tracks,
+    speech detection, 3 zones of the movie: effects and music, shared by every
+    version, are ignored). Recognises a
     clone even re-encoded, shifted or PAL, and reports a **VFQ labelled VFF**
     (or the reverse): same label but different dubs, or different labels but
     same dub;

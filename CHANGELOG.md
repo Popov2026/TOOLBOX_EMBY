@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026.10.4
+
+### Français
+- **Analyse du son centrée sur les DIALOGUES :** sur un film à bruitages forts
+  (ex. *The Conjuring*), les extraits ne contenaient que des bruitages et la
+  comparaison pouvait conclure à tort « même doublage » (bruitages communs à
+  toutes les versions). Désormais :
+  - **canal central** des pistes 5.1 / 7.1 (là où sont mixés les dialogues) ;
+  - **détection de la parole** (sons voisés au rythme des syllabes) : le son
+    n'est comparé que pendant que quelqu'un parle ; bruitages larges bande,
+    chocs et nappes de musique sont écartés ;
+  - **3 zones** du film (20 %, 45 %, 70 %) au lieu d'une ;
+  - durée de dialogue comparée affichée ; sans assez de dialogue :
+    « pas assez de dialogue entendu », jamais « même doublage » ni « sûr ».
+- **Fichier comparatif :** extraits choisis pendant les dialogues, voix prise
+  sur le canal central.
+- « Meilleur son » : plus de canaux ou vrai saut de qualité (DTS > AC3) ; un
+  simple EAC3 face à AC3 ne compte plus.
+
+### English
+- **Sound analysis focused on DIALOGUE:** on a movie with loud sound effects
+  (e.g. *The Conjuring*), the clips only contained effects and the comparison
+  could wrongly conclude "same dub" (effects shared by every version). Now:
+  - **centre channel** of 5.1 / 7.1 tracks (where dialogue is mixed);
+  - **speech detection** (voiced sounds at syllable rate): sound is compared
+    only while someone speaks; broadband effects, bangs and music beds are
+    ignored;
+  - **3 zones** of the movie (20 %, 45 %, 70 %) instead of one;
+  - compared dialogue duration shown; without enough dialogue: "not enough
+    dialogue heard", never "same dub" nor "safe".
+- **Comparison file:** clips picked during dialogue, voice taken from the
+  centre channel.
+- "Better audio": more channels or a real quality jump (DTS > AC3); plain
+  EAC3 vs AC3 no longer counts.
+
 ## 2026.10.3
 
 ### Français
