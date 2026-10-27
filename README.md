@@ -66,10 +66,13 @@ sans redémarrer. Le choix est mémorisé.
   - chaque piste audio est identifiée : **VFF**, **VFQ**, **VF** (variante non
     précisée), **ENG**, **JPN**…, d'après le titre de la piste ou, à défaut,
     le nom du fichier (TRUEFRENCH, VFQ…) ;
-  - chaque groupe indique si les **pistes audio sont identiques** d'une
-    version à l'autre, et propose qui **GARDER**, qui **SUPPRIMER** (clone
-    *sûr* ou *probable*) et quoi **VÉRIFIER** (seule version VFQ mais de
-    moindre qualité, meilleur son sur la petite version…), raison au survol ;
+  - colonne **Pistes audio** dans chaque ligne de film, en couleur : **vert**
+    = pistes identiques à une autre version, **orange** = différence légère
+    (codec, canaux, piste en plus ou en moins), **rouge** = pistes françaises
+    différentes (VFF face à VFQ, autre doublage) ;
+  - colonne **Suggestion** : qui **GARDER**, qui **SUPPRIMER** (clone *sûr*
+    ou *probable*) et quoi **VÉRIFIER** (seule version VFQ mais de moindre
+    qualité, meilleur son sur la petite version…), raison au survol ;
   - **Langue préférée** (aucune / VFF / VFQ) : sans préférence, une version
     VFF et une version VFQ sont toutes deux gardées ; avec VFF, la version
     uniquement VFQ devient supprimable si une VFF au moins aussi bonne existe ;
@@ -272,8 +275,11 @@ restart. The choice is remembered.
   - each audio track is identified: **VFF**, **VFQ**, **VF** (variant not
     specified), **ENG**, **JPN**…, from the track title or, failing that, the
     file name (TRUEFRENCH, VFQ…);
-  - each group tells whether the **audio tracks are identical** between
-    versions and suggests what to **KEEP**, what to **DELETE** (*safe* or
+  - **Audio tracks** column in every movie row, coloured: **green** = same
+    tracks as another version, **orange** = slight difference (codec,
+    channels, extra or missing track), **red** = different French tracks (VFF
+    vs VFQ, another dub);
+  - **Suggestion** column: what to **KEEP**, what to **DELETE** (*safe* or
     *likely* clone) and what to **CHECK** (only VFQ version but lower quality,
     better sound on the smaller version…), reason on hover;
   - **Preferred language** (none / VFF / VFQ): without preference, a VFF and a

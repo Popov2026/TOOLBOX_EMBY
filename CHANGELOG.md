@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026.10.8
+
+### Français
+- **Doublons – couleurs des pistes audio :** la ligne « Pistes audio
+  identiques / différentes » sous le titre des groupes est retirée ; la
+  colonne « Pistes audio » de chaque fichier est colorée selon sa différence
+  avec la version la plus proche du groupe :
+  - **vert** : pistes identiques ;
+  - **orange** : différence légère (codec ou canaux différents, piste en plus
+    ou en moins - par ex. VFF+VFQ face à VFF seule, VF sans variante) ;
+  - **rouge** : totalement différent (aucun doublage français commun : VFF
+    face à VFQ, français absent d'un côté).
+  Après « Analyser son », c'est le son qui décide pour le français (même
+  étiquette mais autre doublage = rouge ; étiquettes VFF/VFQ mais même
+  doublage = vert). Raison détaillée au survol.
+
+### English
+- **Duplicates – audio track colours:** the "Identical / different audio
+  tracks" line under each group title is removed; each file's "Audio tracks"
+  column is coloured by its difference with the closest version of the group:
+  - **green**: identical tracks;
+  - **orange**: slight difference (different codec or channels, extra or
+    missing track - e.g. VFF+VFQ vs VFF only, VF with unknown variant);
+  - **red**: totally different (no common French dub: VFF vs VFQ, French
+    missing on one side).
+  After "Analyse sound", the sound decides for French (same label but another
+  dub = red; VFF/VFQ labels but same dub = green). Detailed reason on hover.
+
 ## 2026.10.7
 
 ### Français

@@ -28,7 +28,7 @@ Lignes de commande utiles :
     python emby_toolbox_dpg.pyw --mkv-selftest   tests du moteur de renommage
 """
 
-APP_VERSION = "2026.10.7"
+APP_VERSION = "2026.10.8"
 
 import dearpygui.dearpygui as dpg
 import threading, queue, json, os, sys, subprocess, time, socket
@@ -5467,6 +5467,100 @@ def _init_doublons():
                     out.append((f"#{num[a]} ↔ #{num[b]} : " + d["note"], (170, 170, 170), None))
         return out
 
+    AUDIO_LVL_COL = {0: (46, 204, 113), 1: (240, 160, 0), 2: (233, 69, 96)}
+
+    def audio_diff(md_x, md_y, rows=None):
+        """Niveau de difference des pistes audio de X par rapport a Y :
+        0 = identiques, 1 = difference legere (codec, canaux, piste non
+        francaise en plus/moins), 2 = totalement different (pistes francaises
+        differentes : VFF/VFQ, autre doublage, ou francais absent d'un cote).
+        rows : analyse du son X -> Y ; si elle existe, le SON decide pour le
+        francais. Retourne (niveau, raison)."""
+        sx = sorted(track_sig(tr) for tr in md_x.get("audio_tracks", []))
+        sy = sorted(track_sig(tr) for tr in md_y.get("audio_tracks", []))
+        fx = {tr["variant"] for tr in _fr_tracks(md_x)}
+        fy = {tr["variant"] for tr in _fr_tracks(md_y)}
+        dec = [r for r in (rows or []) if not r.get("no_speech")]
+        fr_same, why_fr = None, ""
+        if dec and fx and fy:
+            # le son : chaque piste francaise de X doit avoir son doublage dans Y
+            bests = {}
+            for r in dec:
+                bests[r["ia"]] = max(bests.get(r["ia"], 0.0), r["sim"])
+            if bests and all(v < SND_DIFF for v in bests.values()):
+                fr_same = False
+                why_fr = _L("doublage français différent (son)", "different French dub (sound)")
+            elif any(v < SND_DIFF for v in bests.values()) and \
+                    any(v >= SND_SAME for v in bests.values()):
+                return 1, _L("un doublage français en plus d'un côté (son)",
+                             "one extra French dub on one side (sound)")
+            elif all(v >= SND_SAME for v in bests.values()):
+                fr_same = True
+        if fr_same is None:
+            if not fx and not fy:
+                fr_same = item_langs(md_x) == item_langs(md_y)
+                why_fr = "" if fr_same else _L("langues différentes", "different languages")
+            elif fx == fy and "VF" not in fx:
+                fr_same = True
+            elif fx and fy and ("VF" in fx or "VF" in fy):
+                return 1, _L("variante VF non précisée d'un côté (VFF ou VFQ ?)",
+                             "VF variant unknown on one side (VFF or VFQ?)")
+            elif fx & fy:
+                extra = sorted(fx ^ fy)
+                return 1, _L(f"piste française en plus d'un côté : {'+'.join(extra)}",
+                             f"extra French track on one side: {'+'.join(extra)}")
+            else:
+                fr_same = False
+                why_fr = _L(f"français différent : {'+'.join(sorted(fx)) or 'aucun'} / "
+                            f"{'+'.join(sorted(fy)) or 'aucun'}",
+                            f"different French: {'+'.join(sorted(fx)) or 'none'} / "
+                            f"{'+'.join(sorted(fy)) or 'none'}")
+        if not fr_same:
+            return 2, why_fr
+        if sx == sy:
+            return 0, _L("pistes identiques", "identical tracks")
+        if dec and fx != fy:
+            # meme doublage d'apres le son : on ignore l'etiquette VFF/VFQ/VF
+            nx = sorted(("FR" if v in _FR else v, c, ch) for v, c, ch in sx)
+            ny = sorted(("FR" if v in _FR else v, c, ch) for v, c, ch in sy)
+            if nx == ny:
+                return 0, _L("même doublage d'après le son (étiquettes "
+                             f"{'+'.join(sorted(fx))} / {'+'.join(sorted(fy))} différentes)",
+                             "same dub according to the sound (different labels "
+                             f"{'+'.join(sorted(fx))} / {'+'.join(sorted(fy))})")
+        if len(_fr_tracks(md_x)) != len(_fr_tracks(md_y)):
+            extra = sorted(fx ^ fy) or [_L("piste française", "French track")]
+            return 1, _L(f"piste française en plus d'un côté : {'+'.join(extra)}",
+                         f"extra French track on one side: {'+'.join(extra)}")
+        lx, ly = item_langs(md_x), item_langs(md_y)
+        if dec:
+            lx = {"FR" if v in _FR else v for v in lx}
+            ly = {"FR" if v in _FR else v for v in ly}
+        if lx != ly:
+            extra = sorted(lx ^ ly)
+            return 1, _L(f"piste(s) en plus ou en moins : {'+'.join(extra) or '?'}",
+                         f"extra or missing track(s): {'+'.join(extra) or '?'}")
+        return 1, _L("mêmes langues, codec ou canaux différents",
+                     "same languages, different codec or channels")
+
+    def audio_levels(items):
+        """{id: (niveau, raison)} : chaque version comparee a la version du
+        groupe qui lui ressemble le PLUS (un clone ressort en vert meme si le
+        groupe contient aussi une version tres differente)."""
+        mds = {it.get("Id", ""): get_rich_metadata(it) for it in items}
+        num = {it.get("Id", ""): i + 1 for i, it in enumerate(items)}
+        out = {}
+        for x in mds:
+            best = None
+            for y in mds:
+                if y == x:
+                    continue
+                lvl, why = audio_diff(mds[x], mds[y], pair_rows(x, y))
+                if best is None or lvl < best[0]:
+                    best = (lvl, _L(f"comparé à #{num[y]} : ", f"compared with #{num[y]}: ") + why)
+            out[x] = best or (0, "")
+        return out
+
     def group_suggestions(items, key=None):
         """Analyse un groupe de doublons. Retourne
         {"summary": str, "audio_identical": bool, "analysed": bool,
@@ -7506,10 +7600,8 @@ def _init_doublons():
 
                 # ── Analyse des pistes + suggestion ──────────────
                 sg = group_suggestions(items, key)
-                with dpg.group(horizontal=True):
-                    dpg.add_text(sg["summary"],
-                                 color=(120,220,140) if sg["audio_identical"] else (240,180,80))
-                    if key in _ANALYZING:
+                if key in _ANALYZING:
+                    with dpg.group(horizontal=True):
                         dpg.add_loading_indicator(style=1, radius=1.2, thickness=1.4,
                                                   color=(240,160,0))
                         dpg.add_text(_L("analyse du son...", "analysing sound..."),
@@ -7543,10 +7635,8 @@ def _init_doublons():
                                          width_fixed=True, init_width_or_weight=135)
                     dpg.add_table_column(label=t("col_actions"),width_fixed=True,   init_width_or_weight=245)
 
-                    # pistes audio : identiques dans toutes les versions ?
-                    _g_sigs=[sorted(track_sig(tr) for tr in get_rich_metadata(it).get("audio_tracks", []))
-                             for it in items]
-                    _audio_same_all = len({tuple(x) for x in _g_sigs}) == 1
+                    # pistes audio : niveau de difference avec la version la plus proche
+                    _adiff = audio_levels(items)
                     # valeurs du groupe pour surligner durées/tailles identiques
                     _g_durs=[get_rich_metadata(it)["duration_s"] for it in items]
                     _g_szs =[(get_rich_metadata(it)["size_bytes"] or get_api_size(it)) for it in items]
@@ -7575,7 +7665,8 @@ def _init_doublons():
                         }.get(_sv, ("", (136,136,136)))
                         _tracks = "  ·  ".join(track_label_short(tr)
                                                for tr in md.get("audio_tracks", [])) or "?"
-                        _tr_col = (120,220,140) if _audio_same_all else (255,220,100)
+                        _lvl, _lvl_why = _adiff.get(item_id, (0, ""))
+                        _tr_col = AUDIO_LVL_COL[_lvl]
                         for path in get_all_sources(item):
                             wp=to_win(path,prefix,unc) or path
                             fname=Path(path).name if path else "-"
@@ -7594,10 +7685,16 @@ def _init_doublons():
                                         + (f"   ({tr['title']})" if tr.get("title") else "")
                                         for i_, tr in enumerate(md.get("audio_tracks", [])))
                                         or "?", wrap=460)
-                                    dpg.add_text(_L("Vert : mêmes pistes dans toutes les versions du "
-                                                    "groupe.  Jaune : pistes différentes.",
-                                                    "Green: same tracks in every version of the "
-                                                    "group.  Yellow: different tracks."),
+                                    if _lvl_why:
+                                        dpg.add_text(_lvl_why, color=_tr_col, wrap=460)
+                                    dpg.add_text(_L("Vert : identique à une autre version.  Orange : "
+                                                    "différence légère (codec, canaux, piste non "
+                                                    "française en plus/moins).  Rouge : pistes "
+                                                    "françaises différentes (VFF/VFQ, doublage).",
+                                                    "Green: identical to another version.  Orange: "
+                                                    "slight difference (codec, channels, extra/missing "
+                                                    "non-French track).  Red: different French tracks "
+                                                    "(VFF/VFQ, dub)."),
                                                  color=(136,136,170), wrap=460)
                                 dpg.add_text(dur, color=_dur_col)
                                 dpg.add_text(sz, color=_sz_col)
@@ -8526,6 +8623,7 @@ def _init_doublons():
         "audio_variant": audio_variant,
         "group_suggestions": group_suggestions,
         "rich_metadata": get_rich_metadata,
+        "audio_levels": audio_levels,
         "analyze_group_audio": analyze_group_audio,
         "render_results": render_results,
         "fr_report": fr_report,
