@@ -28,7 +28,7 @@ Lignes de commande utiles :
     python emby_toolbox_dpg.pyw --mkv-selftest   tests du moteur de renommage
 """
 
-APP_VERSION = "2026.10.6"
+APP_VERSION = "2026.10.7"
 
 import dearpygui.dearpygui as dpg
 import threading, queue, json, os, sys, subprocess, time, socket
@@ -7514,20 +7514,7 @@ def _init_doublons():
                                                   color=(240,160,0))
                         dpg.add_text(_L("analyse du son...", "analysing sound..."),
                                      color=(240,160,0))
-                parts = []
-                dels = [r for r in sg["items"].values() if r["verdict"] == "delete"]
-                chks = [r for r in sg["items"].values() if r["verdict"] == "check"]
-                keeps = [r for r in sg["items"].values() if r["verdict"] == "keep"]
-                if keeps:
-                    parts.append(_L("garder ", "keep ") + ", ".join(f"#{r['num']}" for r in keeps))
-                if dels:
-                    parts.append(_L("supprimer ", "delete ") + ", ".join(
-                        f"#{r['num']}" + (_L(" (sûr)", " (safe)") if r["confidence"] == "sure"
-                                          else _L(" (probable)", " (likely)")) for r in dels))
-                if chks:
-                    parts.append(_L("à vérifier ", "to check ") + ", ".join(f"#{r['num']}" for r in chks))
-                dpg.add_text(_L("Suggestion : ", "Suggestion: ") + "  ·  ".join(parts),
-                             color=(233,69,96) if dels else (170,170,170))
+                # (la suggestion par fichier est dans la colonne « Suggestion »)
                 # compte rendu de l'analyse du son des pistes francaises
                 _rep = fr_report(items)
                 if _rep:

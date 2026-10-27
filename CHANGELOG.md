@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026.10.7
+
+### Français
+- **Doublons :** la ligne rouge « Suggestion : garder #1 · supprimer #2 » sous
+  le titre de chaque groupe est retirée ; la suggestion reste dans la colonne
+  « Suggestion » du tableau.
+
+### English
+- **Duplicates:** the red "Suggestion: keep #1 · delete #2" line under each
+  group title is removed; the suggestion stays in the table's "Suggestion"
+  column.
+
 ## 2026.10.6
 
 ### Français
