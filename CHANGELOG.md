@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026.10.1
+
+### Français
+- **Doublons – suggestions de suppression des clones :** langue de chaque piste
+  (VFF / VFQ / VF / ENG…), pistes audio identiques ou non, verdict par fichier
+  (GARDER / SUPPRIMER sûr ou probable / À VÉRIFIER) avec la raison, langue
+  préférée (VFF ou VFQ), fenêtre « Suggestions de suppression » avec
+  suppression groupée après confirmation.
+- **Doublons – « Analyser son » :** comparaison du son réel des pistes avec
+  ffmpeg (clone réencodé ou décalé reconnu, doublage mal étiqueté repéré) ;
+  résultat repris dans la suggestion et dans la fenêtre « Audio ».
+- **Correction :** une vidéo 1280×720 était classée « 1080p » (le plus grand
+  côté de l'image était comparé à 1080) ; elle est maintenant classée 720p.
+
+### English
+- **Duplicates – clone deletion suggestions:** language of each track
+  (VFF / VFQ / VF / ENG…), identical audio tracks or not, verdict per file
+  (KEEP / DELETE safe or likely / TO CHECK) with the reason, preferred language
+  (VFF or VFQ), "Deletion suggestions" window with batch deletion after
+  confirmation.
+- **Duplicates – "Analyse sound":** compares the real sound of the tracks with
+  ffmpeg (re-encoded or shifted clone recognised, wrongly labelled dub
+  spotted); the result is used in the suggestion and in the "Audio" window.
+- **Fix:** a 1280×720 video was classified "1080p" (the longest side of the
+  picture was compared to 1080); it is now classified 720p.
+
 ## 2026.10.0
 
 ### Français

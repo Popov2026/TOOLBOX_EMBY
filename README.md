@@ -62,6 +62,23 @@ sans redémarrer. Le choix est mémorisé.
   l'API Emby (retirer de la médiathèque ou supprimer le fichier), avec
   confirmation. Les suppressions lentes sur NAS ne déclenchent plus de faux
   timeout.
+- **Suggestions de suppression des clones** :
+  - chaque piste audio est identifiée : **VFF**, **VFQ**, **VF** (variante non
+    précisée), **ENG**, **JPN**…, d'après le titre de la piste ou, à défaut,
+    le nom du fichier (TRUEFRENCH, VFQ…) ;
+  - chaque groupe indique si les **pistes audio sont identiques** d'une
+    version à l'autre, et propose qui **GARDER**, qui **SUPPRIMER** (clone
+    *sûr* ou *probable*) et quoi **VÉRIFIER** (seule version VFQ mais de
+    moindre qualité, meilleur son sur la petite version…), raison au survol ;
+  - **Langue préférée** (aucune / VFF / VFQ) : sans préférence, une version
+    VFF et une version VFQ sont toutes deux gardées ; avec VFF, la version
+    uniquement VFQ devient supprimable si une VFF au moins aussi bonne existe ;
+  - **Analyser son** (ffmpeg) : compare le son réel des pistes (90 s au milieu
+    du film). Reconnaît un vrai clone même réencodé ou décalé, et repère un
+    doublage différent mal étiqueté ; le résultat confirme ou corrige la
+    suggestion ;
+  - fenêtre **Suggestions de suppression** : tous les clones du scan, cases à
+    cocher (sûrs cochés), suppression groupée après confirmation.
 - Sauvegarde / rechargement du scan (hors ligne), export **HTML** ou **CSV**,
   rafraîchissement des médiathèques Emby.
 
@@ -241,6 +258,23 @@ restart. The choice is remembered.
 - Per file: play, open folder, copy path, **delete** through the Emby API
   (remove from library or delete the file), with confirmation. Slow deletions
   on a NAS no longer raise a false timeout.
+- **Clone deletion suggestions**:
+  - each audio track is identified: **VFF**, **VFQ**, **VF** (variant not
+    specified), **ENG**, **JPN**…, from the track title or, failing that, the
+    file name (TRUEFRENCH, VFQ…);
+  - each group tells whether the **audio tracks are identical** between
+    versions and suggests what to **KEEP**, what to **DELETE** (*safe* or
+    *likely* clone) and what to **CHECK** (only VFQ version but lower quality,
+    better sound on the smaller version…), reason on hover;
+  - **Preferred language** (none / VFF / VFQ): without preference, a VFF and a
+    VFQ version are both kept; with VFF, the VFQ-only version becomes
+    deletable when a VFF version at least as good exists;
+  - **Analyse sound** (ffmpeg): compares the real sound of the tracks (90 s in
+    the middle of the movie). Recognises a true clone even re-encoded or
+    shifted, and spots a different dub with a wrong label; the result confirms
+    or corrects the suggestion;
+  - **Deletion suggestions** window: every clone of the scan, checkboxes (safe
+    ones ticked), batch deletion after confirmation.
 - Save / reload the scan (offline), **HTML** or **CSV** export, Emby library
   refresh.
 

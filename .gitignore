@@ -3,3 +3,12 @@ build/
 dist/
 *.spec
 version_info.txt
+# fichiers personnels de l'outil (config, cles, bases, journaux)
+*.ini
+*.key
+*.db
+*.db-*
+*.log
+emby_toolbox_*.json
+emby_toolbox_dpg_*.json
+emby_enrich_cache.json*

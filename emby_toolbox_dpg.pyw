@@ -28,7 +28,7 @@ Lignes de commande utiles :
     python emby_toolbox_dpg.pyw --mkv-selftest   tests du moteur de renommage
 """
 
-APP_VERSION = "2026.10.0"
+APP_VERSION = "2026.10.1"
 
 import dearpygui.dearpygui as dpg
 import threading, queue, json, os, sys, subprocess, time, socket
@@ -5053,6 +5053,42 @@ def _init_doublons():
         r'unrated|uncensored|final[.\s_-]?cut|redux|remastered|'
         r'special[.\s_-]?edition|3D|SBS|OU|MVC|bonus|extras?|featurette)\b', re.I)
 
+    # ── Langue / variante d'une piste audio (VFF, VFQ, VF, ENG...) ────
+    _FR_CODES = {"fre", "fra", "fr", "french", "francais", "français", "fr-fr", "fr-ca"}
+    _VFQ_RE  = re.compile(r"\bvfq\b|qu[eé]b|canad|\bfr[-_ ]?ca\b|\(ca\)", re.I)
+    _VFF_RE  = re.compile(r"\bvff\b|\bvfi\b|truefrench|\bfrance\b|\bfr[-_ ]?fr\b|parisi", re.I)
+    _COMM_RE = re.compile(r"comment", re.I)
+    _LANG_MAP = {"en": "ENG", "eng": "ENG", "english": "ENG", "ja": "JPN", "jpn": "JPN",
+                 "de": "GER", "ger": "GER", "deu": "GER", "es": "SPA", "spa": "SPA",
+                 "it": "ITA", "ita": "ITA", "ko": "KOR", "kor": "KOR",
+                 "zh": "CHI", "chi": "CHI", "zho": "CHI"}
+
+    def audio_variant(lang, title, fname="", n_fr=1):
+        """'VFF', 'VFQ', 'VF' (francais, variante inconnue), 'ENG', 'JPN'...,
+        'COMM' (commentaire) ou '?'. Le titre de la piste prime ; a defaut,
+        le nom du fichier sert quand il n'y a qu'une seule piste francaise."""
+        lg = (lang or "").strip().lower()
+        tt = title or ""
+        if _COMM_RE.search(tt):
+            return "COMM"
+        is_fr = lg in _FR_CODES or (lg in ("", "?", "und")
+                                    and re.search(r"fran|\bvf", tt, re.I))
+        if is_fr:
+            if _VFQ_RE.search(tt):
+                return "VFQ"
+            if _VFF_RE.search(tt):
+                return "VFF"
+            if n_fr <= 1:
+                q, f = bool(_VFQ_RE.search(fname)), bool(_VFF_RE.search(fname))
+                if q and not f:
+                    return "VFQ"
+                if f and not q:
+                    return "VFF"
+            return "VF"
+        if lg in ("", "?", "und", "unknown"):
+            return "?"
+        return _LANG_MAP.get(lg, lg.upper())
+
     def _nc(c):
         c=(c or "").upper()
         if c in ("HEVC","H265","H.265","X265"): return "HEVC"
@@ -5089,13 +5125,23 @@ def _init_doublons():
 
         # Toutes les pistes audio
         audio_streams = [s for s in streams if s.get("Type")=="Audio"]
-        for a in audio_streams:
+        _paths = get_all_sources(movie)
+        _fn = Path(_paths[0]).name if _paths else movie.get("Name", "")
+        n_fr = sum(1 for a in audio_streams
+                   if (a.get("Language") or "").strip().lower() in _FR_CODES)
+        for ai, a in enumerate(audio_streams):
             lang  = (a.get("Language") or "").strip().upper() or "?"
             title = (a.get("DisplayTitle") or a.get("Title") or "").strip()
             codec = (a.get("Codec") or "?").upper()
             ch    = str(a.get("Channels","?"))
             md["audio_tracks"].append({"lang":lang,"codec":codec,
-                                       "channels":ch,"title":title})
+                                       "channels":ch,"title":title,
+                                       "index": ai,
+                                       "bitrate": (a.get("BitRate") or 0) // 1000,
+                                       "variant": audio_variant(
+                                           lang, (a.get("Title") or "") + " "
+                                           + (a.get("DisplayTitle") or ""),
+                                           _fn, n_fr)})
 
         # Résumé piste principale (compatibilité)
         if audio_streams:
@@ -5105,8 +5151,10 @@ def _init_doublons():
 
         if video:
             w,h = video.get("Width",0) or 0, video.get("Height",0) or 0
-            mx = max(w,h)
-            tier = 4 if mx>=2160 else 3 if mx>=1080 else 2 if mx>=720 else 1 if mx>0 else 0
+            # largeur OU hauteur : 1280x720 = 720p (avant, max(w,h)=1280 le
+            # classait 1080p) ; 1920x800 (scope) reste 1080p.
+            tier = (4 if w >= 3200 or h >= 2000 else 3 if w >= 1800 or h >= 1000
+                    else 2 if w >= 1200 or h >= 700 else 1 if (w or h) else 0)
             md["width"]=w; md["height"]=h; md["res_tier"]=tier
             md["vcodec"] = _nc(video.get("Codec",""))
             md["hdr"]    = video.get("VideoRange","").upper() not in ("SDR","")
@@ -5214,6 +5262,566 @@ def _init_doublons():
                     reasons.append("bonus/extras detecte"); break
 
         return bool(reasons)," + ".join(reasons)
+
+    # ══════════════════════════════════════════════════════════════
+    #  SUGGESTIONS DE SUPPRESSION (langues VFF/VFQ, pistes audio)
+    # ══════════════════════════════════════════════════════════════
+    def _L(fr, en):
+        return en if G.get("lang") == "en" else fr
+
+    _VCODEC_RANK = {"AV1": 4, "HEVC": 3, "H265": 3, "X265": 3, "VP9": 2,
+                    "H264": 1, "AVC": 1, "X264": 1}
+    _ACODEC_RANK = {"TRUEHD": 6, "DTS-HD MA": 6, "DTSHD": 6, "DTS-HD": 6, "FLAC": 5,
+                    "PCM": 5, "LPCM": 5, "DTS": 4, "EAC3": 3, "E-AC3": 3,
+                    "AC3": 2, "AAC": 1, "OPUS": 1, "VORBIS": 1, "MP3": 0, "MP2": 0}
+
+    def _ch_num(ch):
+        try:
+            return int(str(ch).split(".")[0])
+        except Exception:
+            return 0
+
+    def track_sig(tr):
+        """Signature d'une piste : (langue/variante, codec, canaux)."""
+        return (tr.get("variant") or tr.get("lang") or "?",
+                (tr.get("codec") or "?").upper(), _ch_num(tr.get("channels")))
+
+    def track_label(tr):
+        v, c, ch = track_sig(tr)
+        return f"{v} {c} {ch}ch" if ch else f"{v} {c}"
+
+    def item_langs(md):
+        """Langues/variantes reelles d'une version (commentaires exclus)."""
+        return {tr["variant"] for tr in md.get("audio_tracks", [])
+                if tr.get("variant") not in (None, "", "?", "COMM")}
+
+    def _audio_q(tr):
+        return (_ch_num(tr.get("channels")),
+                _ACODEC_RANK.get((tr.get("codec") or "").upper(), 1),
+                tr.get("bitrate") or 0)
+
+    def _best_audio(md, variant):
+        tr = [t_ for t_ in md.get("audio_tracks", []) if t_.get("variant") == variant]
+        return max(tr, key=_audio_q) if tr else None
+
+    def _video_q(md):
+        return (md["res_tier"], int(bool(md["hdr"])),
+                _VCODEC_RANK.get((md["vcodec"] or "").upper(), 0))
+
+    def _covers(md_k, md_x, pref):
+        """Vrai si la version K contient toutes les langues de X.
+        Retourne (couvre, approximatif)."""
+        lk, lx = item_langs(md_k), item_langs(md_x)
+        approx = False
+        fr_k = {v for v in lk if v in ("VFF", "VFQ", "VF")}
+        for lang in lx:
+            if lang in lk:
+                continue
+            if lang in ("VFF", "VFQ", "VF") and fr_k:
+                # VF (variante inconnue) <-> VFF/VFQ : couvert mais incertain
+                if lang == "VF" or "VF" in fr_k:
+                    approx = True
+                    continue
+                # langue preferee : la variante non preferee est couverte
+                if pref and lang != pref and pref in fr_k:
+                    continue
+            return False, approx
+        return True, approx
+
+    def _lang_txt(md):
+        ls = sorted(item_langs(md))
+        return "+".join(ls) if ls else "?"
+
+    def group_suggestions(items, key=None):
+        """Analyse un groupe de doublons. Retourne
+        {"summary": str, "audio_identical": bool,
+         "items": {item_id: {"verdict": keep|delete|check, "confidence": sure|probable|"",
+                             "reason": str, "keeper": id|None, "num": n}}}"""
+        pref = G.get("pref_lang", "")
+        mds = {it.get("Id", ""): get_rich_metadata(it) for it in items}
+        num = {it.get("Id", ""): i + 1 for i, it in enumerate(items)}
+        sigs = {iid: sorted(track_sig(tr) for tr in md.get("audio_tracks", []))
+                for iid, md in mds.items()}
+        same_audio = len({tuple(s) for s in sigs.values()}) == 1 and bool(
+            next(iter(sigs.values()), None))
+        langsets = {iid: _lang_txt(md) for iid, md in mds.items()}
+
+        def rank(it):
+            md = mds[it.get("Id", "")]
+            return (_video_q(md), len(item_langs(md)),
+                    md["bitrate_kbps"] or 0, md["size_bytes"] or 0)
+        order = sorted(items, key=rank, reverse=True)
+
+        res, keepers = {}, []
+        for it in order:
+            iid = it.get("Id", "")
+            mx = mds[iid]
+            best_k, approx_k = None, False
+            for k in keepers:
+                mk = mds[k]
+                cov, approx = _covers(mk, mx, pref)
+                if cov and mk["res_tier"] >= mx["res_tier"] and \
+                        int(bool(mk["hdr"])) >= int(bool(mx["hdr"])):
+                    best_k, approx_k = k, approx
+                    break
+            if best_k is None:
+                keepers.append(iid)
+                res[iid] = {"verdict": "keep", "confidence": "", "keeper": None,
+                            "reason": "", "num": num[iid]}
+                continue
+            mk = mds[best_k]
+            # la version X apporte-t-elle un meilleur son pour une langue ?
+            better_audio = []
+            for lang in item_langs(mx):
+                ax, ak = _best_audio(mx, lang), _best_audio(mk, lang)
+                if ax and ak and _audio_q(ax)[:2] > _audio_q(ak)[:2]:
+                    better_audio.append(f"{track_label(ax)} > {track_label(ak)}")
+            sx = set(sigs[iid]); sk = set(sigs[best_k])
+            pure_clone = sx <= sk and not approx_k
+            vq_txt = (f"{mx['res_label'].split(' ')[0]} {mx['vcodec']}"
+                      + (" HDR" if mx["hdr"] else ""))
+            vk_txt = (f"{mk['res_label'].split(' ')[0]} {mk['vcodec']}"
+                      + (" HDR" if mk["hdr"] else ""))
+            if better_audio:
+                res[iid] = {"verdict": "check", "confidence": "", "keeper": best_k,
+                            "num": num[iid],
+                            "reason": _L(f"meilleur son que #{num[best_k]} : ",
+                                         f"better audio than #{num[best_k]}: ")
+                                      + "; ".join(better_audio)}
+                continue
+            if pure_clone:
+                why = _L(f"clone : toutes ses pistes ({langsets[iid]}) existent dans "
+                         f"#{num[best_k]}", f"clone: all its tracks ({langsets[iid]}) "
+                         f"exist in #{num[best_k]}")
+            else:
+                why = _L(f"langues {langsets[iid]} couvertes par #{num[best_k]} "
+                         f"({langsets[best_k]})", f"languages {langsets[iid]} covered "
+                         f"by #{num[best_k]} ({langsets[best_k]})")
+                if approx_k:
+                    why += _L(" - variante VF non précisée", " - VF variant unknown")
+            if _video_q(mx) < _video_q(mk) or (mx["bitrate_kbps"] or 0) < (mk["bitrate_kbps"] or 0):
+                why += _L(f", qualité {vq_txt} ≤ {vk_txt}", f", quality {vq_txt} ≤ {vk_txt}")
+            else:
+                why += _L(", même qualité vidéo", ", same video quality")
+            res[iid] = {"verdict": "delete",
+                        "confidence": "sure" if pure_clone else "probable",
+                        "keeper": best_k, "num": num[iid], "reason": why}
+
+        # versions gardees uniquement pour une langue, mais de moindre qualite
+        if len(keepers) > 1:
+            top = mds[keepers[0]]
+            for k in keepers[1:]:
+                mk = mds[k]
+                uniq = item_langs(mk) - item_langs(top)
+                if _video_q(mk) < _video_q(top):
+                    res[k].update(verdict="check", reason=_L(
+                        f"seule version avec {'+'.join(sorted(uniq)) or '?'}, "
+                        f"mais qualité inférieure à #{num[keepers[0]]}",
+                        f"only version with {'+'.join(sorted(uniq)) or '?'}, "
+                        f"but lower quality than #{num[keepers[0]]}"))
+                else:
+                    res[k]["reason"] = _L(
+                        f"à garder : seule version avec {'+'.join(sorted(uniq)) or '?'}",
+                        f"keep: only version with {'+'.join(sorted(uniq)) or '?'}")
+        if keepers:
+            res[keepers[0]]["reason"] = res[keepers[0]]["reason"] or _L(
+                "meilleure version du groupe", "best version of the group")
+
+        # resultats de l'analyse approfondie (si lancee)
+        for iid, r in res.items():
+            k = r.get("keeper")
+            if not k:
+                continue
+            cmp_ = audio_cmp_between(iid, k)
+            if not cmp_:
+                continue
+            low = [c for c in cmp_ if c["sim"] < 0.85]
+            if low and r["verdict"] == "delete":
+                r.update(verdict="check", confidence="", reason=r["reason"] + _L(
+                    f" | analyse : son différent ({low[0]['label']} {low[0]['sim']:.0%})",
+                    f" | analysis: different sound ({low[0]['label']} {low[0]['sim']:.0%})"))
+            elif not low and r["verdict"] == "delete":
+                r.update(confidence="sure", reason=r["reason"] + _L(
+                    f" | analyse : son identique ({min(c['sim'] for c in cmp_):.0%})",
+                    f" | analysis: identical sound ({min(c['sim'] for c in cmp_):.0%})"))
+
+        # resume
+        if same_audio:
+            summary = _L("Pistes audio identiques : ", "Identical audio tracks: ") + \
+                " + ".join(track_label(tr) for tr in mds[order[0].get("Id", "")]["audio_tracks"])
+        else:
+            summary = _L("Pistes audio différentes : ", "Different audio tracks: ") + \
+                "  ·  ".join(f"#{num[i]} {langsets[i]}" for i in mds)
+        return {"summary": summary, "audio_identical": same_audio, "items": res}
+
+    # ── Analyse approfondie : comparaison reelle du son (ffmpeg) ──────
+    _AUDIO_ENV = {}     # (chemin, index piste) -> enveloppe normalisee
+    _AUDIO_CMP = {}     # (id_a, id_b) -> [{"label", "sim"}]
+
+    def audio_cmp_between(a, b):
+        return _AUDIO_CMP.get((a, b)) or _AUDIO_CMP.get((b, a))
+
+    def find_ffmpeg():
+        exe = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+        try:
+            fp = mkv_find_ffprobe("")
+        except Exception:
+            fp = ""
+        if fp:
+            cand = Path(fp).with_name(exe)
+            if cand.is_file():
+                return str(cand)
+        import shutil as _sh
+        return _sh.which("ffmpeg") or ""
+
+    def _audio_envelope(ffmpeg, path, ti, start, dur=90):
+        """Enveloppe d'energie (dB, fenetres de 100 ms) d'une piste audio,
+        normalisee (moyenne 0, ecart-type 1)."""
+        ck = (path, ti, int(start))
+        if ck in _AUDIO_ENV:
+            return _AUDIO_ENV[ck]
+        import array, math
+        cmd = [ffmpeg, "-nostdin", "-v", "error", "-ss", str(int(start)), "-i", path,
+               "-map", f"0:a:{ti}", "-t", str(dur), "-ac", "1", "-ar", "8000",
+               "-f", "s16le", "-"]
+        kw = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "timeout": 300}
+        if sys.platform == "win32":
+            kw["creationflags"] = 0x08000000      # CREATE_NO_WINDOW
+        r = subprocess.run(cmd, **kw)
+        if r.returncode != 0 or len(r.stdout) < 16000:
+            raise RuntimeError((r.stderr or b"").decode("utf-8", "replace")[:200]
+                               or "audio illisible")
+        pcm = array.array("h")
+        pcm.frombytes(r.stdout[: len(r.stdout) // 2 * 2])
+        if sys.byteorder == "big":
+            pcm.byteswap()
+        w = 800
+        env = []
+        for i in range(0, len(pcm) - w + 1, w):
+            seg = pcm[i:i + w]
+            e = sum(x * x for x in seg) / w
+            env.append(10 * math.log10(e + 1.0))
+        n = len(env)
+        mu = sum(env) / n
+        sd = math.sqrt(sum((x - mu) ** 2 for x in env) / n) or 1.0
+        env = [(x - mu) / sd for x in env]
+        _AUDIO_ENV[ck] = env
+        return env
+
+    def _env_similarity(a, b, max_lag=150):
+        """Correlation maximale entre deux enveloppes, decalage +/- 15 s."""
+        best = -1.0
+        n = min(len(a), len(b))
+        for lag in range(-max_lag, max_lag + 1):
+            if lag >= 0:
+                xa, xb = a[lag:n], b[:n - lag]
+            else:
+                xa, xb = a[:n + lag], b[-lag:n]
+            m = len(xa)
+            if m < 200:
+                continue
+            s = sum(p * q for p, q in zip(xa, xb)) / m
+            if s > best:
+                best = s
+        return max(0.0, min(1.0, best))
+
+    def analyze_group_audio(items, progress=None):
+        """Compare le son reel des pistes de chaque version a celles de la
+        meilleure version du groupe. Remplit _AUDIO_CMP. Retourne (ok, msg)."""
+        ffmpeg = find_ffmpeg()
+        if not ffmpeg:
+            return False, _L("ffmpeg introuvable : installez FFmpeg (ffmpeg.exe à côté "
+                             "de ffprobe.exe) pour l'analyse approfondie.",
+                             "ffmpeg not found: install FFmpeg (ffmpeg.exe next to "
+                             "ffprobe.exe) for the deep analysis.")
+        prefix, unc = G["nas_prefix"], G["nas_unc"]
+        mds = {it.get("Id", ""): get_rich_metadata(it) for it in items}
+        paths = {}
+        for it in items:
+            src = get_all_sources(it)
+            paths[it.get("Id", "")] = (to_win(src[0], prefix, unc) or src[0]) if src else ""
+        durs = [md["duration_s"] for md in mds.values() if md["duration_s"]]
+        start = max(30, min(900, int(min(durs) * 0.25))) if durs else 300
+        ids = [it.get("Id", "") for it in items]
+        pairs = [(a, b) for i, a in enumerate(ids) for b in ids[i + 1:]]
+        done = 0
+        for a, b in pairs:
+            out = []
+            for ta in mds[a]["audio_tracks"]:
+                cand = [tb for tb in mds[b]["audio_tracks"]
+                        if (ta["variant"] in ("VFF", "VFQ", "VF")) ==
+                           (tb["variant"] in ("VFF", "VFQ", "VF"))
+                        and (ta["variant"] == tb["variant"]
+                             or ta["variant"] in ("VFF", "VFQ", "VF"))]
+                if not cand:
+                    continue
+                try:
+                    ea = _audio_envelope(ffmpeg, paths[a], ta["index"], start)
+                    sims = []
+                    for tb in cand:
+                        eb = _audio_envelope(ffmpeg, paths[b], tb["index"], start)
+                        sims.append((_env_similarity(ea, eb), tb))
+                except Exception as e:
+                    return False, _L(f"Analyse impossible : {e}", f"Analysis failed: {e}")
+                sim, tb = max(sims, key=lambda x: x[0])
+                out.append({"label": f"{ta['variant']}/{tb['variant']}", "sim": sim,
+                            "a": track_label(ta), "b": track_label(tb)})
+            _AUDIO_CMP[(a, b)] = out
+            done += 1
+            if progress:
+                progress(done, len(pairs))
+        return True, ""
+
+    _ANALYZING = set()      # groupes dont l'analyse du son est en cours
+
+    def start_audio_analysis(key, items):
+        if key in _ANALYZING:
+            return
+        _ANALYZING.add(key)
+        title = (items[0].get("Name", "?") if items else "?")
+        _set_status(_L(f"Analyse du son : {title}...", f"Analysing sound: {title}..."),
+                    (240,160,0))
+        render_results()
+
+        def worker():
+            try:
+                ok, msg = analyze_group_audio(items, lambda d, n: ui(lambda d=d, n=n: _set_status(
+                    _L(f"Analyse du son : {title} ({d}/{n})", f"Analysing sound: {title} ({d}/{n})"),
+                    (240,160,0))))
+            except Exception as e:
+                ok, msg = False, str(e)
+            finally:
+                _ANALYZING.discard(key)
+
+            def done(ok=ok, msg=msg):
+                if ok:
+                    _set_status(_L(f"Analyse du son terminée : {title}",
+                                   f"Sound analysis done: {title}"), (46,204,113))
+                else:
+                    _set_status(_L("Analyse du son impossible", "Sound analysis failed"),
+                                (233,69,96))
+                    modal_err(_L("Analyse du son", "Sound analysis"), msg)
+                render_results()
+            ui(done)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def on_pref_lang(s, v, u):
+        G["pref_lang"] = {"VFF": "VFF", "VFQ": "VFQ"}.get(v, "")
+        save_dbl_prefs()
+        render_results()
+
+    # ── Fenetre « Suggestions de suppression » (tous les groupes) ──────
+    def show_suggestions_window():
+        nonlocal _mid; _mid += 1; tag = f"dbl_sug{_mid}"
+        url = G.get("emby_url", ""); key_ = G.get("api_key", "")
+        rows = []
+        # vrais doublons + versions intentionnelles (ces dernieres jamais
+        # cochees d'office : 4K/1080p/720p, HDR... selon les criteres)
+        groups = [(k, v, "") for k, v in G["dupes"].items()] + \
+                 [(k, v[0], v[1]) for k, v in G["multiqual"].items()]
+        for gkey, items, intent in groups:
+            if gkey in G["ignored"] or len(items) < 2:
+                continue
+            sg = group_suggestions(items, gkey)
+            by_id = {it.get("Id", ""): it for it in items}
+            for iid, r in sg["items"].items():
+                if r["verdict"] != "delete":
+                    continue
+                rows.append({"gkey": gkey, "item": by_id[iid], "r": r, "intent": intent,
+                             "keeper": by_id.get(r["keeper"])})
+        rows.sort(key=lambda x: (bool(x["intent"]), x["r"]["confidence"] != "sure",
+                                 (x["item"].get("Name") or "").lower()))
+        if not rows:
+            modal_info(_L("Suggestions", "Suggestions"),
+                       _L("Aucun clone à supprimer dans les groupes affichés.\n"
+                          "(Les groupes ignorés ne sont pas proposés.)",
+                          "No clone to delete in the groups shown.\n"
+                          "(Ignored groups are not proposed.)"))
+            return
+        n_sure = sum(1 for x in rows if x["r"]["confidence"] == "sure" and not x["intent"])
+
+        def _count():
+            n = sum(1 for i in range(len(rows)) if dpg.get_value(f"{tag}_c{i}"))
+            dpg.configure_item(f"{tag}_ok", enabled=n > 0, label=_L(
+                f"Supprimer la sélection ({n})", f"Delete selection ({n})"))
+        def _set(mode):
+            for i, x in enumerate(rows):
+                dpg.set_value(f"{tag}_c{i}", mode == "all" or
+                              (mode == "sure" and x["r"]["confidence"] == "sure"
+                               and not x["intent"]))
+            _count()
+        def _ask():
+            sel = [x for i, x in enumerate(rows) if dpg.get_value(f"{tag}_c{i}")]
+            delete_file = dpg.get_value(f"{tag}_mode") == _L(
+                "Supprimer les fichiers du disque", "Delete the files from disk")
+            confirm_batch_delete(sel, delete_file, tag)
+
+        vw, vh = 1200, 760
+        try:
+            vw = max(900, dpg.get_viewport_client_width() or vw)
+            vh = max(600, dpg.get_viewport_client_height() or vh)
+        except Exception:
+            pass
+        w, h = min(1250, vw - 40), min(720, vh - 40)
+        with dpg.window(label=_L("Suggestions de suppression des clones",
+                                 "Clone deletion suggestions"), tag=tag, modal=True,
+                        width=w, height=h, pos=[(vw - w) // 2, (vh - h) // 2]):
+            dpg.add_text(_L(f"{len(rows)} fichier(s) proposés à la suppression, dont {n_sure} clone(s) sûr(s) "
+                            "(cochés). Les versions intentionnelles (critères de l'onglet) sont "
+                            "listées à la fin, jamais cochées d'office. Rien n'est supprimé "
+                            "avant confirmation.",
+                            f"{len(rows)} file(s) proposed for deletion, {n_sure} safe clone(s) "
+                            "(ticked). Intentional versions (tab criteria) are listed at the "
+                            "end, never ticked by default. Nothing is deleted before "
+                            "confirmation."),
+                         color=(255,200,80), wrap=w - 30)
+            dpg.add_text(_L("sûr = toutes ses pistes audio existent à l'identique dans la version gardée, "
+                            "de qualité égale ou meilleure.  probable = langues couvertes mais pistes "
+                            "différentes : lancez « Analyser son » sur le groupe pour confirmer.",
+                            "safe = all its audio tracks exist identically in the kept version, of "
+                            "equal or better quality.  likely = languages covered but different "
+                            "tracks: run \"Analyse sound\" on the group to confirm."),
+                         color=(150,150,150), wrap=w - 30)
+            with dpg.group(horizontal=True):
+                dpg.add_button(label=_L("Cocher les sûrs", "Tick safe ones"), width=130,
+                               callback=lambda: _set("sure"))
+                dpg.add_button(label=_L("Tout cocher", "Tick all"), width=110,
+                               callback=lambda: _set("all"))
+                dpg.add_button(label=_L("Tout décocher", "Untick all"), width=120,
+                               callback=lambda: _set("none"))
+                dpg.add_spacer(width=20)
+                dpg.add_text(_L("Langue préférée :", "Preferred language:"), color=(136,136,170))
+                dpg.add_text(G.get("pref_lang") or _L("aucune", "none"), color=(170,221,255))
+            with dpg.child_window(height=-70, border=True):
+                with dpg.table(header_row=True, row_background=True, resizable=True,
+                               borders_innerH=True, policy=dpg.mvTable_SizingStretchProp):
+                    dpg.add_table_column(label="", width_fixed=True, init_width_or_weight=28)
+                    dpg.add_table_column(label=_L("Film", "Movie"), init_width_or_weight=0.18)
+                    dpg.add_table_column(label=_L("À supprimer", "To delete"), init_width_or_weight=0.28)
+                    dpg.add_table_column(label=_L("Gardé à la place", "Kept instead"), init_width_or_weight=0.28)
+                    dpg.add_table_column(label=_L("Confiance", "Confidence"), width_fixed=True,
+                                         init_width_or_weight=80)
+                    dpg.add_table_column(label=_L("Raison", "Reason"), init_width_or_weight=0.26)
+                    for i, x in enumerate(rows):
+                        it, kp, r = x["item"], x["keeper"], x["r"]
+                        mi = get_rich_metadata(it)
+                        mk = get_rich_metadata(kp) if kp else None
+                        def _desc(md, item):
+                            return (f"{_fname(item)}\n{md['res_label'].split(' ')[0]} {md['vcodec']}"
+                                    + (" HDR" if md["hdr"] else "") + f" · {fmt_size(md['size_bytes'])}"
+                                    + f" · {_lang_txt(md)}")
+                        sure = r["confidence"] == "sure"
+                        with dpg.table_row():
+                            dpg.add_checkbox(tag=f"{tag}_c{i}",
+                                             default_value=sure and not x["intent"],
+                                             callback=lambda: _count())
+                            dpg.add_text(f"{it.get('Name','?')} ({it.get('ProductionYear','')})")
+                            dpg.add_text(f"#{r['num']} " + _desc(mi, it), color=(233,120,120))
+                            dpg.add_text((f"#{sg_num(x)} " + _desc(mk, kp)) if kp else "-",
+                                         color=(120,220,140))
+                            dpg.add_text(_L("sûr", "safe") if sure else _L("probable", "likely"),
+                                         color=(46,204,113) if sure else (240,160,0))
+                            dpg.add_text((_L(f"[version intentionnelle : {x['intent']}] ",
+                                             f"[intentional version: {x['intent']}] ")
+                                          if x["intent"] else "") + r["reason"], wrap=0,
+                                         color=(170,170,220) if x["intent"] else (224,224,224))
+            with dpg.group(horizontal=True):
+                dpg.add_radio_button(
+                    (_L("Retirer de la bibliothèque Emby (fichier conservé)",
+                        "Remove from the Emby library (file kept)"),
+                     _L("Supprimer les fichiers du disque", "Delete the files from disk")),
+                    tag=f"{tag}_mode", horizontal=True,
+                    default_value=_L("Supprimer les fichiers du disque", "Delete the files from disk"))
+            with dpg.group(horizontal=True):
+                b = dpg.add_button(tag=f"{tag}_ok", width=230, callback=lambda: _ask(),
+                                   label=_L(f"Supprimer la sélection ({n_sure})",
+                                            f"Delete selection ({n_sure})"),
+                                   enabled=n_sure > 0)
+                dpg.add_button(label=t("cancel"), width=120, callback=lambda: dpg.delete_item(tag))
+        if not url or not key_:
+            dpg.configure_item(f"{tag}_ok", enabled=False,
+                               label=_L("Connectez-vous d'abord (Connecter)", "Connect first"))
+
+    def sg_num(x):
+        """Numero (#n) de la version gardee dans son groupe."""
+        items = G["dupes"].get(x["gkey"]) or (G["multiqual"].get(x["gkey"]) or ([],))[0]
+        for i, it in enumerate(items):
+            if it.get("Id") == (x["keeper"] or {}).get("Id"):
+                return i + 1
+        return "?"
+
+    def confirm_batch_delete(sel, delete_file, parent_tag):
+        nonlocal _mid; _mid += 1; tag = f"dbl_bdc{_mid}"
+        if not sel:
+            return
+        with dpg.window(label=_L("Confirmer la suppression", "Confirm deletion"), tag=tag,
+                        modal=True, width=620, autosize=True, pos=[260, 180], no_resize=True):
+            dpg.add_text(_L(f"{len(sel)} fichier(s) vont être ", f"{len(sel)} file(s) will be ")
+                         + (_L("SUPPRIMÉS DÉFINITIVEMENT du disque.", "PERMANENTLY DELETED from disk.")
+                            if delete_file else
+                            _L("retirés de la bibliothèque Emby (fichiers conservés).",
+                               "removed from the Emby library (files kept).")),
+                         color=(233,69,96) if delete_file else (255,200,80), wrap=590)
+            with dpg.child_window(height=min(300, 22 * len(sel) + 10), border=True):
+                for x in sel:
+                    dpg.add_text(f"- {x['item'].get('Name','?')} : {_fname(x['item'])}", wrap=570)
+            if delete_file:
+                dpg.add_text(t("del_warning"), color=(233,69,96))
+            with dpg.group(horizontal=True):
+                dpg.add_button(label=_L("Oui, supprimer", "Yes, delete"), width=180,
+                               callback=lambda: (dpg.delete_item(tag),
+                                                 dpg.does_item_exist(parent_tag)
+                                                 and dpg.delete_item(parent_tag),
+                                                 run_batch_delete(sel, delete_file)))
+                dpg.add_button(label=t("cancel"), width=120, callback=lambda: dpg.delete_item(tag))
+
+    def run_batch_delete(sel, delete_file):
+        url = G.get("emby_url", ""); key_ = G.get("api_key", "")
+        todo = [x for x in sel if x["item"].get("Id") not in _deleting]
+        for x in todo:
+            _deleting[x["item"].get("Id")] = (x["item"].get("Name", "?"), time.time())
+
+        def worker():
+            ok, errs = [], []
+            for n, x in enumerate(todo, 1):
+                iid = x["item"].get("Id"); nm = _fname(x["item"])
+                ui(lambda n=n, nm=nm: _set_status(
+                    _L(f"Suppression {n}/{len(todo)} : {nm}", f"Deleting {n}/{len(todo)}: {nm}"),
+                    (240,160,0)))
+                try:
+                    emby_delete(url, key_, iid, delete_file=delete_file)
+                    ok.append(x)
+                except urllib.error.HTTPError as e:
+                    errs.append(f"{nm} : HTTP {e.code} {e.reason}")
+                except Exception as e:
+                    errs.append(f"{nm} : {e}")
+                finally:
+                    _deleting.pop(iid, None)
+
+            def done():
+                for x in ok:
+                    iid = x["item"].get("Id")
+                    gk = x["gkey"]
+                    if gk in G["dupes"]:
+                        G["dupes"][gk] = [it for it in G["dupes"][gk] if it.get("Id") != iid]
+                        if len(G["dupes"][gk]) <= 1:
+                            G["dupes"].pop(gk, None)
+                    elif gk in G["multiqual"]:
+                        its, why = G["multiqual"][gk]
+                        its = [it for it in its if it.get("Id") != iid]
+                        if len(its) <= 1:
+                            G["multiqual"].pop(gk, None)
+                        else:
+                            G["multiqual"][gk] = (its, why)
+                    _meta_cache.pop(iid, None)
+                _set_status(_L(f"OK - {len(ok)} fichier(s) supprimé(s)", f"OK - {len(ok)} file(s) deleted")
+                            + (_L(f", {len(errs)} erreur(s)", f", {len(errs)} error(s)") if errs else ""),
+                            (233,69,96) if errs else (46,204,113))
+                if errs:
+                    modal_err(_L("Erreurs de suppression", "Deletion errors"), "\n".join(errs[:30]))
+                render_results()
+            ui(done)
+        threading.Thread(target=worker, daemon=True).start()
 
     def find_fuzzy_dupes(movies):
         cands=[m for m in movies
@@ -5896,7 +6504,21 @@ def _init_doublons():
         # Médiathèques disponibles et sélectionnées
         "libraries": [],        # [{"id":..,"name":..,"type":..}]
         "lib_selected": set(),  # ids sélectionnés pour le scan
+        # Langue preferee pour les suggestions de suppression ("" / "VFF" / "VFQ")
+        "pref_lang": "",
     }
+    DBL_PREFS_FILE = APP_DIR / "emby_toolbox_dbl_prefs.json"
+    try:
+        G["pref_lang"] = json.loads(DBL_PREFS_FILE.read_text("utf-8")).get("pref_lang", "")
+    except Exception:
+        pass
+
+    def save_dbl_prefs():
+        try:
+            DBL_PREFS_FILE.write_text(json.dumps({"pref_lang": G.get("pref_lang", "")}),
+                                      "utf-8")
+        except Exception:
+            pass
     _mid = 0
     _render_timer = 0.0   # debounce pour slider/filtre
     _RENDER_DELAY = 0.30  # secondes d'attente apres dernier changement
@@ -6131,7 +6753,7 @@ def _init_doublons():
         title_str=f"{first.get('Name','?')} ({first.get('ProductionYear','')})"
 
         def fmt_track(tr):
-            s=f"{tr['lang']} {tr['codec']} {tr['channels']}ch"
+            s=track_label(tr)
             if tr['title']: s+=f"  ({tr['title'][:28]})"
             return s
 
@@ -6186,6 +6808,32 @@ def _init_doublons():
                             col=(255,220,100) if tdiff else (224,224,224)
                             if v=="-": col=(110,110,110)
                             dpg.add_text(v, color=col)
+
+            # Resultat de l'analyse du son (si lancee sur ce groupe)
+            ids=[it.get("Id","") for it in items]
+            lines=[]
+            for i,a in enumerate(ids):
+                for j in range(i+1,len(ids)):
+                    for c in (audio_cmp_between(a, ids[j]) or []):
+                        verdict=(_L("identique","identical") if c["sim"]>=0.95 else
+                                 _L("très proche","very close") if c["sim"]>=0.85 else
+                                 _L("différent","different"))
+                        lines.append((f"#{i+1} {c['a']}  ↔  #{j+1} {c['b']} : "
+                                      f"{c['sim']:.0%} ({verdict})", c["sim"]))
+            dpg.add_separator()
+            if lines:
+                dpg.add_text(_L("Analyse du son (similarité du signal réel) :",
+                                "Sound analysis (similarity of the real signal):"),
+                             color=(136,136,170))
+                for txt_, sim_ in lines:
+                    dpg.add_text(txt_, color=(46,204,113) if sim_>=0.95 else
+                                 (240,160,0) if sim_>=0.85 else (233,69,96))
+            else:
+                dpg.add_text(_L("Son non analysé : bouton « Analyser son » du groupe pour "
+                                "comparer le son réel des pistes.",
+                                "Sound not analysed: use the group's \"Analyse sound\" "
+                                "button to compare the real sound of the tracks."),
+                             color=(110,110,140), wrap=w-40)
 
             dpg.add_separator()
             dpg.add_button(label=t("close"), width=-1,
@@ -6400,11 +7048,49 @@ def _init_doublons():
                         callback=lambda s,a,u: compare_audio_popup(u))
                     tip("Compare les pistes audio de toutes les versions cote a cote\n(langue, codec, canaux, titre).\nLes lignes qui different sont surlignees.",
                         en="Compares the audio tracks of all versions side by side\n(language, codec, channels, title).\nDiffering rows are highlighted.")
+                    dpg.add_button(label=_L("Analyser son", "Analyse sound"), width=95,
+                        user_data=(key, items),
+                        callback=lambda s,a,u: start_audio_analysis(u[0], u[1]))
+                    tip("Analyse approfondie (ffmpeg) : compare le SON reel des pistes\n"
+                        "d'une version a l'autre (90 s au milieu du film).\n"
+                        "Detecte un vrai clone meme reencode ou decale, et un doublage\n"
+                        "different mal etiquete (ex. VFQ marquee VFF).\n"
+                        "Le resultat affine la suggestion de suppression.",
+                        en="Deep analysis (ffmpeg): compares the REAL sound of the tracks\n"
+                           "between versions (90 s in the middle of the movie).\n"
+                           "Detects a true clone even re-encoded or shifted, and a\n"
+                           "different dub with a wrong label (e.g. VFQ marked VFF).\n"
+                           "The result refines the deletion suggestion.")
                     dpg.add_button(label=t("ignore"), width=60,
                         user_data=(key,title),
                         callback=lambda s,a,u: do_ignore(u[0],u[1]))
                     tip("Marque ce groupe comme faux positif.\nIl n'apparaitra plus dans les resultats.\nRecuperez-le via 'Reinitialiser' les ignores.",
                         en="Marks this group as a false positive.\nIt won't appear in the results anymore.\nRestore it via 'Reset' ignored.")
+
+                # ── Analyse des pistes + suggestion ──────────────
+                sg = group_suggestions(items, key)
+                with dpg.group(horizontal=True):
+                    dpg.add_text(sg["summary"],
+                                 color=(120,220,140) if sg["audio_identical"] else (240,180,80))
+                    if key in _ANALYZING:
+                        dpg.add_loading_indicator(style=1, radius=1.2, thickness=1.4,
+                                                  color=(240,160,0))
+                        dpg.add_text(_L("analyse du son...", "analysing sound..."),
+                                     color=(240,160,0))
+                parts = []
+                dels = [r for r in sg["items"].values() if r["verdict"] == "delete"]
+                chks = [r for r in sg["items"].values() if r["verdict"] == "check"]
+                keeps = [r for r in sg["items"].values() if r["verdict"] == "keep"]
+                if keeps:
+                    parts.append(_L("garder ", "keep ") + ", ".join(f"#{r['num']}" for r in keeps))
+                if dels:
+                    parts.append(_L("supprimer ", "delete ") + ", ".join(
+                        f"#{r['num']}" + (_L(" (sûr)", " (safe)") if r["confidence"] == "sure"
+                                          else _L(" (probable)", " (likely)")) for r in dels))
+                if chks:
+                    parts.append(_L("à vérifier ", "to check ") + ", ".join(f"#{r['num']}" for r in chks))
+                dpg.add_text(_L("Suggestion : ", "Suggestion: ") + "  ·  ".join(parts),
+                             color=(233,69,96) if dels else (170,170,170))
 
                 dpg.add_separator()
 
@@ -6418,6 +7104,8 @@ def _init_doublons():
                     dpg.add_table_column(label=t("col_folder"), width_stretch=True, init_width_or_weight=0.38)
                     dpg.add_table_column(label=t("col_dur"),    width_fixed=True,   init_width_or_weight=70)
                     dpg.add_table_column(label=t("col_size"),   width_fixed=True,   init_width_or_weight=68)
+                    dpg.add_table_column(label=_L("Suggestion", "Suggestion"),
+                                         width_fixed=True, init_width_or_weight=135)
                     dpg.add_table_column(label=t("col_actions"),width_fixed=True,   init_width_or_weight=245)
 
                     # valeurs du groupe pour surligner durées/tailles identiques
@@ -6437,19 +7125,36 @@ def _init_doublons():
                         sz  = fmt_size(md["size_bytes"]) if md["size_bytes"] else fmt_size(get_api_size(item))
                         dur = fmt_duration(md["duration_s"])
                         item_id = item.get("Id","")
+                        _sr = sg["items"].get(item_id, {})
+                        _n = _sr.get("num", 0)
+                        _sv, _sc = _sr.get("verdict", ""), _sr.get("confidence", "")
+                        _stxt, _scol = {
+                            "keep":   (_L("GARDER", "KEEP"), (46,204,113)),
+                            "delete": ((_L("SUPPRIMER (sûr)", "DELETE (safe)") if _sc == "sure"
+                                        else _L("SUPPRIMER ?", "DELETE ?")), (233,69,96)),
+                            "check":  (_L("À VÉRIFIER", "TO CHECK"), (240,160,0)),
+                        }.get(_sv, ("", (136,136,136)))
+                        _tracks = " | ".join(track_label(tr) for tr in md.get("audio_tracks", [])) or "?"
                         for path in get_all_sources(item):
                             wp=to_win(path,prefix,unc) or path
                             fname=Path(path).name if path else "-"
                             folder=str(Path(wp).parent) if wp else "-"
                             fd=folder if len(folder)<=55 else "..."+folder[-52:]
                             with dpg.table_row():
-                                dpg.add_button(label=f"  {fname}", width=-1,
+                                dpg.add_button(label=f" #{_n}  {fname}", width=-1,
                                     user_data=wp,
                                     callback=lambda s,a,u: open_file(u, get_player()))
+                                with dpg.tooltip(dpg.last_item()):
+                                    dpg.add_text(_L("Pistes audio : ", "Audio tracks: ") + _tracks,
+                                                 wrap=420)
                                 dpg.add_text(qual, color=(170,221,255))
                                 dpg.add_text(fd)
                                 dpg.add_text(dur, color=_dur_col)
                                 dpg.add_text(sz, color=_sz_col)
+                                dpg.add_text(_stxt, color=_scol)
+                                if _sr.get("reason"):
+                                    with dpg.tooltip(dpg.last_item()):
+                                        dpg.add_text(_sr["reason"], wrap=420)
                                 with dpg.group(horizontal=True):
                                     dpg.add_button(label=t("play"), width=40,
                                         user_data=wp,
@@ -6618,6 +7323,16 @@ def _init_doublons():
             if kids and not G["libraries"]:
                 dpg.configure_item(kids[0], default_value=L["libs_hint"])
         except Exception: pass
+        # Suggestions de suppression
+        for tag_, fr_, en_, attr in (
+                ("dbl_btn_sugg", "Suggestions de suppression", "Deletion suggestions", "label"),
+                ("dbl_lbl_pref", "Langue préférée :", "Preferred language:", "default_value"),
+                ("dbl_lbl_sugg_help",
+                 "Colonne Suggestion : GARDER / SUPPRIMER / À VÉRIFIER (survolez pour la raison)",
+                 "Suggestion column: KEEP / DELETE / TO CHECK (hover for the reason)",
+                 "default_value")):
+            try: dpg.configure_item(tag_, **{attr: _L(fr_, en_)})
+            except Exception: pass
         # Mettre a jour tous les tooltips enregistres
         for txt_tag, lang_key, wrap in _TIPS_REGISTRY:
             try: dpg.configure_item(txt_tag, default_value=t(lang_key))
@@ -7198,6 +7913,44 @@ def _init_doublons():
             dpg.add_spacer(height=3)
         dpg.add_spacer(height=3)
 
+        # Ligne 5b : suggestions de suppression des clones
+        with dpg.group(horizontal=True):
+            b = dpg.add_button(label=_L("Suggestions de suppression", "Deletion suggestions"),
+                               tag="dbl_btn_sugg", width=200,
+                               callback=lambda s,a,u: show_suggestions_window())
+            try:
+                dpg.bind_item_theme(b, "th_btn_ok")
+            except Exception:
+                pass
+            tip("Liste tous les clones a supprimer (vrais doublons) avec la version\n"
+                "gardee a la place et la raison : langues (VFF / VFQ / VF / VO),\n"
+                "pistes audio identiques ou non, qualite video.\n"
+                "Les clones surs sont coches ; rien n'est supprime sans confirmation.",
+                wrap=380,
+                en="Lists every clone to delete (real duplicates) with the version\n"
+                   "kept instead and the reason: languages (VFF / VFQ / VF / VO),\n"
+                   "identical audio tracks or not, video quality.\n"
+                   "Safe clones are ticked; nothing is deleted without confirmation.")
+            dpg.add_spacer(width=12)
+            dpg.add_text(_L("Langue préférée :", "Preferred language:"), tag="dbl_lbl_pref",
+                         color=(136,136,170))
+            dpg.add_combo(("-", "VFF", "VFQ"), tag="dbl_cb_pref", width=70,
+                          default_value=G.get("pref_lang") or "-", callback=on_pref_lang)
+            tip("Sans preference ('-'), une version VFF et une version VFQ sont toutes\n"
+                "deux gardees (langues differentes).\n"
+                "Avec VFF : une version uniquement VFQ devient supprimable quand une\n"
+                "version VFF de qualite egale ou meilleure existe (et inversement).",
+                wrap=380,
+                en="Without preference ('-'), a VFF version and a VFQ version are both\n"
+                   "kept (different languages).\n"
+                   "With VFF: a VFQ-only version becomes deletable when a VFF version\n"
+                   "of equal or better quality exists (and vice versa).")
+            dpg.add_spacer(width=12)
+            dpg.add_text(_L("Colonne Suggestion : GARDER / SUPPRIMER / À VÉRIFIER (survolez pour la raison)",
+                            "Suggestion column: KEEP / DELETE / TO CHECK (hover for the reason)"),
+                         tag="dbl_lbl_sugg_help", color=(110,110,140))
+        dpg.add_spacer(height=3)
+
         # Ligne 6 : filtre + tri + seuil + ignorés
         with dpg.group(horizontal=True):
             dpg.add_text("Filtre :",tag="dbl_lbl_filter")
@@ -7294,6 +8047,16 @@ def _init_doublons():
         "build_body": _build_body,
         "tick": _tick,
         "connect": do_connect,
+        # moteur de suggestions (utilise aussi par les tests)
+        "G": G,
+        "audio_variant": audio_variant,
+        "group_suggestions": group_suggestions,
+        "rich_metadata": get_rich_metadata,
+        "analyze_group_audio": analyze_group_audio,
+        "render_results": render_results,
+        "show_suggestions": show_suggestions_window,
+        "audio_cmp": _AUDIO_CMP,
+        "env_similarity": _env_similarity,
         "set_lang": _set_lang,
         "save": do_save,
         "legacy": {
