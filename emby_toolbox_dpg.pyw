@@ -28,7 +28,7 @@ Lignes de commande utiles :
     python emby_toolbox_dpg.pyw --mkv-selftest   tests du moteur de renommage
 """
 
-APP_VERSION = "2026.10.1"
+APP_VERSION = "2026.10.2"
 
 import dearpygui.dearpygui as dpg
 import threading, queue, json, os, sys, subprocess, time, socket
@@ -5308,16 +5308,40 @@ def _init_doublons():
         return (md["res_tier"], int(bool(md["hdr"])),
                 _VCODEC_RANK.get((md["vcodec"] or "").upper(), 0))
 
-    def _covers(md_k, md_x, pref):
-        """Vrai si la version K contient toutes les langues de X.
-        Retourne (couvre, approximatif)."""
+    # Seuils de l'analyse du son (similarite du signal, bande de la voix)
+    SND_SAME = 0.93     # >= : meme doublage
+    SND_DIFF = 0.85     # <  : doublage different ; entre les deux : incertain
+    _FR = ("VFF", "VFQ", "VF")
+
+    def _fr_tracks(md):
+        return [tr for tr in md.get("audio_tracks", []) if tr.get("variant") in _FR]
+
+    def _covers(md_k, md_x, pref, rows=None):
+        """La version K contient-elle toutes les langues de X ?
+        rows : resultat de l'analyse du son X -> K (ou None).
+        Retourne (couvre, approximatif, incertain)."""
         lk, lx = item_langs(md_k), item_langs(md_x)
-        approx = False
-        fr_k = {v for v in lk if v in ("VFF", "VFQ", "VF")}
+        approx = uncertain = False
+        fr_k = {v for v in lk if v in _FR}
         for lang in lx:
+            if lang in _FR and rows:
+                # le SON decide : chaque piste de X dans cette langue doit
+                # correspondre a une piste francaise de K
+                for tr in _fr_tracks(md_x):
+                    if tr["variant"] != lang:
+                        continue
+                    best = max((r["sim"] for r in rows if r["ia"] == tr["index"]),
+                               default=None)
+                    if best is None or best < SND_DIFF:
+                        # doublage different (ex. VFF etiquetee mais VFQ en realite)
+                        if not (pref and lang != pref and pref in fr_k):
+                            return False, approx, uncertain
+                    elif best < SND_SAME:
+                        uncertain = True
+                continue
             if lang in lk:
                 continue
-            if lang in ("VFF", "VFQ", "VF") and fr_k:
+            if lang in _FR and fr_k:
                 # VF (variante inconnue) <-> VFF/VFQ : couvert mais incertain
                 if lang == "VF" or "VF" in fr_k:
                     approx = True
@@ -5325,18 +5349,104 @@ def _init_doublons():
                 # langue preferee : la variante non preferee est couverte
                 if pref and lang != pref and pref in fr_k:
                     continue
-            return False, approx
-        return True, approx
+            return False, approx, uncertain
+        return True, approx, uncertain
 
     def _lang_txt(md):
         ls = sorted(item_langs(md))
         return "+".join(ls) if ls else "?"
 
+    # ── Analyse du son : stockage et lecture des resultats ──────────────
+    _AUDIO_ENV = {}     # (chemin, piste, debut, duree, tempo) -> (grossiere, fine)
+    _AUDIO_CMP = {}     # (id_a, id_b) -> {"rows": [...], "note": str}
+    _AUDIO_FILES = {}   # (id_a, ia, id_b, ib) -> chemin du fichier comparatif
+
+    def _swap_row(r):
+        return dict(r, ia=r["ib"], ib=r["ia"], va=r["vb"], vb=r["va"], la=r["lb"],
+                    lb=r["la"], segs=[(b, a) for a, b in r.get("segs", [])])
+
+    def pair_rows(x, k):
+        """Comparaisons du son des pistes francaises, vues depuis X vers K."""
+        d = _AUDIO_CMP.get((x, k))
+        if d is not None:
+            return d["rows"]
+        d = _AUDIO_CMP.get((k, x))
+        if d is not None:
+            return [_swap_row(r) for r in d["rows"]]
+        return None
+
+    def audio_cmp_between(a, b):
+        return pair_rows(a, b)
+
+    def _snd_status(va, vb, sim):
+        """(statut, texte FR, texte EN, couleur) d'une comparaison de pistes."""
+        p = f"{sim:.0%}"
+        if sim >= SND_SAME:
+            if va == vb and va != "VF":
+                return ("ok", f"même doublage ({p})", f"same dub ({p})", (46, 204, 113))
+            if "VF" in (va, vb):
+                kn = vb if va == "VF" else va
+                return ("info", f"même doublage ({p}) : la piste VF est une {kn}",
+                        f"same dub ({p}): the VF track is a {kn}", (120, 200, 255))
+            return ("warn", f"MÊME doublage ({p}) alors que les étiquettes diffèrent : "
+                            f"une des deux est fausse",
+                    f"SAME dub ({p}) although labels differ: one of them is wrong",
+                    (233, 69, 96))
+        if sim < SND_DIFF:
+            if va == vb and va != "VF":
+                return ("warn", f"doublages DIFFÉRENTS ({p}) malgré la même étiquette {va} : "
+                                f"l'un est peut-être une {'VFQ' if va == 'VFF' else 'VFF'}",
+                        f"DIFFERENT dubs ({p}) despite the same {va} label: one may be a "
+                        f"{'VFQ' if va == 'VFF' else 'VFF'}", (233, 69, 96))
+            if "VF" in (va, vb):
+                kn = vb if va == "VF" else va
+                return ("info", f"doublage différent ({p}) : la piste VF n'est pas la {kn} "
+                                f"({'VFQ' if kn == 'VFF' else 'VFF'} probable)",
+                        f"different dub ({p}): the VF track is not the {kn} "
+                        f"({'VFQ' if kn == 'VFF' else 'VFF'} likely)", (120, 200, 255))
+            return ("ok", f"doublages bien différents ({p}), conforme aux étiquettes",
+                    f"clearly different dubs ({p}), consistent with the labels",
+                    (46, 204, 113))
+        return ("unsure", f"incertain ({p}) : écoutez le fichier comparatif",
+                f"uncertain ({p}): listen to the comparison file", (240, 160, 0))
+
+    def fr_report(items):
+        """Lignes de compte rendu de l'analyse du son du groupe :
+        [(texte, couleur, cle_fichier)] - une ligne par piste francaise
+        comparee (meilleure correspondance)."""
+        num = {it.get("Id", ""): i + 1 for i, it in enumerate(items)}
+        ids = [it.get("Id", "") for it in items]
+        out = []
+        for i, a in enumerate(ids):
+            for b in ids[i + 1:]:
+                d = _AUDIO_CMP.get((a, b)) or _AUDIO_CMP.get((b, a))
+                if not d:
+                    continue
+                rows = pair_rows(a, b)
+                seen = set()
+                for r in sorted(rows, key=lambda r: -r["sim"]):
+                    if r["ia"] in seen:
+                        continue
+                    seen.add(r["ia"])
+                    st, fr, en, col = _snd_status(r["va"], r["vb"], r["sim"])
+                    txt = (f"#{num[a]} {r['va']} ({r['la']})  ↔  #{num[b]} {r['vb']} "
+                           f"({r['lb']}) : " + _L(fr, en))
+                    fk = (a, r["ia"], b, r["ib"])
+                    if fk not in _AUDIO_FILES:
+                        fk = (b, r["ib"], a, r["ia"])
+                    out.append((txt, col, fk if fk in _AUDIO_FILES else None))
+                if d.get("note"):
+                    out.append((f"#{num[a]} ↔ #{num[b]} : " + d["note"], (170, 170, 170), None))
+        return out
+
     def group_suggestions(items, key=None):
         """Analyse un groupe de doublons. Retourne
-        {"summary": str, "audio_identical": bool,
+        {"summary": str, "audio_identical": bool, "analysed": bool,
          "items": {item_id: {"verdict": keep|delete|check, "confidence": sure|probable|"",
-                             "reason": str, "keeper": id|None, "num": n}}}"""
+                             "reason": str, "keeper": id|None, "num": n}}}
+        « sûr » exige que le SON des pistes francaises ait ete verifie
+        (bouton « Analyser son ») ; les etiquettes seules donnent au mieux
+        « probable »."""
         pref = G.get("pref_lang", "")
         mds = {it.get("Id", ""): get_rich_metadata(it) for it in items}
         num = {it.get("Id", ""): i + 1 for i, it in enumerate(items)}
@@ -5345,6 +5455,9 @@ def _init_doublons():
         same_audio = len({tuple(s) for s in sigs.values()}) == 1 and bool(
             next(iter(sigs.values()), None))
         langsets = {iid: _lang_txt(md) for iid, md in mds.items()}
+        ids = list(mds)
+        analysed = any(pair_rows(a, b) is not None
+                       for i, a in enumerate(ids) for b in ids[i + 1:])
 
         def rank(it):
             md = mds[it.get("Id", "")]
@@ -5356,13 +5469,14 @@ def _init_doublons():
         for it in order:
             iid = it.get("Id", "")
             mx = mds[iid]
-            best_k, approx_k = None, False
+            best_k = None
+            approx_k = unsure_k = False
             for k in keepers:
                 mk = mds[k]
-                cov, approx = _covers(mk, mx, pref)
+                cov, approx, unsure = _covers(mk, mx, pref, pair_rows(iid, k))
                 if cov and mk["res_tier"] >= mx["res_tier"] and \
                         int(bool(mk["hdr"])) >= int(bool(mx["hdr"])):
-                    best_k, approx_k = k, approx
+                    best_k, approx_k, unsure_k = k, approx, unsure
                     break
             if best_k is None:
                 keepers.append(iid)
@@ -5370,14 +5484,13 @@ def _init_doublons():
                             "reason": "", "num": num[iid]}
                 continue
             mk = mds[best_k]
+            rows = pair_rows(iid, best_k)
             # la version X apporte-t-elle un meilleur son pour une langue ?
             better_audio = []
             for lang in item_langs(mx):
                 ax, ak = _best_audio(mx, lang), _best_audio(mk, lang)
                 if ax and ak and _audio_q(ax)[:2] > _audio_q(ak)[:2]:
                     better_audio.append(f"{track_label(ax)} > {track_label(ak)}")
-            sx = set(sigs[iid]); sk = set(sigs[best_k])
-            pure_clone = sx <= sk and not approx_k
             vq_txt = (f"{mx['res_label'].split(' ')[0]} {mx['vcodec']}"
                       + (" HDR" if mx["hdr"] else ""))
             vk_txt = (f"{mk['res_label'].split(' ')[0]} {mk['vcodec']}"
@@ -5389,10 +5502,21 @@ def _init_doublons():
                                          f"better audio than #{num[best_k]}: ")
                                       + "; ".join(better_audio)}
                 continue
-            if pure_clone:
-                why = _L(f"clone : toutes ses pistes ({langsets[iid]}) existent dans "
-                         f"#{num[best_k]}", f"clone: all its tracks ({langsets[iid]}) "
-                         f"exist in #{num[best_k]}")
+            # « sûr » : son des pistes francaises verifie identique, et toutes
+            # les autres pistes presentes a l'identique dans K
+            fr_x = _fr_tracks(mx)
+            other_ok = {s_ for s_ in sigs[iid] if s_[0] not in _FR} <= set(sigs[best_k])
+            snd_ok = bool(rows) and bool(fr_x) and all(
+                max((r["sim"] for r in rows if r["ia"] == tr["index"]), default=0) >= SND_SAME
+                for tr in fr_x)
+            sure = snd_ok and other_ok and not unsure_k
+            labels_same = set(sigs[iid]) <= set(sigs[best_k]) and not approx_k
+            if snd_ok:
+                why = _L(f"son des pistes françaises identique à #{num[best_k]}",
+                         f"French tracks sound identical to #{num[best_k]}")
+            elif labels_same:
+                why = _L(f"pistes ({langsets[iid]}) aux étiquettes identiques à #{num[best_k]}",
+                         f"tracks ({langsets[iid]}) with labels identical to #{num[best_k]}")
             else:
                 why = _L(f"langues {langsets[iid]} couvertes par #{num[best_k]} "
                          f"({langsets[best_k]})", f"languages {langsets[iid]} covered "
@@ -5403,64 +5527,53 @@ def _init_doublons():
                 why += _L(f", qualité {vq_txt} ≤ {vk_txt}", f", quality {vq_txt} ≤ {vk_txt}")
             else:
                 why += _L(", même qualité vidéo", ", same video quality")
-            res[iid] = {"verdict": "delete",
-                        "confidence": "sure" if pure_clone else "probable",
+            if unsure_k:
+                why += _L(" | son incertain : écoutez le fichier comparatif",
+                          " | uncertain sound: listen to the comparison file")
+            elif not rows and fr_x:
+                why += _L(" | son non vérifié : cliquez « Analyser son » pour confirmer",
+                          " | sound not checked: click \"Analyse sound\" to confirm")
+            res[iid] = {"verdict": "delete", "confidence": "sure" if sure else "probable",
                         "keeper": best_k, "num": num[iid], "reason": why}
 
-        # versions gardees uniquement pour une langue, mais de moindre qualite
+        # versions gardees pour une langue : le dire, et signaler une qualite moindre
         if len(keepers) > 1:
             top = mds[keepers[0]]
             for k in keepers[1:]:
                 mk = mds[k]
                 uniq = item_langs(mk) - item_langs(top)
-                if _video_q(mk) < _video_q(top):
-                    res[k].update(verdict="check", reason=_L(
-                        f"seule version avec {'+'.join(sorted(uniq)) or '?'}, "
-                        f"mais qualité inférieure à #{num[keepers[0]]}",
-                        f"only version with {'+'.join(sorted(uniq)) or '?'}, "
-                        f"but lower quality than #{num[keepers[0]]}"))
+                rows = pair_rows(k, keepers[0])
+                diff_dub = [r for r in (rows or []) if r["sim"] < SND_DIFF
+                            and r["va"] == r["vb"]]
+                if diff_dub:
+                    why_u = _L(f"son de sa {diff_dub[0]['va']} différent de celle de "
+                               f"#{num[keepers[0]]} ({diff_dub[0]['sim']:.0%}) : autre doublage",
+                               f"its {diff_dub[0]['va']} sounds different from "
+                               f"#{num[keepers[0]]} ({diff_dub[0]['sim']:.0%}): another dub")
                 else:
-                    res[k]["reason"] = _L(
-                        f"à garder : seule version avec {'+'.join(sorted(uniq)) or '?'}",
-                        f"keep: only version with {'+'.join(sorted(uniq)) or '?'}")
+                    why_u = _L(f"seule version avec {'+'.join(sorted(uniq)) or '?'}",
+                               f"only version with {'+'.join(sorted(uniq)) or '?'}")
+                if _video_q(mk) < _video_q(top):
+                    res[k].update(verdict="check", reason=why_u + _L(
+                        f", mais qualité inférieure à #{num[keepers[0]]}",
+                        f", but lower quality than #{num[keepers[0]]}"))
+                else:
+                    res[k]["reason"] = _L("à garder : ", "keep: ") + why_u
         if keepers:
             res[keepers[0]]["reason"] = res[keepers[0]]["reason"] or _L(
                 "meilleure version du groupe", "best version of the group")
 
-        # resultats de l'analyse approfondie (si lancee)
-        for iid, r in res.items():
-            k = r.get("keeper")
-            if not k:
-                continue
-            cmp_ = audio_cmp_between(iid, k)
-            if not cmp_:
-                continue
-            low = [c for c in cmp_ if c["sim"] < 0.85]
-            if low and r["verdict"] == "delete":
-                r.update(verdict="check", confidence="", reason=r["reason"] + _L(
-                    f" | analyse : son différent ({low[0]['label']} {low[0]['sim']:.0%})",
-                    f" | analysis: different sound ({low[0]['label']} {low[0]['sim']:.0%})"))
-            elif not low and r["verdict"] == "delete":
-                r.update(confidence="sure", reason=r["reason"] + _L(
-                    f" | analyse : son identique ({min(c['sim'] for c in cmp_):.0%})",
-                    f" | analysis: identical sound ({min(c['sim'] for c in cmp_):.0%})"))
-
-        # resume
         if same_audio:
-            summary = _L("Pistes audio identiques : ", "Identical audio tracks: ") + \
+            summary = _L("Pistes audio identiques (étiquettes) : ",
+                         "Identical audio tracks (labels): ") + \
                 " + ".join(track_label(tr) for tr in mds[order[0].get("Id", "")]["audio_tracks"])
         else:
             summary = _L("Pistes audio différentes : ", "Different audio tracks: ") + \
                 "  ·  ".join(f"#{num[i]} {langsets[i]}" for i in mds)
-        return {"summary": summary, "audio_identical": same_audio, "items": res}
+        return {"summary": summary, "audio_identical": same_audio,
+                "analysed": analysed, "items": res}
 
     # ── Analyse approfondie : comparaison reelle du son (ffmpeg) ──────
-    _AUDIO_ENV = {}     # (chemin, index piste) -> enveloppe normalisee
-    _AUDIO_CMP = {}     # (id_a, id_b) -> [{"label", "sim"}]
-
-    def audio_cmp_between(a, b):
-        return _AUDIO_CMP.get((a, b)) or _AUDIO_CMP.get((b, a))
-
     def find_ffmpeg():
         exe = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
         try:
@@ -5474,103 +5587,245 @@ def _init_doublons():
         import shutil as _sh
         return _sh.which("ffmpeg") or ""
 
-    def _audio_envelope(ffmpeg, path, ti, start, dur=90):
-        """Enveloppe d'energie (dB, fenetres de 100 ms) d'une piste audio,
-        normalisee (moyenne 0, ecart-type 1)."""
-        ck = (path, ti, int(start))
+    def _run_ffmpeg(cmd, timeout=300):
+        kw = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "timeout": timeout}
+        if sys.platform == "win32":
+            kw["creationflags"] = 0x08000000      # CREATE_NO_WINDOW
+        return subprocess.run(cmd, **kw)
+
+    def _norm(xs):
+        import math
+        n = len(xs)
+        mu = sum(xs) / n
+        sd = math.sqrt(sum((x - mu) ** 2 for x in xs) / n) or 1.0
+        return [(x - mu) / sd for x in xs]
+
+    def _audio_envelopes(ffmpeg, path, ti, start, dur, tempo=1.0):
+        """Enveloppes d'energie de la bande de la voix (300-3400 Hz) :
+        grossiere (100 ms, pour trouver le decalage) et fine (10 ms, pour
+        distinguer deux doublages qui partagent musique et effets)."""
+        ck = (path, ti, int(start), int(dur), round(tempo, 4))
         if ck in _AUDIO_ENV:
             return _AUDIO_ENV[ck]
         import array, math
-        cmd = [ffmpeg, "-nostdin", "-v", "error", "-ss", str(int(start)), "-i", path,
-               "-map", f"0:a:{ti}", "-t", str(dur), "-ac", "1", "-ar", "8000",
-               "-f", "s16le", "-"]
-        kw = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "timeout": 300}
-        if sys.platform == "win32":
-            kw["creationflags"] = 0x08000000      # CREATE_NO_WINDOW
-        r = subprocess.run(cmd, **kw)
-        if r.returncode != 0 or len(r.stdout) < 16000:
+        af = "highpass=f=300,lowpass=f=3400"
+        if abs(tempo - 1.0) > 1e-3:
+            af += f",atempo={tempo:.6f}"
+        r = _run_ffmpeg([ffmpeg, "-nostdin", "-v", "error", "-ss", f"{start:.2f}", "-i", path,
+                         "-map", f"0:a:{ti}", "-t", f"{dur:.2f}", "-af", af, "-ac", "1",
+                         "-ar", "8000", "-f", "s16le", "-"])
+        if r.returncode != 0 or len(r.stdout) < 32000:
             raise RuntimeError((r.stderr or b"").decode("utf-8", "replace")[:200]
                                or "audio illisible")
         pcm = array.array("h")
         pcm.frombytes(r.stdout[: len(r.stdout) // 2 * 2])
         if sys.byteorder == "big":
             pcm.byteswap()
-        w = 800
-        env = []
-        for i in range(0, len(pcm) - w + 1, w):
-            seg = pcm[i:i + w]
-            e = sum(x * x for x in seg) / w
-            env.append(10 * math.log10(e + 1.0))
-        n = len(env)
-        mu = sum(env) / n
-        sd = math.sqrt(sum((x - mu) ** 2 for x in env) / n) or 1.0
-        env = [(x - mu) / sd for x in env]
-        _AUDIO_ENV[ck] = env
-        return env
+        e10 = [sum(x * x for x in pcm[i:i + 80]) / 80.0
+               for i in range(0, len(pcm) - 79, 80)]
+        e100 = [sum(e10[i:i + 10]) / 10.0 for i in range(0, len(e10) - 9, 10)]
+        fine = _norm([10 * math.log10(e + 1.0) for e in e10])
+        coarse = _norm([10 * math.log10(e + 1.0) for e in e100])
+        _AUDIO_ENV[ck] = (coarse, fine)
+        return _AUDIO_ENV[ck]
+
+    def _corr_at(a, b, lag):
+        """Correlation de a[i] avec b[i - lag] (lag > 0 : b est en avance)."""
+        xa, xb = (a[lag:], b) if lag >= 0 else (a, b[-lag:])
+        m = min(len(xa), len(xb))
+        if m < 50:
+            return -1.0
+        return sum(p * q for p, q in zip(xa, xb)) / m
 
     def _env_similarity(a, b, max_lag=150):
-        """Correlation maximale entre deux enveloppes, decalage +/- 15 s."""
-        best = -1.0
-        n = min(len(a), len(b))
-        for lag in range(-max_lag, max_lag + 1):
-            if lag >= 0:
-                xa, xb = a[lag:n], b[:n - lag]
-            else:
-                xa, xb = a[:n + lag], b[-lag:n]
-            m = len(xa)
-            if m < 200:
+        """Correlation maximale entre deux enveloppes (decalage +/- max_lag)."""
+        return max(0.0, min(1.0, max(_corr_at(a, b, l) for l in range(-max_lag, max_lag + 1))))
+
+    def _match_envelopes(ea, eb):
+        """(similarite, decalage fin en 10 ms) : decalage grossier +/- 30 s,
+        puis affinage +/- 150 ms sur l'enveloppe fine."""
+        ca, fa = ea
+        cb, fb = eb
+        cl = max(range(-300, 301), key=lambda l: _corr_at(ca, cb, l))
+        fl = max(range(cl * 10 - 15, cl * 10 + 16), key=lambda l: _corr_at(fa, fb, l))
+        return max(0.0, min(1.0, _corr_at(fa, fb, fl))), fl
+
+    def _pick_segments(fa, fb, fl, n=3, win=800):
+        """Debuts (index fins de A) de n extraits de 8 s : la ou il y a de la
+        voix, de preference la ou les deux versions different le plus."""
+        cands = []
+        for s in range(0, len(fa) - win, 100):
+            sb = s - fl
+            if sb < 0 or sb + win > len(fb):
                 continue
-            s = sum(p * q for p, q in zip(xa, xb)) / m
-            if s > best:
-                best = s
-        return max(0.0, min(1.0, best))
+            seg_a, seg_b = fa[s:s + win], fb[sb:sb + win]
+            loud = sum(seg_a) / win
+            loc = sum(p * q for p, q in zip(seg_a, seg_b)) / win
+            cands.append((loud + (1.0 - loc), s))
+        picked = []
+        for _sc, s in sorted(cands, reverse=True):
+            if all(abs(s - p) >= win for p in picked):
+                picked.append(s)
+            if len(picked) == n:
+                break
+        return sorted(picked)
 
     def analyze_group_audio(items, progress=None):
-        """Compare le son reel des pistes de chaque version a celles de la
-        meilleure version du groupe. Remplit _AUDIO_CMP. Retourne (ok, msg)."""
+        """Compare le son reel de TOUTES les pistes francaises de chaque
+        version a celles des autres versions (90 s au milieu du film, bande
+        de la voix), puis genere un fichier audio comparatif par piste.
+        Remplit _AUDIO_CMP et _AUDIO_FILES. Retourne (ok, message)."""
         ffmpeg = find_ffmpeg()
         if not ffmpeg:
             return False, _L("ffmpeg introuvable : installez FFmpeg (ffmpeg.exe à côté "
-                             "de ffprobe.exe) pour l'analyse approfondie.",
+                             "de ffprobe.exe) pour l'analyse du son.",
                              "ffmpeg not found: install FFmpeg (ffmpeg.exe next to "
-                             "ffprobe.exe) for the deep analysis.")
+                             "ffprobe.exe) for the sound analysis.")
         prefix, unc = G["nas_prefix"], G["nas_unc"]
         mds = {it.get("Id", ""): get_rich_metadata(it) for it in items}
         paths = {}
         for it in items:
             src = get_all_sources(it)
             paths[it.get("Id", "")] = (to_win(src[0], prefix, unc) or src[0]) if src else ""
-        durs = [md["duration_s"] for md in mds.values() if md["duration_s"]]
-        start = max(30, min(900, int(min(durs) * 0.25))) if durs else 300
-        ids = [it.get("Id", "") for it in items]
+        ids = [it.get("Id", "") for it in items if _fr_tracks(mds[it.get("Id", "")])]
+        if len(ids) < 2:
+            return False, _L("Moins de deux versions avec une piste française : rien à comparer.",
+                             "Fewer than two versions with a French track: nothing to compare.")
         pairs = [(a, b) for i, a in enumerate(ids) for b in ids[i + 1:]]
-        done = 0
-        for a, b in pairs:
-            out = []
-            for ta in mds[a]["audio_tracks"]:
-                cand = [tb for tb in mds[b]["audio_tracks"]
-                        if (ta["variant"] in ("VFF", "VFQ", "VF")) ==
-                           (tb["variant"] in ("VFF", "VFQ", "VF"))
-                        and (ta["variant"] == tb["variant"]
-                             or ta["variant"] in ("VFF", "VFQ", "VF"))]
-                if not cand:
+        dur = 90
+        for n_pair, (a, b) in enumerate(pairs, 1):
+            da = mds[a]["duration_s"] or 0
+            db = mds[b]["duration_s"] or 0
+            start_a = max(30, min(900, int(da * 0.25))) if da else 300
+            ratio = (db / da) if da and db else 1.0
+            pal = (abs(ratio - 23.976 / 25) < 0.006 or abs(ratio - 25 / 23.976) < 0.006)
+            if pal:
+                # rapport EXACT (les durees Emby sont arrondies a la seconde :
+                # 0,2 % d'erreur suffit a desaligner l'enveloppe fine sur 90 s)
+                ratio = 23.976 / 25 if ratio < 1 else 25 / 23.976
+            tempo = ratio if pal else 1.0
+            start_b = start_a * ratio if pal else start_a
+            note = ""
+            if pal:
+                note = _L("vitesses différentes (PAL 25 i/s / 23,976 i/s), compensées pour "
+                          "l'analyse", "different speeds (PAL 25 fps / 23.976 fps), "
+                          "compensated for the analysis")
+            elif da and db and abs(ratio - 1) > 0.01:
+                note = _L(f"durées différentes ({fmt_duration(da)} / {fmt_duration(db)}) : "
+                          "montage différent ? comparaison moins fiable",
+                          f"different durations ({fmt_duration(da)} / {fmt_duration(db)}): "
+                          "different cut? less reliable comparison")
+            rows = []
+            for ta in _fr_tracks(mds[a]):
+                for tb in _fr_tracks(mds[b]):
+                    try:
+                        ea = _audio_envelopes(ffmpeg, paths[a], ta["index"], start_a, dur)
+                        eb = _audio_envelopes(ffmpeg, paths[b], tb["index"], start_b,
+                                              dur * tempo, tempo)
+                    except Exception as e:
+                        return False, _L(f"Analyse impossible : {e}", f"Analysis failed: {e}")
+                    sim, fl = _match_envelopes(ea, eb)
+                    segs = [(start_a + s * 0.01, start_b + (s - fl) * 0.01 * tempo)
+                            for s in _pick_segments(ea[1], eb[1], fl)]
+                    rows.append({"ia": ta["index"], "ib": tb["index"],
+                                 "va": ta["variant"], "vb": tb["variant"],
+                                 "la": track_label(ta), "lb": track_label(tb),
+                                 "sim": sim, "lag": fl / 100.0, "segs": segs})
+            _AUDIO_CMP[(a, b)] = {"rows": rows, "note": note}
+            # un fichier comparatif par piste francaise de A (meilleure correspondance)
+            seen = set()
+            for r in sorted(rows, key=lambda r: -r["sim"]):
+                if r["ia"] in seen or not r["segs"]:
                     continue
+                seen.add(r["ia"])
                 try:
-                    ea = _audio_envelope(ffmpeg, paths[a], ta["index"], start)
-                    sims = []
-                    for tb in cand:
-                        eb = _audio_envelope(ffmpeg, paths[b], tb["index"], start)
-                        sims.append((_env_similarity(ea, eb), tb))
-                except Exception as e:
-                    return False, _L(f"Analyse impossible : {e}", f"Analysis failed: {e}")
-                sim, tb = max(sims, key=lambda x: x[0])
-                out.append({"label": f"{ta['variant']}/{tb['variant']}", "sim": sim,
-                            "a": track_label(ta), "b": track_label(tb)})
-            _AUDIO_CMP[(a, b)] = out
-            done += 1
+                    _AUDIO_FILES[(a, r["ia"], b, r["ib"])] = make_comparison_audio(
+                        ffmpeg, items, a, b, r, paths)
+                except Exception:
+                    pass        # l'analyse reste valable sans le fichier
             if progress:
-                progress(done, len(pairs))
+                progress(n_pair, len(pairs))
         return True, ""
+
+    COMPARE_DIR = APP_DIR / "comparaisons_audio"
+
+    def make_comparison_audio(ffmpeg, items, a, b, r, paths, clip=8.0):
+        """Fichier .m4a : pour chaque extrait, 1 bip + replique de la version A,
+        puis 2 bips + la MEME replique dans la version B. Retourne le chemin."""
+        import tempfile
+        by_id = {it.get("Id", ""): it for it in items}
+        num = {it.get("Id", ""): i + 1 for i, it in enumerate(items)}
+        it0 = by_id[a]
+        title = f"{it0.get('Name', '?')} ({it0.get('ProductionYear', '')})"
+        safe = re.sub(r'[<>:"/\\|?*]+', "_", title).strip()
+        COMPARE_DIR.mkdir(parents=True, exist_ok=True)
+        out = COMPARE_DIR / (f"{safe} - #{num[a]} {r['va']} vs #{num[b]} {r['vb']} "
+                             f"(piste {r['ia'] + 1} vs {r['ib'] + 1}).m4a")
+        fmt = ["-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le"]
+        with tempfile.TemporaryDirectory(prefix="emby_cmp_") as tmp:
+            tmp = Path(tmp)
+            def gen(name, src):
+                p = tmp / name
+                rr = _run_ffmpeg([ffmpeg, "-nostdin", "-v", "error", "-y", "-f", "lavfi",
+                                  "-i", src] + fmt + [str(p)])
+                if rr.returncode != 0:
+                    raise RuntimeError(rr.stderr.decode("utf-8", "replace")[:200])
+                return p
+            bip = gen("bip.wav", "sine=frequency=880:duration=0.15")
+            gap = gen("gap.wav", "anullsrc=r=44100:cl=stereo:d=0.12")
+            pause = gen("pause.wav", "anullsrc=r=44100:cl=stereo:d=0.7")
+            fin = gen("fin.wav", "anullsrc=r=44100:cl=stereo:d=1.6")
+            parts = []
+            for n_seg, (t_a, t_b) in enumerate(r["segs"]):
+                for who, pth, ti, t0 in (("a", paths[a], r["ia"], t_a),
+                                         ("b", paths[b], r["ib"], t_b)):
+                    p = tmp / f"s{n_seg}{who}.wav"
+                    rr = _run_ffmpeg([ffmpeg, "-nostdin", "-v", "error", "-y",
+                                      "-ss", f"{max(0.0, t0):.2f}", "-i", pth,
+                                      "-map", f"0:a:{ti}", "-t", f"{clip:.2f}",
+                                      "-af", "afade=t=in:d=0.08,dynaudnorm"] + fmt + [str(p)])
+                    if rr.returncode != 0:
+                        raise RuntimeError(rr.stderr.decode("utf-8", "replace")[:200])
+                    beeps = [bip] if who == "a" else [bip, gap, bip]
+                    parts += beeps + [pause, p] + ([pause] if who == "a" else [fin])
+            lst = tmp / "liste.txt"
+            lst.write_text("".join(f"file '{p.as_posix()}'\n" for p in parts), "utf-8")
+            rr = _run_ffmpeg([ffmpeg, "-nostdin", "-v", "error", "-y", "-f", "concat",
+                              "-safe", "0", "-i", str(lst), "-c:a", "aac", "-b:a", "160k",
+                              "-metadata", f"title={title} - #{num[a]} {r['va']} vs "
+                                           f"#{num[b]} {r['vb']}", str(out)])
+            if rr.returncode != 0:
+                raise RuntimeError(rr.stderr.decode("utf-8", "replace")[:200])
+        return str(out)
+
+    def play_comparison(fk):
+        p = _AUDIO_FILES.get(fk)
+        if p and Path(p).is_file():
+            open_file(p, get_player())
+        else:
+            modal_err(_L("Fichier comparatif", "Comparison file"),
+                      _L("Fichier introuvable : relancez « Analyser son ».",
+                         "File not found: run \"Analyse sound\" again."))
+
+    def render_fr_report(rep, parent=0):
+        """Affiche les lignes du compte rendu ; bouton « Écouter » quand un
+        fichier comparatif existe (1 bip = 1re version, 2 bips = 2e)."""
+        kw = {"parent": parent} if parent else {}
+        for txt_, col_, fk in rep:
+            with dpg.group(horizontal=True, **kw):
+                if fk:
+                    dpg.add_button(label=_L("Écouter", "Listen"), width=70, user_data=fk,
+                                   callback=lambda s, a, u: play_comparison(u))
+                    with dpg.tooltip(dpg.last_item()):
+                        dpg.add_text(_L(
+                            "Fichier audio comparatif : 3 répliques. Pour chacune :\n"
+                            "1 bip = la 1re version, puis 2 bips = la même réplique\n"
+                            "dans la 2e version.\n" + str(_AUDIO_FILES.get(fk, "")),
+                            "Comparison audio file: 3 lines. For each one:\n"
+                            "1 beep = the 1st version, then 2 beeps = the same line\n"
+                            "in the 2nd version.\n" + str(_AUDIO_FILES.get(fk, ""))),
+                            wrap=460)
+                dpg.add_text(txt_, color=col_)
 
     _ANALYZING = set()      # groupes dont l'analyse du son est en cours
 
@@ -5595,8 +5850,9 @@ def _init_doublons():
 
             def done(ok=ok, msg=msg):
                 if ok:
-                    _set_status(_L(f"Analyse du son terminée : {title}",
-                                   f"Sound analysis done: {title}"), (46,204,113))
+                    _set_status(_L(f"Analyse du son terminée : {title} - fichiers comparatifs dans "
+                                   f"{COMPARE_DIR.name}", f"Sound analysis done: {title} - "
+                                   f"comparison files in {COMPARE_DIR.name}"), (46,204,113))
                 else:
                     _set_status(_L("Analyse du son impossible", "Sound analysis failed"),
                                 (233,69,96))
@@ -5675,13 +5931,78 @@ def _init_doublons():
                             "end, never ticked by default. Nothing is deleted before "
                             "confirmation."),
                          color=(255,200,80), wrap=w - 30)
-            dpg.add_text(_L("sûr = toutes ses pistes audio existent à l'identique dans la version gardée, "
-                            "de qualité égale ou meilleure.  probable = langues couvertes mais pistes "
-                            "différentes : lancez « Analyser son » sur le groupe pour confirmer.",
-                            "safe = all its audio tracks exist identically in the kept version, of "
-                            "equal or better quality.  likely = languages covered but different "
-                            "tracks: run \"Analyse sound\" on the group to confirm."),
+            dpg.add_text(_L("sûr = le SON de ses pistes françaises a été vérifié identique à celui de la "
+                            "version gardée (même doublage), ses autres pistes y existent aussi, et la "
+                            "qualité vidéo gardée est égale ou meilleure.  probable = étiquettes "
+                            "identiques ou langues couvertes, mais son pas encore vérifié : cliquez "
+                            "« Vérifier le son » ci-dessous (un fichier audio comparatif est créé "
+                            "pour chaque film).",
+                            "safe = the SOUND of its French tracks was checked identical to the kept "
+                            "version (same dub), its other tracks exist there too, and the kept video "
+                            "quality is equal or better.  likely = identical labels or languages "
+                            "covered, but sound not checked yet: click \"Check the sound\" below "
+                            "(a comparison audio file is created for each movie)."),
                          color=(150,150,150), wrap=w - 30)
+            todo_groups = []
+            for x in rows:
+                if x["gkey"] in [g for g, _ in todo_groups]:
+                    continue
+                its = G["dupes"].get(x["gkey"]) or (G["multiqual"].get(x["gkey"]) or ([],))[0]
+                ids_ = [it.get("Id", "") for it in its]
+                if not any(pair_rows(p, q) is not None
+                           for i_, p in enumerate(ids_) for q in ids_[i_ + 1:]):
+                    todo_groups.append((x["gkey"], its))
+            with dpg.group(horizontal=True):
+                bv = dpg.add_button(
+                    tag=f"{tag}_snd", width=330, enabled=bool(todo_groups),
+                    label=(_L(f"Vérifier le son des pistes françaises ({len(todo_groups)} film(s))",
+                              f"Check the sound of the French tracks ({len(todo_groups)} movie(s))")
+                           if todo_groups else _L("Son déjà vérifié pour tous les films",
+                                                  "Sound already checked for every movie")),
+                    callback=lambda: _check_sound())
+                try:
+                    dpg.bind_item_theme(bv, "th_btn_ok")
+                except Exception:
+                    pass
+                dpg.add_loading_indicator(tag=f"{tag}_spin", style=1, radius=1.3, show=False,
+                                          color=(240,160,0))
+                dpg.add_text("", tag=f"{tag}_sndtxt", color=(240,160,0))
+
+            def _check_sound(groups=todo_groups):
+                dpg.configure_item(f"{tag}_snd", enabled=False)
+                dpg.configure_item(f"{tag}_spin", show=True)
+                for g_, _its in groups:
+                    _ANALYZING.add(g_)
+
+                def worker():
+                    errs = []
+                    for n_, (g_, its) in enumerate(groups, 1):
+                        nm = its[0].get("Name", "?") if its else "?"
+                        ui(lambda n_=n_, nm=nm: dpg.does_item_exist(f"{tag}_sndtxt") and
+                           dpg.set_value(f"{tag}_sndtxt", _L(
+                               f"Film {n_}/{len(groups)} : {nm}...",
+                               f"Movie {n_}/{len(groups)}: {nm}...")))
+                        try:
+                            ok_, msg_ = analyze_group_audio(its)
+                            if not ok_:
+                                errs.append(f"{nm} : {msg_}")
+                                if "ffmpeg" in msg_:
+                                    break
+                        except Exception as e:
+                            errs.append(f"{nm} : {e}")
+                        finally:
+                            _ANALYZING.discard(g_)
+
+                    def done():
+                        if dpg.does_item_exist(tag):
+                            dpg.delete_item(tag)
+                        render_results()
+                        show_suggestions_window()
+                        if errs:
+                            modal_err(_L("Vérification du son", "Sound check"),
+                                      "\n".join(errs[:20]))
+                    ui(done)
+                threading.Thread(target=worker, daemon=True).start()
             with dpg.group(horizontal=True):
                 dpg.add_button(label=_L("Cocher les sûrs", "Tick safe ones"), width=130,
                                callback=lambda: _set("sure"))
@@ -6809,30 +7130,21 @@ def _init_doublons():
                             if v=="-": col=(110,110,110)
                             dpg.add_text(v, color=col)
 
-            # Resultat de l'analyse du son (si lancee sur ce groupe)
-            ids=[it.get("Id","") for it in items]
-            lines=[]
-            for i,a in enumerate(ids):
-                for j in range(i+1,len(ids)):
-                    for c in (audio_cmp_between(a, ids[j]) or []):
-                        verdict=(_L("identique","identical") if c["sim"]>=0.95 else
-                                 _L("très proche","very close") if c["sim"]>=0.85 else
-                                 _L("différent","different"))
-                        lines.append((f"#{i+1} {c['a']}  ↔  #{j+1} {c['b']} : "
-                                      f"{c['sim']:.0%} ({verdict})", c["sim"]))
+            # Resultat de l'analyse du son des pistes francaises (si lancee)
             dpg.add_separator()
-            if lines:
-                dpg.add_text(_L("Analyse du son (similarité du signal réel) :",
-                                "Sound analysis (similarity of the real signal):"),
+            rep=fr_report(items)
+            if rep:
+                dpg.add_text(_L("Analyse du son des pistes françaises (bande de la voix) :",
+                                "Sound analysis of the French tracks (voice band):"),
                              color=(136,136,170))
-                for txt_, sim_ in lines:
-                    dpg.add_text(txt_, color=(46,204,113) if sim_>=0.95 else
-                                 (240,160,0) if sim_>=0.85 else (233,69,96))
+                render_fr_report(rep)
             else:
                 dpg.add_text(_L("Son non analysé : bouton « Analyser son » du groupe pour "
-                                "comparer le son réel des pistes.",
+                                "comparer le son réel des pistes françaises (et générer un "
+                                "fichier audio comparatif).",
                                 "Sound not analysed: use the group's \"Analyse sound\" "
-                                "button to compare the real sound of the tracks."),
+                                "button to compare the real sound of the French tracks (and "
+                                "create a comparison audio file)."),
                              color=(110,110,140), wrap=w-40)
 
             dpg.add_separator()
@@ -7091,6 +7403,15 @@ def _init_doublons():
                     parts.append(_L("à vérifier ", "to check ") + ", ".join(f"#{r['num']}" for r in chks))
                 dpg.add_text(_L("Suggestion : ", "Suggestion: ") + "  ·  ".join(parts),
                              color=(233,69,96) if dels else (170,170,170))
+                # compte rendu de l'analyse du son des pistes francaises
+                _rep = fr_report(items)
+                if _rep:
+                    render_fr_report(_rep)
+                    if any(fk for _t, _c, fk in _rep):
+                        dpg.add_button(label=_L("Dossier des fichiers comparatifs",
+                                                "Comparison files folder"), width=240,
+                                       callback=lambda s,a,u: open_folder(
+                                           str(next(COMPARE_DIR.glob("*.m4a"), COMPARE_DIR))))
 
                 dpg.add_separator()
 
@@ -8054,6 +8375,8 @@ def _init_doublons():
         "rich_metadata": get_rich_metadata,
         "analyze_group_audio": analyze_group_audio,
         "render_results": render_results,
+        "fr_report": fr_report,
+        "audio_files": _AUDIO_FILES,
         "show_suggestions": show_suggestions_window,
         "audio_cmp": _AUDIO_CMP,
         "env_similarity": _env_similarity,

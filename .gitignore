@@ -12,3 +12,4 @@ version_info.txt
 emby_toolbox_*.json
 emby_toolbox_dpg_*.json
 emby_enrich_cache.json*
+comparaisons_audio/

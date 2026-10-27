@@ -73,10 +73,17 @@ sans redémarrer. Le choix est mémorisé.
   - **Langue préférée** (aucune / VFF / VFQ) : sans préférence, une version
     VFF et une version VFQ sont toutes deux gardées ; avec VFF, la version
     uniquement VFQ devient supprimable si une VFF au moins aussi bonne existe ;
-  - **Analyser son** (ffmpeg) : compare le son réel des pistes (90 s au milieu
-    du film). Reconnaît un vrai clone même réencodé ou décalé, et repère un
-    doublage différent mal étiqueté ; le résultat confirme ou corrige la
-    suggestion ;
+  - **SUPPRIMER (sûr)** exige que le **son des pistes françaises** ait été
+    vérifié identique (même doublage) ; sur les seules étiquettes, le verdict
+    est au mieux *probable* ;
+  - **Analyser son** (ffmpeg) : compare entre elles toutes les pistes
+    **françaises** de chaque version (90 s au milieu du film, bande de la
+    voix). Reconnaît un clone même réencodé, décalé ou en PAL, et signale une
+    **VFQ étiquetée VFF** (ou l'inverse) : même étiquette mais doublages
+    différents, ou étiquettes différentes mais même doublage ;
+  - **fichier audio comparatif** par film (`comparaisons_audio\*.m4a`, bouton
+    **Écouter**) : 3 répliques, chacune jouée dans la 1re version (1 bip) puis
+    dans la 2e (2 bips), pour trancher à l'oreille ;
   - fenêtre **Suggestions de suppression** : tous les clones du scan, cases à
     cocher (sûrs cochés), suppression groupée après confirmation.
 - Sauvegarde / rechargement du scan (hors ligne), export **HTML** ou **CSV**,
@@ -269,10 +276,16 @@ restart. The choice is remembered.
   - **Preferred language** (none / VFF / VFQ): without preference, a VFF and a
     VFQ version are both kept; with VFF, the VFQ-only version becomes
     deletable when a VFF version at least as good exists;
-  - **Analyse sound** (ffmpeg): compares the real sound of the tracks (90 s in
-    the middle of the movie). Recognises a true clone even re-encoded or
-    shifted, and spots a different dub with a wrong label; the result confirms
-    or corrects the suggestion;
+  - **DELETE (safe)** requires the **sound of the French tracks** to be checked
+    identical (same dub); on labels alone the verdict is at best *likely*;
+  - **Analyse sound** (ffmpeg): compares every **French** track of each version
+    with the others (90 s in the middle of the movie, voice band). Recognises a
+    clone even re-encoded, shifted or PAL, and reports a **VFQ labelled VFF**
+    (or the reverse): same label but different dubs, or different labels but
+    same dub;
+  - **comparison audio file** per movie (`comparaisons_audio\*.m4a`, **Listen**
+    button): 3 lines, each played in the 1st version (1 beep) then in the 2nd
+    (2 beeps), to decide by ear;
   - **Deletion suggestions** window: every clone of the scan, checkboxes (safe
     ones ticked), batch deletion after confirmation.
 - Save / reload the scan (offline), **HTML** or **CSV** export, Emby library

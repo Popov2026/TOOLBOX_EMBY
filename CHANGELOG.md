@@ -1,5 +1,44 @@
 # Changelog
 
+## 2026.10.2
+
+### Français
+- **Doublons – vérification du son des pistes françaises :** « SUPPRIMER (sûr) »
+  exige maintenant que le SON des pistes françaises ait été vérifié identique
+  (même doublage) ; sur les seules étiquettes, le verdict est au mieux
+  « probable ». Une piste « VF » sans variante n'est jamais « sûre » sans
+  vérification.
+- **VFF / VFQ contrôlées par le son :** toutes les pistes françaises de chaque
+  version sont comparées entre elles (bande de la voix, 300–3 400 Hz). Sont
+  signalés : même étiquette mais doublages différents (« l'un est peut-être une
+  VFQ »), étiquettes différentes mais même doublage (« une des deux est
+  fausse »), piste VF identifiée comme VFF ou VFQ. Versions PAL (25 i/s)
+  compensées.
+- **Fichier audio comparatif par film** (`comparaisons_audio\*.m4a`) : 3
+  répliques ; pour chacune, 1 bip + la réplique de la 1re version, puis 2 bips
+  + la même réplique dans la 2e version. Bouton « Écouter » dans le groupe et
+  dans la fenêtre « Audio ».
+- **Fenêtre « Suggestions » :** bouton « Vérifier le son des pistes
+  françaises » pour tous les films proposés ; seuls les clones dont le son est
+  confirmé sont cochés d'office.
+
+### English
+- **Duplicates – sound check of the French tracks:** "DELETE (safe)" now
+  requires the SOUND of the French tracks to be checked identical (same dub);
+  on labels alone the verdict is at best "likely". A "VF" track with no variant
+  is never "safe" without a check.
+- **VFF / VFQ checked by sound:** every French track of each version is
+  compared with the others (voice band, 300–3,400 Hz). Reported: same label but
+  different dubs ("one may be a VFQ"), different labels but same dub ("one of
+  them is wrong"), VF track identified as VFF or VFQ. PAL versions (25 fps)
+  compensated.
+- **Comparison audio file per movie** (`comparaisons_audio\*.m4a`): 3 lines;
+  for each, 1 beep + the line from the 1st version, then 2 beeps + the same line
+  in the 2nd version. "Listen" button in the group and in the "Audio" window.
+- **"Suggestions" window:** "Check the sound of the French tracks" button for
+  every proposed movie; only clones whose sound is confirmed are ticked by
+  default.
+
 ## 2026.10.1
 
 ### Français
