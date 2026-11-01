@@ -40,6 +40,20 @@ bool isWsUrl(const std::string &a) { return a.compare(0, 6, "wss://") == 0 || a.
 
 namespace {
 
+std::mutex errMu;
+std::string lastErr;   // raison du dernier échec d'ouverture (affichée par le jeu)
+void setErr(const std::string &e) { std::lock_guard<std::mutex> l(errMu); lastErr = e; }
+
+// réponse HTTP autre que 101 (mise à niveau WebSocket refusée)
+std::string httpHint(int st) {
+  std::string r = "réponse HTTP " + std::to_string(st) + " au lieu de 101";
+  if (st == 404) r += " : le serveur relais a reçu la requête sans en-tête WebSocket (proxy : ajouter l'en-tête personnalisé WebSocket)";
+  else if (st == 502 || st == 503 || st == 504) r += " : le proxy n'atteint pas le serveur relais (destination, port, serveur arrêté ?)";
+  else if (st == 400 || st == 426) r += " : WebSocket refusée par le proxy (en-tête personnalisé WebSocket ?)";
+  else if (st == 403) r += " : accès refusé par le proxy (profil de contrôle d'accès ?)";
+  return r;
+}
+
 struct Url { bool secure = false; std::string host, path = "/"; int port = 0; };
 
 bool parseUrl(const std::string &u, Url &r) {
@@ -87,7 +101,7 @@ class PlainWs : public Transport {
     s_ = TSock(socket(res->ai_family, res->ai_socktype, res->ai_protocol));
     bool ok = s_ != TBAD && ::connect(s_, res->ai_addr, int(res->ai_addrlen)) == 0;
     freeaddrinfo(res);
-    if (!ok) return false;
+    if (!ok) { setErr("connexion impossible"); return false; }
     int on = 1;
     setsockopt(s_, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char *>(&on), sizeof on);
     uint8_t key[16];
@@ -105,7 +119,7 @@ class PlainWs : public Transport {
       head.append(b, size_t(r));
     }
     size_t end = head.find("\r\n\r\n") + 4;
-    if (head.compare(0, 12, "HTTP/1.1 101") != 0) return false;
+    if (head.compare(0, 12, "HTTP/1.1 101") != 0) { setErr(httpHint(std::atoi(head.c_str() + 9))); return false; }
     in_.assign(head.begin() + long(end), head.end());
     return true;
   }
@@ -186,24 +200,39 @@ class WinWs : public Transport {
     if (con_) WinHttpCloseHandle(con_);
     if (ses_) WinHttpCloseHandle(ses_);
   }
+  static std::string winErr(const char *step) {
+    DWORD e = GetLastError();
+    std::string w;
+    switch (e) {
+      case 12007: w = "nom du serveur introuvable (DNS)"; break;
+      case 12029: w = "connexion impossible (box, redirection du port 443, NAT en boucle ?)"; break;
+      case 12002: w = "délai dépassé"; break;
+      case 12030: case 12152: w = "connexion coupée par le proxy ou le serveur (serveur relais à jour lancé ?)"; break;
+      case 12175: case 12045: case 12057: case 12037: case 12038: case 12044: w = "certificat refusé"; break;
+      default: w = "erreur"; break;
+    }
+    return std::string("WinHTTP ") + step + " : " + w + " (" + std::to_string(e) + ")";
+  }
   bool open(const Url &u) override {
     std::wstring host = wide(u.host), path = wide(u.path);
     ses_ = WinHttpOpen(L"StuntCarRacer", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!ses_) return false;
+    if (!ses_) { setErr(winErr("ouverture")); return false; }
     DWORD keep = 20000;   // trame de maintien toutes les 20 s : les proxys ferment les liaisons muettes
     WinHttpSetOption(ses_, WINHTTP_OPTION_WEB_SOCKET_KEEPALIVE_INTERVAL, &keep, sizeof keep);
     con_ = WinHttpConnect(ses_, host.c_str(), INTERNET_PORT(u.port), 0);
-    if (!con_) return false;
+    if (!con_) { setErr(winErr("connexion")); return false; }
     HINTERNET req = WinHttpOpenRequest(con_, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
                                        u.secure ? WINHTTP_FLAG_SECURE : 0);
-    if (!req) return false;
-    bool ok = WinHttpSetOption(req, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0) &&
-              WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0, nullptr, 0, 0, 0) &&
-              WinHttpReceiveResponse(req, nullptr);
+    if (!req) { setErr(winErr("requête")); return false; }
+    bool ok = true;
+    if (!WinHttpSetOption(req, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0)) { setErr(winErr("WebSocket")); ok = false; }
+    else if (!WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0, nullptr, 0, 0, 0)) { setErr(winErr("envoi")); ok = false; }
+    else if (!WinHttpReceiveResponse(req, nullptr)) { setErr(winErr("réponse")); ok = false; }
     DWORD status = 0, sz = sizeof status;
-    if (ok) ok = WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
-                                     &status, &sz, WINHTTP_NO_HEADER_INDEX) && status == 101;
-    if (ok) ws_ = WinHttpWebSocketCompleteUpgrade(req, 0);
+    if (ok && !WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
+                                   &status, &sz, WINHTTP_NO_HEADER_INDEX)) { setErr(winErr("statut")); ok = false; }
+    if (ok && status != 101) { setErr(httpHint(int(status))); ok = false; }
+    if (ok && !(ws_ = WinHttpWebSocketCompleteUpgrade(req, 0))) setErr(winErr("mise à niveau"));
     WinHttpCloseHandle(req);
     return ws_ != nullptr;
   }
@@ -271,7 +300,10 @@ void runTunnel(TSock ls, Url u) {
 
 }  // namespace
 
+std::string tunnelError() { std::lock_guard<std::mutex> l(errMu); return lastErr; }
+
 std::string openWsTunnel(const std::string &url, std::string &err) {
+  setErr("");
   Url u;
   if (!parseUrl(url, u)) { err = "adresse wss:// invalide"; return ""; }
 #ifndef _WIN32

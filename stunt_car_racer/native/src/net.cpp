@@ -712,7 +712,10 @@ void RelayProbe::start(const std::string &server) {
       got.append(b, size_t(r));
     }
     closeRaw(intptr_t(s));
-    if (got.size() < 3) { fin(State::Failed, "pas de réponse (est-ce bien le relais ?)"); return; }
+    if (got.size() < 3) {
+      std::string why = tunnel ? tunnelError() : "";   // par un tunnel : raison précise (proxy, certificat...)
+      fin(State::Failed, why.empty() ? "pas de réponse (est-ce bien le relais ?)" : why); return;
+    }
     std::lock_guard<std::mutex> lk(sh->mu);
     // ping : temps de connexion ; par un tunnel, temps de la réponse (connexion chiffrée comprise)
     sh->pingMs = int(((tunnel ? t2 - t1 : t1 - t0)) * 1000 + 0.5);

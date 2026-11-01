@@ -14,4 +14,7 @@ bool isWsUrl(const std::string &addr);   // wss://... ou ws://...
 // Le tunnel attend une connexion locale (15 s au plus), la relie au serveur puis se ferme avec elle.
 std::string openWsTunnel(const std::string &url, std::string &err);
 
+// raison de l'échec du dernier tunnel (vide si aucun) : HTTP du proxy, erreur WinHTTP...
+std::string tunnelError();
+
 }  // namespace scr
