@@ -704,7 +704,7 @@ void RelayProbe::start(const std::string &server) {
     ::send(s, q, 3, 0);
     std::string got;
     while (got.size() < 3 || got.size() < 3 + ((size_t(uint8_t(got[1])) << 8) | uint8_t(got[2]))) {
-      if (!waitFor(false, 5)) break;
+      if (!waitFor(false, tunnel ? 12 : 5)) break;   // tunnel : connexion chiffrée en plus
       char b[512];
       int r = int(::recv(s, b, sizeof b, 0));
       if (r <= 0) break;

@@ -178,6 +178,9 @@ données. Façons de se trouver (menu « 4. Online Multiplayer » du jeu) :
   trame de maintien toutes les 20 s, et le jeu aussi, pour que le proxy ne coupe pas une liaison
   muette (délai de 60 s par défaut chez Synology). Les requêtes web ordinaires (robots) reçoivent
   une réponse « 404 » et sont traitées comme les autres robots.
+  En cas de souci : le message « Hors ligne : ... » du jeu donne la raison (réponse HTTP du proxy,
+  certificat...) ; le jeu note aussi chaque étape dans scr_reseau.log (dossier du jeu), et la
+  fenêtre du serveur affiche « connexion WebSocket » et « test du serveur par WebSocket ».
 
 
 ==============================================================================
@@ -364,3 +367,6 @@ data along. Ways to find each other (the game's "4. Online Multiplayer" menu):
   keep-alive frame every 20 s, and so does the game, so the proxy does not cut an idle link (60 s
   timeout by default on Synology). Ordinary web requests (robots) get a "404" answer and are
   treated like the other robots.
+  If something goes wrong: the game's "Hors ligne : ..." (offline) message gives the reason (proxy
+  HTTP answer, certificate...); the game also writes each step to scr_reseau.log (game folder), and
+  the server window shows "connexion WebSocket" and "test du serveur par WebSocket".

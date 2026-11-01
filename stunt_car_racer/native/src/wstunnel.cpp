@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -42,7 +44,19 @@ namespace {
 
 std::mutex errMu;
 std::string lastErr;   // raison du dernier échec d'ouverture (affichée par le jeu)
-void setErr(const std::string &e) { std::lock_guard<std::mutex> l(errMu); lastErr = e; }
+void tlog(const std::string &m);
+void setErr(const std::string &e) { { std::lock_guard<std::mutex> l(errMu); lastErr = e; } if (!e.empty()) tlog("échec : " + e); }
+
+// trace du tunnel dans scr_reseau.log (dossier du jeu) : étapes, octets, erreurs ; jamais l'adresse
+void tlog(const std::string &m) {
+  static std::mutex mu;
+  std::lock_guard<std::mutex> l(mu);
+  FILE *f = std::fopen("scr_reseau.log", "a");
+  if (!f) return;
+  char ts[32]; time_t t = time(nullptr); strftime(ts, sizeof ts, "%Y-%m-%d %H:%M:%S", localtime(&t));
+  std::fprintf(f, "%s  %s\n", ts, m.c_str());
+  std::fclose(f);
+}
 
 // réponse HTTP autre que 101 (mise à niveau WebSocket refusée)
 std::string httpHint(int st) {
@@ -233,6 +247,7 @@ class WinWs : public Transport {
                                    &status, &sz, WINHTTP_NO_HEADER_INDEX)) { setErr(winErr("statut")); ok = false; }
     if (ok && status != 101) { setErr(httpHint(int(status))); ok = false; }
     if (ok && !(ws_ = WinHttpWebSocketCompleteUpgrade(req, 0))) setErr(winErr("mise à niveau"));
+    if (ws_) tlog("WebSocket ouverte (HTTP 101)");
     WinHttpCloseHandle(req);
     return ws_ != nullptr;
   }
@@ -240,13 +255,16 @@ class WinWs : public Transport {
     for (;;) {
       DWORD got = 0;
       WINHTTP_WEB_SOCKET_BUFFER_TYPE type;
-      if (WinHttpWebSocketReceive(ws_, buf, DWORD(n), &got, &type) != NO_ERROR) return 0;
-      if (type == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE) return 0;
+      DWORD e = WinHttpWebSocketReceive(ws_, buf, DWORD(n), &got, &type);
+      if (e != NO_ERROR) { tlog("réception : erreur WinHTTP " + std::to_string(e)); return 0; }
+      if (type == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE) { tlog("fermeture par le serveur"); return 0; }
       if (got) return int(got);
     }
   }
   bool send(const uint8_t *p, size_t n) override {
-    return WinHttpWebSocketSend(ws_, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, const_cast<uint8_t *>(p), DWORD(n)) == NO_ERROR;
+    DWORD e = WinHttpWebSocketSend(ws_, WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, const_cast<uint8_t *>(p), DWORD(n));
+    if (e != NO_ERROR) tlog("envoi : erreur WinHTTP " + std::to_string(e));
+    return e == NO_ERROR;
   }
   void shutdown() override { WinHttpWebSocketShutdown(ws_, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, nullptr, 0); }
 
@@ -269,7 +287,8 @@ void runTunnel(TSock ls, Url u) {
   TSock local = TBAD;
   if (select(int(ls + 1), &f, nullptr, nullptr, &tv) > 0) local = TSock(accept(ls, nullptr, nullptr));
   tclose(ls);
-  if (local == TBAD) return;
+  if (local == TBAD) { tlog("tunnel : le jeu ne s'est pas connecté"); return; }
+  tlog(std::string("tunnel : ouverture ") + (u.secure ? "wss" : "ws"));
   int on = 1;
   setsockopt(local, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char *>(&on), sizeof on);
   std::unique_ptr<Transport> t;
@@ -282,17 +301,24 @@ void runTunnel(TSock ls, Url u) {
   Transport *tp = t.get();
   std::thread up([local, tp] {   // jeu -> serveur
     uint8_t b[8192];
+    size_t total = 0;
     for (;;) {
       int r = int(::recv(local, reinterpret_cast<char *>(b), sizeof b, 0));
       if (r <= 0 || !tp->send(b, size_t(r))) break;
+      if (total < 64) tlog("jeu -> serveur : " + std::to_string(r) + " octets");
+      total += size_t(r);
     }
     tp->shutdown();
   });
   uint8_t b[16384];
+  size_t total = 0;
   for (;;) {   // serveur -> jeu
     int r = t->recv(b, sizeof b);
     if (r <= 0 || !sendAll(local, b, size_t(r))) break;
+    if (total < 512) tlog("serveur -> jeu : " + std::to_string(r) + " octets");
+    total += size_t(r);
   }
+  tlog("tunnel : fin (" + std::to_string(total) + " octets reçus du serveur)");
   tshutdown(local);
   up.join();
   tclose(local);

@@ -119,7 +119,7 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v75"
+#define SCR_RELAY_VERSION "v76"
 
 namespace {
 
@@ -193,6 +193,7 @@ struct Client {
   bool ws = false;               // arrivé en WebSocket (par un reverse proxy web)
   std::vector<uint8_t> raw, wsOut;   // WebSocket : octets reçus non décodés, trames à envoyer
   double lastWsPing = 0;
+  bool wsCloseSent = false, wsCloseGot = false;   // fermeture WebSocket propre (les deux sens)
   double closingSince = 0;
   double since = 0, lastRx = 0, pairedAt = 0, lastChat = 0;
   bool inGroup = false;          // course à plusieurs
@@ -360,7 +361,10 @@ void wsDecode(Client &c) {
     std::vector<uint8_t> pay(c.raw.begin() + long(h), c.raw.begin() + long(h + len));
     if (masked) for (size_t i = 0; i < len; i++) pay[i] ^= c.raw[h - 4 + (i & 3)];
     c.raw.erase(c.raw.begin(), c.raw.begin() + long(h + len));
-    if (op == 0x8) { wsFrame(c, 0x8, nullptr, 0); c.closing = true; c.raw.clear(); return; }   // fermeture
+    if (op == 0x8) {   // fermeture demandée par le jeu : réponse, puis fin
+      if (!c.wsCloseSent) { wsFrame(c, 0x8, nullptr, 0); c.wsCloseSent = true; }
+      c.wsCloseGot = c.closing = true; c.raw.clear(); return;
+    }
     if (op == 0x9) { wsFrame(c, 0xA, pay.data(), pay.size()); continue; }                     // ping -> pong
     if (op == 0xA) continue;                                                                    // pong
     c.in.insert(c.in.end(), pay.begin(), pay.end());
@@ -419,6 +423,7 @@ bool httpUpgrade(Client &c) {
                      "Sec-WebSocket-Accept: " + acc + "\r\n\r\n";
   c.wsOut.insert(c.wsOut.end(), resp.begin(), resp.end());
   c.ws = true; c.lastWsPing = now();
+  logf("%s : connexion WebSocket (reverse proxy)", c.ip.c_str());
   c.raw = rest;
   wsDecode(c);
   dirty = true;
@@ -834,6 +839,7 @@ void process(Client &c) {
         // version du serveur (= version du jeu) : le jeu prévient le joueur quand une nouvelle version est sortie
         frame(c, NF_INFO, "SERVER " + std::to_string(players) + " " + std::to_string(games / 2) + ";" + paramsText() + ";version=" SCR_RELAY_VERSION);
         c.probe = c.closing = true;
+        if (c.ws) logf("%s : test du serveur par WebSocket, réponse envoyée", c.ip.c_str());
       }
       else { c.bot = c.closing = true; break; }
     } else if (c.peer != NONE) {
@@ -1072,6 +1078,7 @@ int main(int argc, char **argv) {
       Sock fd = kv.first; Client &c = kv.second;
       if (c.ws) {   // WebSocket : protocole du jeu dans des messages binaires, maintien toutes les 20 s
         if (!c.out.empty()) { wsFrame(c, 0x2, c.out.data(), c.out.size()); c.out.clear(); }
+        if (c.closing && !c.wsCloseSent) { wsFrame(c, 0x8, nullptr, 0); c.wsCloseSent = true; }   // après les dernières données
         if (t - c.lastWsPing > 20) { c.lastWsPing = t; wsFrame(c, 0x9, nullptr, 0); }
         if (c.wsOut.size() > MAX_BUFFER) c.overflow = true;
       }
@@ -1083,7 +1090,9 @@ int main(int argc, char **argv) {
       }
       if (c.closing && !c.closingSince) c.closingSince = t;
       if (c.overflow) dead.push_back({fd, "trop de données en attente"});
-      else if (c.closing && ((c.out.empty() && c.wsOut.empty()) || t - c.closingSince > 10)) dead.push_back({fd, "terminé"});
+      // WebSocket : fermeture propre (réponse du jeu, 3 s au plus) pour que le proxy livre tout avant la coupure
+      else if (c.closing && ((c.out.empty() && c.wsOut.empty() && (!c.ws || c.wsCloseGot || t - c.closingSince > 3)) ||
+                             t - c.closingSince > 10)) dead.push_back({fd, "terminé"});
       else if (!c.joined && t - c.since > (c.suspect ? SUSPECT_JOIN_TIMEOUT : JOIN_TIMEOUT)) dead.push_back({fd, "pas d'inscription"});
       else if (c.joined && c.peer == NONE && t - c.lastRx > PAIR_TIMEOUT) dead.push_back({fd, "inactif trop longtemps"});
       else if (c.peer != NONE && t - c.lastRx > IDLE_TIMEOUT) dead.push_back({fd, "silence"});
