@@ -56,6 +56,10 @@ disponible »).
        « Hors ligne : ... »                    (rouge) : raison (serveur arrêté, adresse
                                                           introuvable, pas de réponse...).
      « Tester à nouveau le serveur » refait le test.
+     « État du serveur (parties, joueurs, salles) » affiche, mis à jour toutes les 5 s, les parties
+     en cours (circuit, tours, joueurs), les joueurs connectés et leur état, et les salles privées
+     ouvertes ; flèches gauche / droite pour faire défiler, « Retour » ou Échap pour revenir
+     (serveur v80 ou plus récent ; la même chose en page web : README_SERVER.txt, section 6).
      Pseudo : « Pseudo : ... (changer) » ; chaque joueur saisit le sien (12 caractères, enregistré
      dans scr.ini, ligne nom =) : c'est le nom affiché au-dessus de sa voiture et au classement.
      Quand le serveur répond :
@@ -232,6 +236,10 @@ with the French language chosen in the F1 options menu; the English meaning is g
        "Hors ligne : ..."                    (red)   : offline, with the reason (server stopped,
                                                        address not found, no answer...).
      "Tester à nouveau le serveur" (test the server again) repeats the test.
+     "Server status (games, players, rooms)" shows, updated every 5 s, the games in progress
+     (track, laps, players), the connected players and their state, and the open private rooms;
+     left / right arrows scroll, "Back" or Escape returns (server v80 or later; the same as a web
+     page: README_SERVER.txt, section 6).
      Nickname: "Pseudo : ... (changer)"; each player enters their own (12 characters, saved in
      scr.ini, line nom =): it is the name shown above their car and in the standings.
      When the server answers:

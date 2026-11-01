@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v79"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v80"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -715,6 +715,11 @@ int main(int argc, char **argv) {
   struct MenuItem { std::string label; int kind; NetLink::Peer peer; };
   RelayProbe probe;                 // « Online Multiplayer » : le serveur relais répond-il ?
   RelayProbe updateProbe;           // au démarrage : le serveur annonce la dernière version du jeu
+  RelayProbe statusProbe;           // « État du serveur » : parties, joueurs et salles (rafraîchi toutes les 5 s)
+  bool statusView = false;
+  int statusScroll = 0;              // défilement de la liste (flèches gauche / droite)
+  double statusAt = -1e9;
+  std::string statusRaw, statusErr;
   bool updateShown = false;
   updateProbe.start(relayAddr(o.relay));
   int netRate = o.netRate;          // cadence réseau en cours (scr.ini, ou imposée par le serveur relais)
@@ -762,6 +767,11 @@ int main(int argc, char **argv) {
   };
   auto menuItems = [&] {
     std::vector<MenuItem> it;
+    if (statusView) {   // écran « État du serveur »
+      it.push_back({L("Actualiser", "Refresh"), 17, {}});
+      it.push_back({L("Retour", "Back"), 18, {}});
+      return it;
+    }
     bool idle = !net.active() || net.state() == NetLink::State::Failed;
     if (online()) {
       bool inRoom = net.relayRoom() && net.state() == NetLink::State::Waiting;   // salle privée du relais
@@ -797,6 +807,7 @@ int main(int argc, char **argv) {
           it.push_back({L("Premier joueur disponible", "First available player"), 5, {}});
           it.push_back({L("Salle privée (code)", "Private room (code)"), 1, {}});
         }
+        if (probe.ok()) it.push_back({L("État du serveur (parties, joueurs, salles)", "Server status (games, players, rooms)"), 17, {}});
         it.push_back({L("Tester à nouveau le serveur", "Test the server again"), 6, {}});
         it.push_back({L("Pseudo : ", "Nickname: ") + o.playerName + L("  (changer)", "  (change)"), 14, {}});
         it.push_back({L("Changer l'adresse du serveur", "Change the server address"), 7, {}});
@@ -848,6 +859,11 @@ int main(int argc, char **argv) {
       case 13: leaveGroup(); break;
       case 15: net.groupCommand("ACCEPT"); break;
       case 16: net.groupCommand("REJECT"); menuSel = 0; break;
+      case 17:   // état du serveur : ouverture ou actualisation
+        if (!statusView) { statusView = true; statusRaw.clear(); statusErr.clear(); statusScroll = 0; menuSel = 0; }
+        statusProbe.start(relayAddr(o.relay), true); statusAt = NetLink::clock();
+        break;
+      case 18: statusView = false; menuSel = 0; break;
     }
   };
   // aide aux tests automatiques (aucun effet sinon) : SCR_AUTOKEYS="trame:Touche,..." simule des appuis
@@ -1111,6 +1127,9 @@ int main(int argc, char **argv) {
           int d = sc == SDL_SCANCODE_RIGHT ? 1 : -1;
           if (kind == 10) gTrack = (gTrack + nTracks + d) % nTracks; else gLaps = std::clamp(gLaps + d, 1, 9);
         }
+        else if (sc == SDL_SCANCODE_ESCAPE && statusView) { statusView = false; menuSel = 0; }
+        else if (statusView && (sc == SDL_SCANCODE_LEFT || sc == SDL_SCANCODE_PAGEUP)) statusScroll = std::max(0, statusScroll - 5);
+        else if (statusView && (sc == SDL_SCANCODE_RIGHT || sc == SDL_SCANCODE_PAGEDOWN)) statusScroll += 5;
         else if (sc == SDL_SCANCODE_ESCAPE && net.inGroup()) leaveGroup();
         else if (sc == SDL_SCANCODE_UP) menuSel = (menuSel + n - 1) % n;
         else if (sc == SDL_SCANCODE_DOWN) menuSel = (menuSel + 1) % n;
@@ -1710,11 +1729,105 @@ int main(int argc, char **argv) {
       int scale = std::max(1, logicalW / 400);
       struct Line { std::string text; uint32_t fg, bg; };
       std::vector<Line> lines;
-      lines.push_back({net.inGroup() && net.groupDuel() ? std::string(L("COURSE A DEUX", "TWO-PLAYER RACE")) + (net.relayRoom() ? L(" - SALLE ", " - ROOM ") + net.room() : "")
+      if (statusView && (!online() || (net.active() && net.state() != NetLink::State::Failed))) statusView = false;
+      lines.push_back({statusView ? std::string(L("ETAT DU SERVEUR", "SERVER STATUS"))
+                       : net.inGroup() && net.groupDuel() ? std::string(L("COURSE A DEUX", "TWO-PLAYER RACE")) + (net.relayRoom() ? L(" - SALLE ", " - ROOM ") + net.room() : "")
                        : net.inGroup() ? L("COURSE A PLUSIEURS - SALLE ", "MULTI-CAR RACE - ROOM ") + net.room()
                        : online() ? L("ONLINE MULTIPLAYER - SERVEUR RELAIS", "ONLINE MULTIPLAYER - RELAY SERVER") : L("COMPUTER LINK - RESEAU LOCAL (LAN)", "COMPUTER LINK - LOCAL NETWORK (LAN)"), 0xffffff00u, 0xe0202020u});
+      if (statusView) {   // état du serveur : réponse STATUS mise en forme dans la langue du jeu
+        if (statusProbe.state() == RelayProbe::State::Ok) { statusRaw = statusProbe.status(); statusErr.clear(); }
+        else if (statusProbe.state() == RelayProbe::State::Failed) statusErr = statusProbe.text();
+        if (statusProbe.state() != RelayProbe::State::Probing && NetLink::clock() - statusAt > 5) {
+          statusProbe.start(relayAddr(o.relay), true); statusAt = NetLink::clock();
+        }
+        const uint32_t bg = 0xe0202020u, white = 0xffffffffu, grey = 0xffc0c0c0u, title = 0xffffc040u;
+        auto split = [](const std::string &s, char d) {
+          std::vector<std::string> v(1);
+          for (char ch : s) { if (ch == d) v.emplace_back(); else v.back() += ch; }
+          return v;
+        };
+        auto dur = [](long sec) {
+          char b[24];
+          if (sec >= 3600) std::snprintf(b, sizeof b, "%ldh%02ld", sec / 3600, sec / 60 % 60);
+          else std::snprintf(b, sizeof b, "%ld:%02ld", sec / 60, sec % 60);
+          return std::string(b);
+        };
+        auto stateTxt = [&](const std::string &c) -> std::string {
+          if (c == "wait") return L("attend un adversaire", "waiting for an opponent");
+          if (c == "free") return L("dans la salle, libre", "in the room, free");
+          if (c.rfind("vs:", 0) == 0) return L("en course contre ", "racing against ") + c.substr(3);
+          if (c == "vote") return L("choisit le circuit", "choosing the track");
+          if (c == "accept") return L("circuit accepté", "track accepted");
+          if (c == "lobby") return L("attend le départ", "waiting for the start");
+          if (c == "racing") return L("en course", "racing");
+          if (c == "out") return L("abandon (voiture détruite)", "out (car wrecked)");
+          if (c.rfind("fin:", 0) == 0) {
+            long ms = std::atol(c.c_str() + 4); char b[32];
+            std::snprintf(b, sizeof b, "%ld:%04.1f", ms / 60000, (ms % 60000) / 1000.0);
+            return L("arrivé en ", "finished in ") + std::string(b);
+          }
+          return L("chargement", "loading");
+        };
+        auto phaseTxt = [&](const std::string &ph) -> std::string {
+          if (ph == "vote") return L("choix du circuit", "choosing the track");
+          if (ph == "racing") return L("en course", "racing");
+          if (ph == "lobby") return L("attente du départ", "waiting for the start");
+          return L("chargement", "loading");
+        };
+        std::vector<Line> games, players, rooms;
+        int np = 0, ng = 0, nr = 0;
+        for (auto &ln : split(statusRaw, '\n')) {
+          auto f = split(ln, '\t');
+          if (f[0] == "S" && f.size() >= 4) { np = std::atoi(f[1].c_str()); ng = std::atoi(f[2].c_str()); nr = std::atoi(f[3].c_str()); }
+          else if (f[0] == "G" && f.size() >= 7) {
+            std::string kind = f[1] == "d" ? L("Course à deux", "Two-player race") : f[1] == "m" ? L("Course à plusieurs", "Multi-car race") : "Computer Link";
+            if (!f[2].empty()) kind += L(" - salle ", " - room ") + f[2];
+            int tr = std::atoi(f[3].c_str()), laps = std::atoi(f[4].c_str());
+            std::string d = tr >= 0 ? trackName(tr) + ", " + std::to_string(laps) + L(" tour", " lap") + (laps > 1 ? "s" : "") + " - " + phaseTxt(f[5]) : phaseTxt(f[5]);
+            for (auto &w : wrapText(kind + L(" : ", ": ") + d, 44)) games.push_back({w, white, bg});
+            std::string names;
+            for (auto &n : split(f[6], '|')) names += (names.empty() ? "" : ", ") + n;
+            for (auto &w : wrapText("  " + names, 44)) games.push_back({w, grey, bg});
+          } else if (f[0] == "P" && f.size() >= 6) {
+            for (auto &w : wrapText(f[1] + " - " + stateTxt(f[4]) + " (" + dur(std::atol(f[5].c_str())) + ")", 44)) players.push_back({w, white, bg});
+          } else if (f[0] == "R" && f.size() >= 3) {
+            std::string names;
+            for (auto &n : split(f[2], '|')) names += (names.empty() ? "" : ", ") + n;
+            for (auto &w : wrapText(f[1] + L(" : ", ": ") + names, 44)) rooms.push_back({w, white, bg});
+          }
+        }
+        if (!statusErr.empty() && statusRaw.empty()) lines.push_back({statusErr, 0xffff8080u, bg});
+        else if (statusRaw.empty()) lines.push_back({L("Chargement...", "Loading..."), grey, bg});
+        else {
+          lines.push_back({L("Joueurs : ", "Players: ") + std::to_string(np) + L("   Parties : ", "   Games: ") + std::to_string(ng) +
+                           L("   Salles : ", "   Rooms: ") + std::to_string(nr), 0xff80ff80u, bg});
+          std::vector<Line> all;   // parties, joueurs, salles ; fenêtre selon la hauteur de l'écran
+          auto section = [&](const char *head, const char *none, std::vector<Line> &v) {
+            all.push_back({head, title, bg});
+            if (v.empty()) all.push_back({none, grey, bg});
+            all.insert(all.end(), v.begin(), v.end());
+          };
+          section(L("PARTIES EN COURS", "GAMES IN PROGRESS"), L("Aucune partie en cours", "No game in progress"), games);
+          section(L("JOUEURS CONNECTES", "PLAYERS ONLINE"), L("Personne", "Nobody"), players);
+          section(L("SALLES PRIVEES", "PRIVATE ROOMS"), L("Aucune salle", "No room"), rooms);
+          const int room = std::max(4, logicalH / (15 * std::max(1, logicalW / 400)) - 6);   // titre, résumé, 2 choix, aide
+          const int n = int(all.size());
+          if (n <= room) statusScroll = 0;
+          else {
+            statusScroll = std::clamp(statusScroll, 0, n - (room - 1));
+            int show = room - 1;   // une ligne pour l'indication de défilement
+            for (int k = statusScroll; k < statusScroll + show && k < n; k++) lines.push_back(all[size_t(k)]);
+            char b[64];
+            std::snprintf(b, sizeof b, "%s %d-%d / %d", L("<  > : défiler", "<  > : scroll"), statusScroll + 1, std::min(n, statusScroll + show), n);
+            lines.push_back({b, grey, bg});
+            all.clear();
+          }
+          lines.insert(lines.end(), all.begin(), all.end());
+        }
+      }
       std::string st = net.status();
       std::vector<Line> groupLines;
+      if (!statusView) {
       if (net.inGroup()) {   // joueurs du groupe (avec les temps de la dernière course)
         std::string hostName;
         for (auto &gm : net.groupMembers()) if (gm.id == net.groupHost()) hostName = gm.name;
@@ -1779,10 +1892,11 @@ int main(int argc, char **argv) {
             addrs += (addrs.empty() ? "" : "  ") + a;
           }
         }
-        if (!addrs.empty()) lines.push_back({"Ce PC : " + addrs, 0xffc0c0c0u, 0xe0202020u});
+        if (!addrs.empty()) lines.push_back({L("Ce PC : ", "This PC: ") + addrs, 0xffc0c0c0u, 0xe0202020u});
         if (net.peers().empty() && net.sinceStart() > 8)
           lines.push_back({L("Personne ? Pare-feu : autoriser scr.exe", "Nobody? Firewall: allow scr.exe"), 0xffffc040u, 0xe0202020u});
       }
+      }   // fin de l'écran habituel (pas l'état du serveur)
       auto items = menuItems();
       if (menuSel >= int(items.size())) menuSel = int(items.size()) - 1;
       for (size_t k = 0; k < items.size(); k++) {
@@ -1811,6 +1925,7 @@ int main(int argc, char **argv) {
                        : typing == Typing::Ip ? L("Entrée : valider     Échap : retour", "Enter: confirm     Escape: back")
                        : typing == Typing::Server ? L("Adresse[:port], Entrée : enregistrer", "Address[:port], Enter: save")
                        : typing == Typing::Pseudo ? L("12 caractères, Entrée : enregistrer", "12 characters, Enter: save")
+                       : statusView ? L("Flèches + Entrée : choisir  Échap : retour", "Arrows + Enter: choose  Escape: back")
                                               : L("Flèches + Entrée : choisir  Échap : annuler", "Arrows + Enter: choose  Escape: cancel"), 0xffc0c0c0u, 0xe0202020u});
       int lineH = 15 * scale, total = int(lines.size()) * lineH;
       int y = std::max(0, (logicalH - total) / 2);

@@ -41,6 +41,8 @@
 //                       HORN (22) ""        (klaxon : à l'adversaire, ou aux autres membres de la course,
 //                                            reçu précédé du numéro du joueur sur 4 octets)
 //                       PROBE (15) ""       (test du serveur par le jeu : réponse INFO "SERVER joueurs parties;réglages;version=vNN")
+//                       STATUS (23) ""      (état du serveur pour le menu du jeu, sans inscription : réponse STATUS,
+//                                            lignes S/P/G/R séparées par des tabulations, voir statusText)
 //                       JOIN (10) "code\0version"  (ancienne version : appariement par code)
 //   serveur -> client : INFO (11) "WAIT" | "PAIRED 1" (maître) | "PAIRED 2" | "GONE" | "BUSY" | "ERR message"
 //                       LIST (13) "numéro\tnom\n..." (salle privée : joueurs présents et libres)
@@ -119,12 +121,12 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v79"
+#define SCR_RELAY_VERSION "v80"
 
 namespace {
 
 constexpr uint8_t NF_JOIN = 10, NF_INFO = 11, NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16, NF_CHAT = 17,
-                  NF_GSTATE = 18, NF_GCMD = 19, NF_GEVENT = 20, NF_GPOS = 21, NF_HORN = 22;
+                  NF_GSTATE = 18, NF_GCMD = 19, NF_GEVENT = 20, NF_GPOS = 21, NF_HORN = 22, NF_STATUS = 23;
 constexpr size_t GROUP_MAX = 6;
 constexpr size_t MAX_CLIENTS = 512, MAX_PER_IP = 16, MAX_BUFFER = 1 << 20;
 const Sock NONE = Sock(-1);
@@ -373,6 +375,7 @@ void wsDecode(Client &c) {
 }
 
 std::string webPage(const std::string &path, std::string &type, int &status);
+std::string statusText();
 
 // requête HTTP en tête de connexion : mise à niveau WebSocket (le jeu, par le reverse proxy), sinon
 // un robot (réponse 404). Rend vrai quand la connexion est passée en WebSocket.
@@ -833,7 +836,7 @@ void process(Client &c) {
   // avant l'inscription, seules JOIN2, JOIN et PROBE (courtes) sont admises : le reste est un robot
   if (!c.joined && !c.in.empty()) {
     uint8_t t0 = c.in[0];
-    bool bad = t0 != NF_JOIN2 && t0 != NF_JOIN && t0 != NF_PROBE;
+    bool bad = t0 != NF_JOIN2 && t0 != NF_JOIN && t0 != NF_PROBE && t0 != NF_STATUS;
     if (!bad && c.in.size() >= 3) bad = ((size_t(c.in[1]) << 8) | c.in[2]) > MAX_JOIN_FRAME;
     if (bad) { c.bot = c.closing = true; c.in.clear(); return; }
   }
@@ -857,6 +860,10 @@ void process(Client &c) {
         frame(c, NF_INFO, "SERVER " + std::to_string(players) + " " + std::to_string(games / 2) + ";" + paramsText() + ";version=" SCR_RELAY_VERSION);
         c.probe = c.closing = true;
         if (c.ws) logf("%s : test du serveur par WebSocket, réponse envoyée", c.ip.c_str());
+      }
+      else if (type == NF_STATUS) {   // état du serveur pour le menu du jeu (parties, joueurs, salles)
+        frame(c, NF_STATUS, statusText());
+        c.probe = c.closing = true;
       }
       else { c.bot = c.closing = true; break; }
     } else if (c.peer != NONE) {
@@ -1121,6 +1128,60 @@ std::string webPage(const std::string &path, std::string &type, int &status) {
   }
   h += "<p class=\"sub\">Machine-readable: <a style=\"color:#8cc8ff\" href=\"/status.json\">/status.json</a></p></main></body></html>";
   return h;
+}
+
+// état pour le menu du jeu (STATUS) : une ligne par élément, champs séparés par des tabulations ;
+// le jeu traduit les codes d'état dans sa langue
+//   S  joueurs  parties  salles  parties depuis le lancement  secondes de service
+//   P  nom  mode (a, r, c)  salle  état  secondes de connexion
+//      état : wait, free, vs:nom, vote, accept, lobby, loading, racing, out, fin:ms
+//   G  type (d : course à deux, m : à plusieurs, l : Computer Link)  salle  circuit  tours  phase  noms (|)
+//   R  code  noms (|)
+std::string statusText() {
+  const double t = now();
+  auto clean = [](std::string n) { for (auto &ch : n) if (ch == '\t' || ch == '|' || ch == '\n') ch = '/'; return n; };
+  auto stateCode = [&](const Client &c) -> std::string {
+    if (c.peer != NONE) { auto p = clients.find(c.peer); return "vs:" + clean(p == clients.end() ? "?" : playerName(p->second)); }
+    if (c.inGroup) {
+      const std::string &g = c.gstate;
+      if (g.rfind("finished:", 0) == 0) return "fin:" + g.substr(9);
+      if (g == "out" || g == "vote" || g == "accept" || g == "racing" || g == "lobby") return g;
+      return "loading";
+    }
+    return c.mode == Mode::Room ? "free" : "wait";
+  };
+  std::vector<const Client *> players;
+  for (auto &kv : clients) if (kv.second.joined && !kv.second.closing) players.push_back(&kv.second);
+  std::sort(players.begin(), players.end(), [](const Client *a, const Client *b) { return a->id < b->id; });
+  std::string gl;
+  size_t ng = 0;
+  for (auto &kv : groups) {
+    const Group &g = kv.second;
+    if (g.members.empty()) continue;
+    std::string names;
+    for (Sock f : g.members) { auto it = clients.find(f); if (it != clients.end()) names += (names.empty() ? "" : "|") + clean(playerName(it->second)); }
+    gl += std::string("G\t") + (g.duel ? "d" : "m") + "\t" + (kv.first.rfind("DUEL", 0) == 0 ? "" : clean(kv.first)) + "\t" + std::to_string(g.track) +
+          "\t" + std::to_string(g.laps) + "\t" + g.phase + "\t" + names + "\n";
+    ng++;
+  }
+  for (const Client *c : players) {
+    if (c->peer == NONE || c->peer < c->fd) continue;
+    auto p = clients.find(c->peer);
+    if (p == clients.end()) continue;
+    gl += "G\tl\t" + clean(c->room) + "\t-1\t0\tracing\t" + clean(playerName(*c)) + "|" + clean(playerName(p->second)) + "\n";
+    ng++;
+  }
+  std::map<std::string, std::string> rooms;
+  for (const Client *c : players)
+    if (c->mode == Mode::Room) { auto &r = rooms[c->room]; r += (r.empty() ? "" : "|") + clean(playerName(*c)); }
+  std::string r = "S\t" + std::to_string(players.size()) + "\t" + std::to_string(ng) + "\t" + std::to_string(rooms.size()) + "\t" +
+                  std::to_string(totalGames) + "\t" + std::to_string(long(t - startedAt)) + "\n" + gl;
+  for (const Client *c : players)
+    r += std::string("P\t") + clean(playerName(*c)) + "\t" + (c->mode == Mode::Auto ? "a" : c->mode == Mode::Room ? "r" : "c") + "\t" +
+         clean(c->mode == Mode::Room ? c->room : "") + "\t" + stateCode(*c) + "\t" + std::to_string(long(t - c->since)) + "\n";
+  for (auto &kv : rooms) r += "R\t" + clean(kv.first) + "\t" + kv.second + "\n";
+  if (r.size() > 60000) r.resize(r.rfind('\n', 60000) + 1);   // une trame (64 Ko au plus)
+  return r;
 }
 
 // adresses IPv4 de cette machine (pour le message de démarrage)

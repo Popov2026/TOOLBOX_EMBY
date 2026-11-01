@@ -28,7 +28,7 @@ constexpr int NET_DISCOVERY_PORT = 27421; // UDP : annonces de parties en résea
 
 enum NetFrame : uint8_t { NF_HELLO = 1, NF_DATA = 2, NF_PING = 3, NF_PONG = 4, NF_BYE = 5, NF_JOIN = 10, NF_INFO = 11,
                           NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16, NF_CHAT = 17,
-                          NF_GSTATE = 18, NF_GCMD = 19, NF_GEVENT = 20, NF_GPOS = 21, NF_HORN = 22 };
+                          NF_GSTATE = 18, NF_GCMD = 19, NF_GEVENT = 20, NF_GPOS = 21, NF_HORN = 22, NF_STATUS = 23 };
 
 class NetLink {
  public:
@@ -178,7 +178,8 @@ class RelayProbe {
  public:
   enum class State { Off, Probing, Ok, Failed };
   ~RelayProbe();
-  void start(const std::string &server);   // serveur[:port]
+  void start(const std::string &server, bool status = false);   // serveur[:port] ; status : état complet (STATUS)
+  std::string status() const;              // réponse STATUS du serveur (lignes S/P/G/R), vide sinon
   State state() const;
   std::string text() const;                // texte pour le menu
   bool ok() const { return state() == State::Ok; }
@@ -189,7 +190,8 @@ class RelayProbe {
   struct Shared {
     std::mutex mu;
     State state = State::Off;
-    std::string server, error, params, version;
+    std::string server, error, params, version, status;
+    bool wantStatus = false;
     int players = -1, games = -1, pingMs = -1;
   };
   std::shared_ptr<Shared> sh_;

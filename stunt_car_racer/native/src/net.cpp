@@ -662,10 +662,10 @@ RelayProbe::~RelayProbe() {
   if (th_.joinable()) th_.detach();   // le fil ne touche qu'à sh_ (partagé) : il peut finir seul
 }
 
-void RelayProbe::start(const std::string &server) {
+void RelayProbe::start(const std::string &server, bool status) {
   if (th_.joinable()) th_.detach();
   auto sh = std::make_shared<Shared>();
-  sh->server = server;
+  sh->server = server; sh->wantStatus = status;
   sh_ = sh;
   if (server.empty()) { sh->state = State::Failed; sh->error = L("aucun serveur dans scr.ini", "no server in scr.ini"); return; }
   sh->state = State::Probing;
@@ -701,7 +701,7 @@ void RelayProbe::start(const std::string &server) {
     if (err != 0) { closeRaw(intptr_t(s)); fin(State::Failed, L("connexion refusée (serveur arrêté ?)", "connection refused (server stopped?)")); return; }
     const bool tunnel = isWsUrl(sh->server);
     double t1 = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(), t2 = 0;
-    const char q[3] = {char(NF_PROBE), 0, 0};
+    const char q[3] = {char(sh->wantStatus ? NF_STATUS : NF_PROBE), 0, 0};
     ::send(s, q, 3, 0);
     std::string got;
     while (got.size() < 3 || got.size() < 3 + ((size_t(uint8_t(got[1])) << 8) | uint8_t(got[2]))) {
@@ -715,12 +715,14 @@ void RelayProbe::start(const std::string &server) {
     closeRaw(intptr_t(s));
     if (got.size() < 3) {
       std::string why = tunnel ? tunnelError() : "";   // par un tunnel : raison précise (proxy, certificat...)
+      if (why.empty() && sh->wantStatus) why = L("pas de réponse (serveur v80 ou plus récent ?)", "no answer (server v80 or later?)");
       fin(State::Failed, why.empty() ? std::string(L("pas de réponse (est-ce bien le relais ?)", "no answer (is it really the relay?)")) : why); return;
     }
     std::lock_guard<std::mutex> lk(sh->mu);
     // ping : temps de connexion ; par un tunnel, temps de la réponse (connexion chiffrée comprise)
     sh->pingMs = int(((tunnel ? t2 - t1 : t1 - t0)) * 1000 + 0.5);
     std::string msg = got.substr(3);
+    if (uint8_t(got[0]) == NF_STATUS) sh->status = msg;
     if (uint8_t(got[0]) == NF_INFO && msg.compare(0, 7, "SERVER ") == 0) {
       std::sscanf(msg.c_str() + 7, "%d %d", &sh->players, &sh->games);
       size_t sc = msg.find(';');
@@ -733,6 +735,12 @@ void RelayProbe::start(const std::string &server) {
     }
     sh->state = State::Ok;   // un ancien relais répond aussi (message d'erreur) : il est en service
   });
+}
+
+std::string RelayProbe::status() const {
+  if (!sh_) return "";
+  std::lock_guard<std::mutex> l(sh_->mu);
+  return sh_->status;
 }
 
 std::string RelayProbe::version() const {
