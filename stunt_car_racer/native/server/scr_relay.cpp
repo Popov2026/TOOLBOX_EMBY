@@ -119,7 +119,7 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v77"
+#define SCR_RELAY_VERSION "v78"
 
 namespace {
 
@@ -191,6 +191,7 @@ struct Client {
   bool bot = false;              // ne parle pas le protocole du jeu (robot, scanner)
   bool suspect = false;          // adresse d'un robot récent : délai d'inscription court
   bool ws = false;               // arrivé en WebSocket (par un reverse proxy web)
+  bool web = false;              // navigateur : page d'état servie (pas un robot)
   std::vector<uint8_t> raw, wsOut;   // WebSocket : octets reçus non décodés, trames à envoyer
   double lastWsPing = 0;
   bool wsCloseSent = false, wsCloseGot = false;   // fermeture WebSocket propre (les deux sens)
@@ -208,7 +209,7 @@ struct Client {
 
 std::map<Sock, Client> clients;
 uint32_t nextId = 1;
-uint64_t totalConnections = 0, totalGames = 0, totalBots = 0;
+uint64_t totalConnections = 0, totalGames = 0, totalBots = 0, totalWeb = 0;
 struct Strike { int n = 0; double until = 0, last = 0; };
 std::map<std::string, Strike> strikes;   // adresses des robots
 double startedAt = 0;
@@ -371,6 +372,8 @@ void wsDecode(Client &c) {
   }
 }
 
+std::string webPage(const std::string &path, std::string &type, int &status);
+
 // requête HTTP en tête de connexion : mise à niveau WebSocket (le jeu, par le reverse proxy), sinon
 // un robot (réponse 404). Rend vrai quand la connexion est passée en WebSocket.
 bool httpUpgrade(Client &c) {
@@ -407,6 +410,19 @@ bool httpUpgrade(Client &c) {
   }
   std::string up = hd.count("upgrade") ? hd["upgrade"] : "";
   for (auto &ch : up) ch = char(std::tolower(static_cast<unsigned char>(ch)));
+  if (first.compare(0, 4, "GET ") == 0 && up != "websocket") {   // navigateur : page d'état (parties, joueurs, salles)
+    std::string path = first.substr(4, first.find(' ', 4) - 4), type;
+    int status = 200;
+    std::string body = webPage(path, type, status);
+    if (status != 404) {
+      std::string resp = "HTTP/1.1 " + std::string(status == 200 ? "200 OK" : "204 No Content") + "\r\nContent-Type: " + type +
+                         "\r\nContent-Length: " + std::to_string(body.size()) +
+                         "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n" + body;
+      c.out.insert(c.out.end(), resp.begin(), resp.end());
+      c.web = c.closing = true;
+      return false;
+    }
+  }
   if (first.compare(0, 4, "GET ") != 0 || up != "websocket" || !hd.count("sec-websocket-key")) {
     static const std::string nf = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
     c.out.insert(c.out.end(), nf.begin(), nf.end());
@@ -693,7 +709,8 @@ void drop(Sock fd, const char *why) {
     auto p = clients.find(c.peer);
     if (p != clients.end()) { frame(p->second, NF_INFO, "GONE"); p->second.peer = NONE; p->second.closing = true; }
   }
-  if (!c.joined && !c.probe && isPrivate(c.ip)) totalBots++;   // réseau local (proxy compris) : jamais surveillé
+  if (c.web) totalWeb++;   // page d'état servie à un navigateur
+  else if (!c.joined && !c.probe && isPrivate(c.ip)) totalBots++;   // réseau local (proxy compris) : jamais surveillé
   else if (!c.joined && !c.probe) {   // jamais inscrit : robot (ou jeu coupé avant l'inscription), pas de journal
     totalBots++;
     Strike &s = strikes[c.ip];
@@ -915,8 +932,9 @@ void draw(double t) {
   o += b;
   if (!machineAddresses.empty()) o += "Adresse(s) de cette machine : " + machineAddresses + "\n";
   o += "Réglages imposés aux jeux : " + paramsText() + "\n";
-  std::snprintf(b, sizeof b, "Joueurs connectés : %zu    parties en cours : %zu    depuis le lancement : %llu parties, %llu robots refusés\n\n",
-                playerCount(), games / 2, static_cast<unsigned long long>(totalGames), static_cast<unsigned long long>(totalBots));
+  std::snprintf(b, sizeof b, "Joueurs connectés : %zu    parties en cours : %zu    depuis le lancement : %llu parties, %llu robots refusés, %llu pages web\n\n",
+                playerCount(), games / 2, static_cast<unsigned long long>(totalGames), static_cast<unsigned long long>(totalBots),
+                static_cast<unsigned long long>(totalWeb));
   o += b;
   o += "\x1b[7m" + col(" N°", 5) + col("Joueur", 18) + col("Adresse IP", 16) + col("Mode", 13) + col("Salle", 10) +
        col("État", 36) + col("Connecté", 10) + col("Trafic", 9) + "\x1b[0m\n";
@@ -938,6 +956,171 @@ void draw(double t) {
   o += "\nCtrl+C ou fermer la fenêtre : arrêter le serveur\n";
   std::fwrite(o.data(), 1, o.size(), stdout);
   std::fflush(stdout);
+}
+
+// ------------------------------------------------------------------ page web d'état (https://... par le proxy)
+const char *const TRACK_NAMES[16] = {"Little Ramp", "Stepping Stones", "Hump Back", "Big Ramp", "Ski Jump", "Draw Bridge",
+                                     "High Jump", "Roller Coaster", "Dizzy Descent", "Witty Way", "Crazy Caper", "Amazing Adept",
+                                     "Jerkily Jump", "Evilly Episode", "Teasing Temper", "Rat Race"};
+std::string trackLabel(int t) {
+  if (t < 0 || t > 15) return "?";
+  return std::string(TRACK_NAMES[t]) + (t >= 8 ? " (TNT)" : "");
+}
+
+std::string esc(const std::string &s) {   // HTML et JSON : noms venus des joueurs
+  std::string r;
+  for (char ch : s) {
+    if (ch == '&') r += "&amp;"; else if (ch == '<') r += "&lt;"; else if (ch == '>') r += "&gt;";
+    else if (ch == '"') r += "&quot;"; else if (ch == '\\') r += "&#92;"; else r += ch;
+  }
+  return r;
+}
+
+std::string playerName(const Client &c) { return c.name.empty() ? "Player " + std::to_string(c.id) : c.name; }
+
+std::string stateEn(const Client &c, double t) {   // état d'un joueur, en anglais (page web)
+  if (c.peer != NONE) {
+    auto p = clients.find(c.peer);
+    return "racing against " + (p == clients.end() ? std::string("?") : playerName(p->second)) + " (" + duration(t - c.pairedAt) + ")";
+  }
+  if (c.inGroup) {
+    const std::string &g = c.gstate;
+    if (g.rfind("finished:", 0) == 0) { long ms = std::atol(g.c_str() + 9); char b[64]; std::snprintf(b, sizeof b, "finished in %ld.%ld s", ms / 1000, ms % 1000 / 100); return b; }
+    if (g == "out") return "out (car wrecked)";
+    if (g == "vote") return "choosing the track";
+    if (g == "accept") return "track accepted";
+    if (g == "racing") return "racing";
+    if (g == "lobby") return "waiting for the start";
+    return "loading the track";
+  }
+  return c.mode == Mode::Room ? "in the room, free" : "waiting for an opponent";
+}
+
+std::string phaseEn(const std::string &ph) {
+  if (ph == "vote") return "choosing the track";
+  if (ph == "loading") return "loading";
+  if (ph == "racing") return "race in progress";
+  if (ph == "lobby") return "waiting for the start";
+  return ph;
+}
+
+std::string webPage(const std::string &path, std::string &type, int &status) {
+  const double t = now();
+  if (path == "/favicon.ico" || path == "/robots.txt") {
+    type = "text/plain"; status = path == "/robots.txt" ? 200 : 204;
+    return path == "/robots.txt" ? "User-agent: *\nDisallow: /\n" : "";
+  }
+  std::vector<const Client *> players;
+  for (auto &kv : clients) if (kv.second.joined && !kv.second.closing) players.push_back(&kv.second);
+  std::sort(players.begin(), players.end(), [](const Client *a, const Client *b) { return a->id < b->id; });
+  // parties : groupes (course à deux, course à plusieurs) et anciennes parties appariées
+  struct Game { std::string kind, where, track, phase; std::vector<std::string> who; };
+  std::vector<Game> games;
+  for (auto &kv : groups) {
+    const Group &g = kv.second;
+    if (g.members.empty()) continue;
+    Game gm;
+    gm.kind = g.duel ? "Two-player race" : "Multi-car race";
+    gm.where = kv.first.rfind("DUEL", 0) == 0 ? "first available player" : "room " + kv.first;
+    gm.track = trackLabel(g.track) + ", " + std::to_string(g.laps) + " lap" + (g.laps > 1 ? "s" : "");
+    gm.phase = phaseEn(g.phase);
+    for (Sock f : g.members) {
+      auto it = clients.find(f);
+      if (it != clients.end()) gm.who.push_back(playerName(it->second) + " - " + stateEn(it->second, t));
+    }
+    games.push_back(gm);
+  }
+  for (const Client *c : players) {
+    if (c->peer == NONE || c->peer < c->fd) continue;   // une fois par paire
+    auto p = clients.find(c->peer);
+    if (p == clients.end()) continue;
+    games.push_back({"Computer Link", c->room.empty() ? "-" : "code " + c->room, "-", "in progress (" + duration(t - c->pairedAt) + ")",
+                     {playerName(*c), playerName(p->second)}});
+  }
+  std::map<std::string, std::vector<std::string>> rooms;   // salles privées : joueurs présents
+  for (const Client *c : players) if (c->mode == Mode::Room) rooms[c->room].push_back(playerName(*c));
+  auto modeEn = [](const Client &c) { return c.mode == Mode::Auto ? "first available" : c.mode == Mode::Room ? "private room" : c.mode == Mode::Code ? "code" : "-"; };
+
+  if (path == "/status.json" || path == "/api") {
+    type = "application/json; charset=utf-8";
+    std::string j = "{\"version\":\"" SCR_RELAY_VERSION "\",\"uptime_s\":" + std::to_string(long(t - startedAt)) +
+                    ",\"players\":[";
+    for (size_t i = 0; i < players.size(); i++) {
+      const Client &c = *players[i];
+      j += std::string(i ? "," : "") + "{\"name\":\"" + esc(playerName(c)) + "\",\"mode\":\"" + modeEn(c) + "\",\"room\":\"" +
+           esc(c.mode == Mode::Room ? c.room : "") + "\",\"state\":\"" + esc(stateEn(c, t)) + "\",\"connected_s\":" +
+           std::to_string(long(t - c.since)) + "}";
+    }
+    j += "],\"games\":[";
+    for (size_t i = 0; i < games.size(); i++) {
+      j += std::string(i ? "," : "") + "{\"type\":\"" + games[i].kind + "\",\"where\":\"" + esc(games[i].where) + "\",\"track\":\"" +
+           esc(games[i].track) + "\",\"phase\":\"" + esc(games[i].phase) + "\",\"players\":[";
+      for (size_t k = 0; k < games[i].who.size(); k++) j += std::string(k ? "," : "") + "\"" + esc(games[i].who[k]) + "\"";
+      j += "]}";
+    }
+    j += "],\"rooms\":[";
+    size_t i = 0;
+    for (auto &r : rooms) {
+      j += std::string(i++ ? "," : "") + "{\"code\":\"" + esc(r.first) + "\",\"players\":[";
+      for (size_t k = 0; k < r.second.size(); k++) j += std::string(k ? "," : "") + "\"" + esc(r.second[k]) + "\"";
+      j += "]}";
+    }
+    j += "],\"total_games\":" + std::to_string(totalGames) + "}";
+    return j;
+  }
+  if (path != "/" && path.rfind("/?", 0) != 0 && path != "/index.html") { status = 404; return ""; }
+  type = "text/html; charset=utf-8";
+  std::string h =
+      "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+      "<meta http-equiv=\"refresh\" content=\"5\"><title>Stunt Car Racer - relay server</title><style>"
+      "body{margin:0;background:#101418;color:#e8e8e8;font:15px/1.45 system-ui,sans-serif}main{max-width:960px;margin:0 auto;padding:16px}"
+      "h1{font-size:22px;margin:4px 0 2px;color:#ffd84a}h2{font-size:17px;margin:22px 0 8px;color:#ffb347}"
+      ".sub{color:#9aa4ae;font-size:13px}.stats{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}"
+      ".stat{background:#1c232b;border-radius:8px;padding:10px 14px;min-width:120px}.stat b{display:block;font-size:22px;color:#fff}"
+      "table{width:100%;border-collapse:collapse;background:#161c22;border-radius:8px;overflow:hidden}"
+      "th,td{text-align:left;padding:7px 10px;border-bottom:1px solid #26303a;vertical-align:top}th{background:#1f2831;color:#b8c2cc;font-weight:600}"
+      ".none{color:#7c8792;font-style:italic;padding:10px}.tag{display:inline-block;background:#2a3642;border-radius:4px;padding:1px 6px;font-size:12px}"
+      "ul{margin:0;padding-left:18px}@media(max-width:600px){th,td{padding:6px}}</style></head><body><main>"
+      "<h1>Stunt Car Racer - relay server</h1><div class=\"sub\">Version " SCR_RELAY_VERSION " &middot; up for " + duration(t - startedAt) +
+      " &middot; refreshed every 5 s</div><div class=\"stats\">";
+  auto stat = [&](const std::string &n, const std::string &v) { h += "<div class=\"stat\"><b>" + v + "</b>" + n + "</div>"; };
+  stat("players online", std::to_string(players.size()));
+  stat("games in progress", std::to_string(games.size()));
+  stat("private rooms", std::to_string(rooms.size()));
+  stat("games since start", std::to_string(totalGames));
+  h += "</div><h2>Games in progress</h2>";
+  if (games.empty()) h += "<div class=\"none\">No game in progress.</div>";
+  else {
+    h += "<table><tr><th>Game</th><th>Track</th><th>Status</th><th>Players</th></tr>";
+    for (auto &g : games) {
+      h += "<tr><td>" + esc(g.kind) + "<br><span class=\"tag\">" + esc(g.where) + "</span></td><td>" + esc(g.track) + "</td><td>" + esc(g.phase) + "</td><td><ul>";
+      for (auto &w : g.who) h += "<li>" + esc(w) + "</li>";
+      h += "</ul></td></tr>";
+    }
+    h += "</table>";
+  }
+  h += "<h2>Players online</h2>";
+  if (players.empty()) h += "<div class=\"none\">Nobody is connected.</div>";
+  else {
+    h += "<table><tr><th>Player</th><th>Mode</th><th>Room</th><th>State</th><th>Connected</th></tr>";
+    for (const Client *c : players)
+      h += "<tr><td>" + esc(playerName(*c)) + "</td><td>" + modeEn(*c) + "</td><td>" + esc(c->mode == Mode::Room ? c->room : "-") + "</td><td>" +
+           esc(stateEn(*c, t)) + "</td><td>" + duration(t - c->since) + "</td></tr>";
+    h += "</table>";
+  }
+  h += "<h2>Private rooms</h2>";
+  if (rooms.empty()) h += "<div class=\"none\">No private room open.</div>";
+  else {
+    h += "<table><tr><th>Room code</th><th>Players</th></tr>";
+    for (auto &r : rooms) {
+      h += "<tr><td>" + esc(r.first) + "</td><td><ul>";
+      for (auto &n : r.second) h += "<li>" + esc(n) + "</li>";
+      h += "</ul></td></tr>";
+    }
+    h += "</table>";
+  }
+  h += "<p class=\"sub\">Machine-readable: <a style=\"color:#8cc8ff\" href=\"/status.json\">/status.json</a></p></main></body></html>";
+  return h;
 }
 
 // adresses IPv4 de cette machine (pour le message de démarrage)

@@ -181,6 +181,11 @@ données. Façons de se trouver (menu « 4. Online Multiplayer » du jeu) :
   En cas de souci : le message « Hors ligne : ... » du jeu donne la raison (réponse HTTP du proxy,
   certificat...) ; le jeu note aussi chaque étape dans scr_reseau.log (dossier du jeu), et la
   fenêtre du serveur affiche « connexion WebSocket » et « test du serveur par WebSocket ».
+  Page web d'état : https://votre.domaine/ dans un navigateur (par le proxy, ou http://adresse:27420/
+  directement) affiche en direct (rafraîchie toutes les 5 s, en anglais) les parties en cours
+  (circuit, tours, état de chaque joueur), les joueurs connectés (mode, salle, état, durée) et les
+  salles privées ouvertes avec leurs joueurs ; mêmes informations en JSON : /status.json. Aucune
+  adresse IP n'y figure (attention : les codes des salles privées y sont visibles).
 
 
 ==============================================================================
@@ -370,3 +375,8 @@ data along. Ways to find each other (the game's "4. Online Multiplayer" menu):
   If something goes wrong: the game's "Hors ligne : ..." (offline) message gives the reason (proxy
   HTTP answer, certificate...); the game also writes each step to scr_reseau.log (game folder), and
   the server window shows "connexion WebSocket" and "test du serveur par WebSocket".
+  Status web page: https://your.domain/ in a browser (through the proxy, or http://address:27420/
+  directly) shows live (refreshed every 5 s) the games in progress (track, laps, each player's
+  state), the connected players (mode, room, state, time) and the open private rooms with their
+  players; the same information as JSON: /status.json. No IP address is shown (note: private room
+  codes are visible there).
