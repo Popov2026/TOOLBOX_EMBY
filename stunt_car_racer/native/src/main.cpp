@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v71"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v72"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -80,10 +80,10 @@ struct Options {
 // serveur relais par défaut, quand ni la ligne de commande ni scr.ini n'en donnent un ; adresse
 // stockée chiffrée (absente du texte du programme) et jamais affichée
 static std::string defaultRelay() {
-  static const uint8_t enc[] = {0x37, 0x06, 0x07, 0xe2, 0xef, 0xe9, 0xc9, 0xd1, 0xa7, 0xe1, 0xbf, 0x8a};
+  static const uint8_t enc[] = {0x29, 0x13, 0x06, 0xaf, 0xe3, 0xfa, 0xdb, 0xd6, 0xa3, 0xbd, 0xbd, 0x8d, 0x93, 0x2d, 0x73, 0x7e};
   std::string r;
   for (size_t i = 0; i < sizeof enc; i++) r += char(enc[i] ^ uint8_t(0x5a + 13 * i));
-  return r + ":" + std::to_string(NET_PORT);
+  return r + ":443";   // par le reverse proxy (flux TCP retransmis au serveur relais)
 }
 static const char *const DEFAULT_RELAY_NAME = "serveur officiel";
 static std::string relayAddr(const std::string &configured) { return configured.empty() ? defaultRelay() : configured; }
