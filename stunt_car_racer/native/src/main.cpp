@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v75"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v74"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -80,7 +80,7 @@ struct Options {
 // serveur relais par défaut, quand ni la ligne de commande ni scr.ini n'en donnent un ; adresse
 // stockée chiffrée (absente du texte du programme) et jamais affichée
 static std::string defaultRelay() {
-  static const uint8_t enc[] = {0x29, 0x13, 0x06, 0xaf, 0xe3, 0xfa, 0xdb, 0xd6, 0xa3, 0xbd, 0xbd, 0x8d, 0x93, 0x2d, 0x73, 0x7e, 0x10, 0x05, 0x73, 0x65, 0x6c, 0x5b};
+  static const uint8_t enc[] = {0x2d, 0x14, 0x07, 0xbb, 0xa1, 0xb4, 0xdb, 0xc1, 0xb0, 0xe1, 0xb1, 0x88, 0x85, 0x60, 0x71, 0x6f, 0x4b, 0x53, 0x21, 0x7f, 0x3d, 0x08, 0x57};
   std::string r;
   for (size_t i = 0; i < sizeof enc; i++) r += char(enc[i] ^ uint8_t(0x5a + 13 * i));
   return r;
