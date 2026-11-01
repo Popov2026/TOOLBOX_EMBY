@@ -1,5 +1,6 @@
 // gpu3d.cpp — voir gpu3d.hpp
 #include "gpu3d.hpp"
+#include "lang.hpp"
 
 #include <SDL.h>
 #include <SDL_opengl.h>
@@ -343,7 +344,7 @@ GLuint compile(GLenum type, const char *src, std::string &err) {
   p_glGetShaderiv(s, K_COMPILE, &ok);
   if (!ok) {
     char log[2048] = {}; p_glGetShaderInfoLog(s, sizeof log, nullptr, log);
-    err = std::string("compilation d'un shader : ") + log;
+    err = std::string(L("compilation d'un shader : ", "shader compilation: ")) + log;
     return 0;
   }
   return s;
@@ -362,7 +363,7 @@ GLuint link(const char *vs, const char *fs, std::string &err) {
   p_glGetProgramiv(p, K_LINK, &ok);
   if (!ok) {
     char log[2048] = {}; p_glGetProgramInfoLog(p, sizeof log, nullptr, log);
-    err = std::string("édition de liens d'un programme : ") + log;
+    err = std::string(L("édition de liens d'un programme : ", "program link: ")) + log;
     return 0;
   }
   return p;
@@ -381,16 +382,16 @@ bool Gpu3D::init(std::string &err) {
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
   win_ = SDL_CreateWindow("scr-gl", 0, 0, 16, 16, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
-  if (!win_) { err = std::string("fenêtre OpenGL : ") + SDL_GetError(); return false; }
+  if (!win_) { err = std::string(L("fenêtre OpenGL : ", "OpenGL window: ")) + SDL_GetError(); return false; }
   ctx_ = SDL_GL_CreateContext(win_);
   // le moteur d'affichage SDL garde ses propres réglages : on les rend au contexte précédent
   SDL_GL_ResetAttributes();
-  if (!ctx_) { err = std::string("contexte OpenGL 3.3 : ") + SDL_GetError(); return false; }
+  if (!ctx_) { err = std::string(L("contexte OpenGL 3.3 : ", "OpenGL 3.3 context: ")) + SDL_GetError(); return false; }
   bool ok = loadGl() && build(err);
   if (ok) {
     const char *r = reinterpret_cast<const char *>(glGetString(GL_RENDERER));
     name_ = r ? r : "OpenGL";
-  } else if (err.empty()) err = "fonctions OpenGL 3.3 absentes";
+  } else if (err.empty()) err = L("fonctions OpenGL 3.3 absentes", "OpenGL 3.3 functions missing");
   if (prevCtx) SDL_GL_MakeCurrent(prevWin, prevCtx);
   ok_ = ok;
   return ok;
@@ -446,7 +447,7 @@ bool Gpu3D::build(std::string &err) {
   p_glGenFramebuffers(2, fbo_);
   glGenTextures(2, color_);
   p_glGenRenderbuffers(1, &depth_);
-  return glGetError() == GL_NO_ERROR || (err = "erreur OpenGL à la préparation", false);
+  return glGetError() == GL_NO_ERROR || (err = L("erreur OpenGL à la préparation", "OpenGL error during setup"), false);
 }
 
 void Gpu3D::resize(int W, int H) {

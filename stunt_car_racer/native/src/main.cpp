@@ -30,13 +30,14 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v76"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v77"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
 #include "sound.hpp"
 #include "gpu3d.hpp"
 #include "machine.hpp"
+#include "lang.hpp"
 #include "net.hpp"
 #include "track.hpp"
 #include "tnt.hpp"
@@ -65,6 +66,7 @@ struct Options {
   bool usePad = true, rumble = true;                         // manette, vibrations lors des chocs
   std::string keyNames[6] = {"Up", "Down", "Left", "Right", "Space", "K"};   // touches : accélérer, freiner, gauche, droite, boost, klaxon
   bool engineV8 = false;
+  bool french = false;   // langue des textes ajoutés : français (sinon anglais)
   bool openGl = true;   // rendu 3D HD sur la carte graphique (OpenGL) ; sinon sur le processeur   // son du moteur : V8 réaliste à la place du son d'origine
   // multijoueur (câble « Computer Link » par le réseau)
   std::string relay;       // serveur relais : adresse[:port]
@@ -85,9 +87,9 @@ static std::string defaultRelay() {
   for (size_t i = 0; i < sizeof enc; i++) r += char(enc[i] ^ uint8_t(0x5a + 13 * i));
   return r;
 }
-static const char *const DEFAULT_RELAY_NAME = "serveur officiel";
+static const char *defaultRelayName() { return L("serveur officiel", "official server"); }
 static std::string relayAddr(const std::string &configured) { return configured.empty() ? defaultRelay() : configured; }
-static std::string relayShown(const std::string &configured) { return configured.empty() ? DEFAULT_RELAY_NAME : ""; }
+static std::string relayShown(const std::string &configured) { return configured.empty() ? defaultRelayName() : ""; }
 
 // version annoncée par le serveur (« v49 ») plus récente que ce jeu ?
 static bool newerVersion(const std::string &server) {
@@ -105,6 +107,7 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "hddir") o.hdDir = val;
   else if (key == "details" || key == "détails") o.highDetail = val != "0";
   else if (key == "relais" || key == "relay") o.relay = val;
+  else if (key == "langue" || key == "language" || key == "lang") o.french = val.rfind("fr", 0) == 0 || val.rfind("FR", 0) == 0;
   else if (key == "tnt") o.tntPath = val;
   else if (key == "circuits" || key == "tracks") o.tnt = val == "tnt" || val == "TNT";
   else if (key == "nom" || key == "name") o.playerName = val;
@@ -309,9 +312,9 @@ std::string paramsSummary(const std::string &s) {
   auto add = [&](const char *n, double v, double def) {
     if (std::fabs(v - def) > 1e-9) { char b[48]; std::snprintf(b, sizeof b, "%s%s %g", r.empty() ? "" : ", ", n, v); r += b; }
   };
-  add("gravité", t.gravity, 1); add("poussée", t.thrust, 1); add("frein", t.brake, 1); add("pas", t.timeStep, 1);
-  add("amorti", t.damping, 1); add("boost", t.boostUse, 1); add("chocs", t.shockTolerance, 0);
-  return r.empty() ? "physique standard" : r;
+  add(L("gravité", "gravity"), t.gravity, 1); add(L("poussée", "thrust"), t.thrust, 1); add(L("frein", "brake"), t.brake, 1); add(L("pas", "step"), t.timeStep, 1);
+  add(L("amorti", "damping"), t.damping, 1); add("boost", t.boostUse, 1); add(L("chocs", "shocks"), t.shockTolerance, 0);
+  return r.empty() ? L("physique standard", "standard physics") : r;
 }
 
 // découpe un texte en lignes d'au plus w caractères (UTF-8), aux espaces si possible
@@ -408,19 +411,22 @@ int main(int argc, char **argv) {
     if (a == "--help" || a == "-h") {
       std::puts("usage : scr [--track N] [--scale N] [--fullscreen] [--speed X] [--smooth] [--hd] [--hdres 1920x1080]\n"
                 "            [--gravity X] [--thrust X] [--brake X] [--timestep X] [--damping X]\n"
-                "            [--boostuse X] [--shock N] [--ini FICHIER]\n"
-                "            [--host | --joinlan | --join ADRESSE[:PORT] | --online CODE] [--relais SERVEUR[:PORT]] [--nom NOM]\n"
+                "            [--boostuse X] [--shock N] [--ini FILE]\n"
+                "            [--host | --joinlan | --join ADDRESS[:PORT] | --online CODE] [--relais SERVER[:PORT]] [--nom NAME]\n"
                 "            [--tnt SCR-TNT|archive.lha] [--circuits tnt]\n"
-                "            DISQUE.st|GAME.PUT");
+                "            DISK.st|GAME.PUT");
       return 0;
     }
     if (a.rfind("--", 0) == 0 && i + 1 < argc) { setOption(o, a.substr(2), argv[++i]); continue; }
     o.disk = a;
   }
+  g_french = o.french;   // langue des textes ajoutés (langue = fr dans scr.ini)
   if (o.disk.empty()) o.disk = findDisk();
   if (o.disk.empty()) {
-    fail("Image disque introuvable.\nPlacez votre image Stunt Car Racer (.st) dans le dossier DISK à côté de scr.exe,\n"
-         "glissez-la sur scr.exe, ou lancez : scr Stunt_Car_Racer.st\n(aucune donnée du jeu n'est incluse)");
+    fail(L("Image disque introuvable.\nPlacez votre image Stunt Car Racer (.st) dans le dossier DISK à côté de scr.exe,\n"
+           "glissez-la sur scr.exe, ou lancez : scr Stunt_Car_Racer.st\n(aucune donnée du jeu n'est incluse)",
+           "Disk image not found.\nPut your Stunt Car Racer image (.st) in the DISK folder next to scr.exe,\n"
+           "drag it onto scr.exe, or run: scr Stunt_Car_Racer.st\n(no game data is included)"));
     return 1;
   }
 
@@ -448,7 +454,7 @@ int main(int argc, char **argv) {
     disk = readFile(o.disk);
     m = start(disk, o, track, soloSet);
   } catch (std::exception &e) {
-    fail(std::string("Erreur : ") + e.what());
+    fail(std::string(L("Erreur : ", "Error: ")) + e.what());
     return 1;
   }
 
@@ -463,7 +469,7 @@ int main(int argc, char **argv) {
     gameHash = h;
     std::string nm = cleanPseudo(o.playerName);
     if (nm.empty()) { const char *u = std::getenv("USERNAME"); if (!u) u = std::getenv("USER"); nm = cleanPseudo(u ? u : ""); }
-    if (nm.empty()) nm = "Joueur";
+    if (nm.empty()) nm = L("Joueur", "Player");
     o.playerName = nm;
     net.setIdentity(SCR_VERSION, h, nm, tuningText(o.tuning));
   }
@@ -509,7 +515,7 @@ int main(int argc, char **argv) {
     hdImages = view->loadAssets(*m, o.hdTextures ? hdDir : "");
     if (!view->assets.report.empty()) std::fprintf(stderr, "images HD (%s) :\n%s", hdDir.c_str(), view->assets.report.c_str());
   };
-  try { newView(); } catch (std::exception &e) { fail(std::string("Erreur : ") + e.what()); return 1; }
+  try { newView(); } catch (std::exception &e) { fail(std::string(L("Erreur : ", "Error: ")) + e.what()); return 1; }
 
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_AUDIO) != 0) {
     fail(std::string("SDL : ") + SDL_GetError());
@@ -652,13 +658,15 @@ int main(int argc, char **argv) {
     if (soloSet) h = fnv1a(tntSet.data.data(), tntSet.data.size(), h);
     gameHash = h;
     net.setIdentity(SCR_VERSION, gameHash, o.playerName, tuningText(o.tuning));
-    note = o.tnt ? "Circuits TNT (F7 : circuits d'origine)" : "Circuits d'origine (F7 : circuits TNT)"; noteUntil = NetLink::clock() + 4;
+    note = o.tnt ? L("Circuits TNT (F7 : circuits d'origine)", "TNT tracks (F7: original tracks)") : L("Circuits d'origine (F7 : circuits TNT)", "Original tracks (F7: TNT tracks)"); noteUntil = NetLink::clock() + 4;
   };
   auto changeTrack = [&](SDL_Scancode sc) {
     if (sc == SDL_SCANCODE_F7 && track < 0) {
       if (view && (hd ? view->raceShown() : view->racing())) {
         swapPending = !swapPending;
-        note = swapPending ? std::string("Circuits ") + (soloSet ? "d'origine" : "TNT") + " après cette course" : "Changement de circuits annulé";
+        note = swapPending ? (g_french ? std::string("Circuits ") + (soloSet ? "d'origine" : "TNT") + " après cette course"
+                                         : std::string(soloSet ? "Original" : "TNT") + " tracks after this race")
+                         : L("Changement de circuits annulé", "Track change cancelled");
         noteUntil = NetLink::clock() + 4;
       } else swapSet();
       return;
@@ -674,7 +682,7 @@ int main(int argc, char **argv) {
       soloSet = tntNow ? &tntSet : nullptr;
       o.tnt = tntNow;
       saveIniValue(ini, {"circuits", "tracks"}, tntNow ? "tnt" : "original", "circuits : original ou tnt (touche F7)");
-      note = tntNow ? "Circuits TNT (F7 : circuits d'origine)" : "Circuits d'origine (F7 : circuits TNT)"; noteUntil = NetLink::clock() + 4;
+      note = tntNow ? L("Circuits TNT (F7 : circuits d'origine)", "TNT tracks (F7: original tracks)") : L("Circuits d'origine (F7 : circuits TNT)", "Original tracks (F7: TNT tracks)"); noteUntil = NetLink::clock() + 4;
       uint32_t h = fnv1a(m->image().data(), m->image().size());
       if (soloSet) h = fnv1a(tntSet.data.data(), tntSet.data.size(), h);
       gameHash = h;
@@ -741,9 +749,9 @@ int main(int argc, char **argv) {
   int gTrack = 0, gLaps = 3;      // choix de l'organisateur
   const int nTracks = haveTnt ? 16 : 8;   // choix de l'organisateur : 8 d'origine, puis 8 TNT
   auto trackName = [&](int t) {
-    const std::vector<Track> &L = t >= 8 ? tracksTnt : tracksOrig;
-    std::string nm = (t & 7) < int(L.size()) ? L[size_t(t & 7)].name : "";
-    if (nm.empty()) return "Circuit " + std::to_string(t + 1);
+    const std::vector<Track> &lst = t >= 8 ? tracksTnt : tracksOrig;
+    std::string nm = (t & 7) < int(lst.size()) ? lst[size_t(t & 7)].name : "";
+    if (nm.empty()) return L("Circuit ", "Track ") + std::to_string(t + 1);
     return t >= 8 ? nm + " (TNT)" : nm;
   };
   auto online = [&] {
@@ -761,54 +769,54 @@ int main(int argc, char **argv) {
         if (net.groupPhase() == "vote") {
           bool accepted = false;
           for (auto &gm : net.groupMembers()) if (gm.id == net.groupMe()) accepted = gm.state == "accept";
-          it.push_back({accepted ? "Circuit accepté : en attente de l'autre joueur" : "Accepter ce circuit", accepted ? 17 : 15, {}});
-          it.push_back({"Autre circuit", 16, {}});
+          it.push_back({accepted ? L("Circuit accepté : en attente de l'autre joueur", "Track accepted: waiting for the other player") : L("Accepter ce circuit", "Accept this track"), accepted ? 17 : 15, {}});
+          it.push_back({L("Autre circuit", "Another track"), 16, {}});
         }
-        it.push_back({"Écrire un message (F9)", 8, {}});
-        it.push_back({"Quitter la course", 13, {}});
+        it.push_back({L("Écrire un message (F9)", "Write a message (F9)"), 8, {}});
+        it.push_back({L("Quitter la course", "Leave the race"), 13, {}});
         return it;
       }
       if (net.inGroup()) {   // course à plusieurs : réglages de l'organisateur, départ
         bool host = net.groupHost() == net.groupMe(), lobby = net.groupPhase() == "lobby";
         if (host && lobby) {
-          it.push_back({"Circuit : " + trackName(gTrack) + "  < >", 10, {}});
-          it.push_back({"Tours : " + std::to_string(gLaps) + "  < >", 11, {}});
+          it.push_back({L("Circuit : ", "Track: ") + trackName(gTrack) + "  < >", 10, {}});
+          it.push_back({L("Tours : ", "Laps: ") + std::to_string(gLaps) + "  < >", 11, {}});
           if (net.groupMembers().size() >= 2)
-            it.push_back({"Lancer la course (" + std::to_string(net.groupMembers().size()) + " joueurs)", 12, {}});
+            it.push_back({L("Lancer la course (", "Start the race (") + std::to_string(net.groupMembers().size()) + L(" joueurs)", " players)"), 12, {}});
         }
-        it.push_back({"Écrire un message (F9)", 8, {}});
-        it.push_back({"Quitter la course à plusieurs", 13, {}});
+        it.push_back({L("Écrire un message (F9)", "Write a message (F9)"), 8, {}});
+        it.push_back({L("Quitter la course à plusieurs", "Leave the multi-car race"), 13, {}});
         return it;
       }
       if (inRoom)
-        for (auto &p : net.peers()) it.push_back({"Affronter " + p.name.substr(0, 20), 0, p});
-      if (inRoom) it.push_back({"Course à plusieurs (2 à 6 joueurs)", 9, {}});
-      if (inRoom) it.push_back({"Écrire un message (F9)", 8, {}});
+        for (auto &p : net.peers()) it.push_back({L("Affronter ", "Race against ") + p.name.substr(0, 20), 0, p});
+      if (inRoom) it.push_back({L("Course à plusieurs (2 à 6 joueurs)", "Multi-car race (2 to 6 players)"), 9, {}});
+      if (inRoom) it.push_back({L("Écrire un message (F9)", "Write a message (F9)"), 8, {}});
       if (idle) {
         if (probe.ok()) {
-          it.push_back({"Premier joueur disponible", 5, {}});
-          it.push_back({"Salle privée (code)", 1, {}});
+          it.push_back({L("Premier joueur disponible", "First available player"), 5, {}});
+          it.push_back({L("Salle privée (code)", "Private room (code)"), 1, {}});
         }
-        it.push_back({"Tester à nouveau le serveur", 6, {}});
-        it.push_back({"Pseudo : " + o.playerName + "  (changer)", 14, {}});
-        it.push_back({"Changer l'adresse du serveur", 7, {}});
+        it.push_back({L("Tester à nouveau le serveur", "Test the server again"), 6, {}});
+        it.push_back({L("Pseudo : ", "Nickname: ") + o.playerName + L("  (changer)", "  (change)"), 14, {}});
+        it.push_back({L("Changer l'adresse du serveur", "Change the server address"), 7, {}});
       }
     } else {
       bool waiting = net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting;
       if (waiting)
-        for (auto &p : net.peers()) it.push_back({"Affronter " + p.name.substr(0, 20), 0, p});
+        for (auto &p : net.peers()) it.push_back({L("Affronter ", "Race against ") + p.name.substr(0, 20), 0, p});
       if (waiting || idle) {
-        if (!waiting) it.push_back({"Chercher en réseau local", 4, {}});
-        it.push_back({"Par adresse IP", 2, {}});
+        if (!waiting) it.push_back({L("Chercher en réseau local", "Search the local network"), 4, {}});
+        it.push_back({L("Par adresse IP", "By IP address"), 2, {}});
       }
     }
-    it.push_back({"Annuler", 3, {}});
+    it.push_back({L("Annuler", "Cancel"), 3, {}});
     return it;
   };
   std::function<void()> leaveGroup = [&] {   // quitter la course à plusieurs (retour au titre si une course a eu lieu)
     const bool duelAuto = net.groupDuel() && !net.relayRoom();   // premier joueur disponible : on quitte le serveur
     net.groupCommand("LEAVE");
-    if (duelAuto) net.close("course quittée");
+    if (duelAuto) net.close(L("course quittée", "race left"));
     bool wasActive = gr.active;
     gr = GroupRace();
     menuSel = 0;
@@ -863,48 +871,50 @@ int main(int argc, char **argv) {
   SDL_Scancode bindSc[6];
   static const SDL_Scancode bindDef[6] = {SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT, SDL_SCANCODE_SPACE, SDL_SCANCODE_K};
   static const char *const bindKeys[6] = {"touche_accelerer", "touche_freiner", "touche_gauche", "touche_droite", "touche_boost", "touche_klaxon"};
-  static const char *const bindLabels[6] = {"Accélérer", "Freiner", "Gauche", "Droite", "Boost", "Klaxon"};
+  static const char *const bindLabelsFr[6] = {"Accélérer", "Freiner", "Gauche", "Droite", "Boost", "Klaxon"};
+  static const char *const bindLabelsEn[6] = {"Accelerate", "Brake", "Left", "Right", "Boost", "Horn"};
   for (int k = 0; k < 6; k++) {
     bindSc[k] = SDL_GetScancodeFromName(o.keyNames[k].c_str());
     if (bindSc[k] == SDL_SCANCODE_UNKNOWN) bindSc[k] = bindDef[k];
   }
   auto keyLabel = [](SDL_Scancode sc) -> std::string {
     switch (sc) {
-      case SDL_SCANCODE_UP: return "Flèche haut";
-      case SDL_SCANCODE_DOWN: return "Flèche bas";
-      case SDL_SCANCODE_LEFT: return "Flèche gauche";
-      case SDL_SCANCODE_RIGHT: return "Flèche droite";
-      case SDL_SCANCODE_SPACE: return "Espace";
+      case SDL_SCANCODE_UP: return L("Flèche haut", "Up arrow");
+      case SDL_SCANCODE_DOWN: return L("Flèche bas", "Down arrow");
+      case SDL_SCANCODE_LEFT: return L("Flèche gauche", "Left arrow");
+      case SDL_SCANCODE_RIGHT: return L("Flèche droite", "Right arrow");
+      case SDL_SCANCODE_SPACE: return L("Espace", "Space");
       default: { const char *n = SDL_GetScancodeName(sc); return n && *n ? n : "?"; }
     }
   };
   struct OptItem { std::string label; int id; };
   auto optItems = [&] {
-    auto yn = [](bool b) { return std::string(b ? "oui" : "non"); };
+    auto yn = [](bool b) { return std::string(b ? L("oui", "on") : L("non", "off")); };
     std::vector<OptItem> it;
-    it.push_back({"Son : " + yn(!muted) + "  (F3)", 0});
-    it.push_back({"Volume : " + std::to_string(int(std::lround(o.volume * 100))) + " %  < >", 1});
-    it.push_back({"Affichage HD : " + yn(hd) + "  (F8)", 2});
-    it.push_back({"Détails élevés : " + yn(highDetail) + "  (F5)", 3});
-    it.push_back({std::string("Rendu 3D : ") + (!o.openGl ? "processeur" : gpu.ok() ? "carte graphique (OpenGL)" : "OpenGL indisponible"), 26});
-    it.push_back({"Ombres des voitures : " + yn(o.shadows), 4});
-    it.push_back({"Étincelles et fumée : " + yn(o.particles), 5});
-    it.push_back({"Lissage des bords : " + yn(o.antialias), 6});
-    it.push_back({"Ciel, nuages et soleil : " + yn(o.sky), 18});
-    it.push_back({"Décor autour des circuits : " + yn(o.scenery), 19});
-    it.push_back({"Densité du décor : " + std::to_string(o.density) + "  < >", 23});
-    it.push_back({"Textures HD : " + yn(o.hdTextures), 21});
-    it.push_back({"Encouragements de la foule : " + yn(o.crowd), 20});
-    it.push_back({"Volume de la foule : " + std::to_string(int(std::lround(o.crowdVolume * 100))) + " %  < >", 22});
-    it.push_back({std::string("Son du moteur : ") + (o.engineV8 ? "V8 réaliste" : "d'origine"), 24});
-    it.push_back({"Plein écran : " + yn(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP) + "  (F11)", 7});
-    it.push_back({haveTnt ? std::string("Circuits : ") + (soloSet ? "TNT" : "d'origine") + "  (F7)" : "Circuits TNT : fichier SCR-TNT absent", 8});
-    it.push_back({"Manette : " + yn(o.usePad) + (pad ? "  (branchée)" : "  (aucune)"), 9});
-    it.push_back({"Vibrations aux chocs : " + yn(o.rumble), 10});
+    it.push_back({L("Son : ", "Sound: ") + yn(!muted) + "  (F3)", 0});
+    it.push_back({L("Volume : ", "Volume: ") + std::to_string(int(std::lround(o.volume * 100))) + " %  < >", 1});
+    it.push_back({L("Affichage HD : ", "HD display: ") + yn(hd) + "  (F8)", 2});
+    it.push_back({L("Détails élevés : ", "High detail: ") + yn(highDetail) + "  (F5)", 3});
+    it.push_back({std::string(L("Rendu 3D : ", "3D renderer: ")) + (!o.openGl ? L("processeur", "CPU") : gpu.ok() ? L("carte graphique (OpenGL)", "graphics card (OpenGL)") : L("OpenGL indisponible", "OpenGL unavailable")), 26});
+    it.push_back({L("Ombres des voitures : ", "Car shadows: ") + yn(o.shadows), 4});
+    it.push_back({L("Étincelles et fumée : ", "Sparks and smoke: ") + yn(o.particles), 5});
+    it.push_back({L("Lissage des bords : ", "Edge smoothing: ") + yn(o.antialias), 6});
+    it.push_back({L("Ciel, nuages et soleil : ", "Sky, clouds and sun: ") + yn(o.sky), 18});
+    it.push_back({L("Décor autour des circuits : ", "Scenery around tracks: ") + yn(o.scenery), 19});
+    it.push_back({L("Densité du décor : ", "Scenery density: ") + std::to_string(o.density) + "  < >", 23});
+    it.push_back({L("Textures HD : ", "HD textures: ") + yn(o.hdTextures), 21});
+    it.push_back({L("Encouragements de la foule : ", "Crowd cheering: ") + yn(o.crowd), 20});
+    it.push_back({L("Volume de la foule : ", "Crowd volume: ") + std::to_string(int(std::lround(o.crowdVolume * 100))) + " %  < >", 22});
+    it.push_back({std::string(L("Son du moteur : ", "Engine sound: ")) + (o.engineV8 ? L("V8 réaliste", "realistic V8") : L("d'origine", "original")), 24});
+    it.push_back({L("Plein écran : ", "Full screen: ") + yn(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP) + "  (F11)", 7});
+    it.push_back({haveTnt ? std::string(L("Circuits : ", "Tracks: ")) + (soloSet ? "TNT" : L("d'origine", "original")) + "  (F7)" : L("Circuits TNT : fichier SCR-TNT absent", "TNT tracks: SCR-TNT file missing"), 8});
+    it.push_back({L("Manette : ", "Gamepad: ") + yn(o.usePad) + (pad ? L("  (branchée)", "  (connected)") : L("  (aucune)", "  (none)")), 9});
+    it.push_back({L("Vibrations aux chocs : ", "Rumble on impacts: ") + yn(o.rumble), 10});
     for (int k = 0; k < 6; k++)
-      it.push_back({std::string("Touche ") + bindLabels[k] + " : " + (optBind == k ? "appuyez sur une touche..." : keyLabel(bindSc[k])), k < 5 ? 11 + k : 25});
-    it.push_back({"Touches par défaut", 16});
-    it.push_back({"Fermer", 17});
+      it.push_back({std::string(L("Touche ", "Key ")) + L(bindLabelsFr[k], bindLabelsEn[k]) + L(" : ", ": ") + (optBind == k ? L("appuyez sur une touche...", "press a key...") : keyLabel(bindSc[k])), k < 5 ? 11 + k : 25});
+    it.push_back({L("Touches par défaut", "Default keys"), 16});
+    it.push_back({L("Langue : français  (Language: English)", "Language: English  (Langue : français)"), 27});
+    it.push_back({L("Fermer", "Close"), 17});
     return it;
   };
   auto saveFlag = [&](std::vector<std::string> keys, bool v, const char *comment) { saveIniValue(ini, keys, v ? "1" : "0", comment); };
@@ -935,8 +945,8 @@ int main(int argc, char **argv) {
         break;
       }
       case 8:
-        if (!haveTnt) { note = "Circuits TNT : fichier SCR-TNT introuvable (dossier TNT à côté de scr.exe)"; noteUntil = NetLink::clock() + 5; }
-        else if (net.inGroup() || gr.active) { note = "Course à plusieurs : le circuit est choisi par l'organisateur"; noteUntil = NetLink::clock() + 4; }
+        if (!haveTnt) { note = L("Circuits TNT : fichier SCR-TNT introuvable (dossier TNT à côté de scr.exe)", "TNT tracks: SCR-TNT file not found (TNT folder next to scr.exe)"); noteUntil = NetLink::clock() + 5; }
+        else if (net.inGroup() || gr.active) { note = L("Course à plusieurs : le circuit est choisi par l'organisateur", "Multi-car race: the organiser chooses the track"); noteUntil = NetLink::clock() + 4; }
         else { changeTrack(SDL_SCANCODE_F7); optOpen = false; }
         break;
       case 9: o.usePad = !o.usePad; saveFlag({"manette", "gamepad"}, o.usePad, "manette"); break;
@@ -950,6 +960,7 @@ int main(int argc, char **argv) {
         }
         break;
       case 17: optOpen = false; break;
+      case 27: g_french = o.french = !o.french; saveIniValue(ini, {"langue", "language", "lang"}, o.french ? "fr" : "en", "langue / language : en ou fr (menu F1)"); break;
       case 19: o.scenery = !o.scenery; view->params.scenery = o.scenery; saveFlag({"decor", "décor", "scenery"}, o.scenery, "décor autour des circuits : tribunes, panneaux, arbres (HD)"); break;
       case 21:
         o.hdTextures = !o.hdTextures;
@@ -967,7 +978,7 @@ int main(int argc, char **argv) {
       case 26:
         o.openGl = !o.openGl; setupGpu();
         saveIniValue(ini, {"rendu", "renderer"}, o.openGl ? "opengl" : "processeur", "rendu 3D HD : opengl (carte graphique) ou processeur");
-        note = !o.openGl ? "Rendu 3D sur le processeur" : gpu.ok() ? "Rendu 3D sur la carte graphique : " + gpu.name() : "OpenGL indisponible : " + gpuErr;
+        note = !o.openGl ? L("Rendu 3D sur le processeur", "3D drawn by the CPU") : gpu.ok() ? L("Rendu 3D sur la carte graphique : ", "3D drawn by the graphics card: ") + gpu.name() : L("OpenGL indisponible : ", "OpenGL unavailable: ") + gpuErr;
         noteUntil = NetLink::clock() + 6;
         break;
       case 24: o.engineV8 = !o.engineV8; saveFlag({"moteur_v8", "engine_v8"}, o.engineV8, "son du moteur : 1 = V8 réaliste, 0 = son d'origine"); break;
@@ -1116,7 +1127,7 @@ int main(int argc, char **argv) {
         bool down = ev.type == SDL_KEYDOWN;
         SDL_Scancode sc = ev.key.keysym.scancode;
         keys[sc] = down;
-        if (down && !ev.key.repeat && sc == SDL_SCANCODE_F10) net.close("déconnexion");   // multijoueur : couper
+        if (down && !ev.key.repeat && sc == SDL_SCANCODE_F10) net.close(L("déconnexion", "disconnected"));   // multijoueur : couper
         if (down && !ev.key.repeat) {
           if (sc == SDL_SCANCODE_F12) running = false;
           else if (sc == bindSc[5] && typing == Typing::None && !optOpen && !menuOpen) {   // klaxon (aussi chez les autres joueurs)
@@ -1145,7 +1156,7 @@ int main(int argc, char **argv) {
             view->params.highDetail = highDetail;
             if (highDetail && !hd) { hd = true; applyMode(true); }
           } else if (sc == SDL_SCANCODE_F7 && !haveTnt) {
-            note = "Circuits TNT : fichier SCR-TNT introuvable (dossier TNT à côté de scr.exe)"; noteUntil = NetLink::clock() + 5;
+            note = L("Circuits TNT : fichier SCR-TNT introuvable (dossier TNT à côté de scr.exe)", "TNT tracks: SCR-TNT file not found (TNT folder next to scr.exe)"); noteUntil = NetLink::clock() + 5;
           } else if (sc == SDL_SCANCODE_F6 || (sc == SDL_SCANCODE_F7 && !net.inGroup() && !gr.active) ||
                      ((sc == SDL_SCANCODE_PAGEUP || sc == SDL_SCANCODE_PAGEDOWN) && track >= 0)) {
             changeTrack(sc);
@@ -1171,7 +1182,7 @@ int main(int argc, char **argv) {
             track = -1; restartMachine(-1);
           } else if (id == 0x10 || (id < 0 && !seenMenu && !racingNow)) {   // titre, menu de départ
             if (now < quitAsk) running = false;
-            else { quitAsk = now + 3; note = "Échap encore une fois pour quitter le jeu"; noteUntil = quitAsk; }
+            else { quitAsk = now + 3; note = L("Échap encore une fois pour quitter le jeu", "Escape once more to quit the game"); noteUntil = quitAsk; }
           } else handled = false;
           if (handled) continue;
         }
@@ -1185,7 +1196,8 @@ int main(int argc, char **argv) {
     if (!updateShown && updateProbe.state() != RelayProbe::State::Probing) {   // nouvelle version : prévenu une fois
       updateShown = true;
       if (updateProbe.ok() && newerVersion(updateProbe.version())) {
-        note = "Nouvelle version " + updateProbe.version() + " de Stunt Car Racer disponible (vous avez " SCR_VERSION ")";
+        note = g_french ? "Nouvelle version " + updateProbe.version() + " de Stunt Car Racer disponible (vous avez " SCR_VERSION ")"
+                        : "New version " + updateProbe.version() + " of Stunt Car Racer available (you have " SCR_VERSION ")";
         noteUntil = NetLink::clock() + 12;
       }
     }
@@ -1274,7 +1286,7 @@ int main(int argc, char **argv) {
             for (size_t k = 0; k < order.size(); k++) if (order[k] == net.groupMe()) gr.slot = int(k);
           }
           if ((t & 15) >= 8 && !haveTnt) {   // circuit TNT sans le fichier SCR-TNT : on ne peut pas rouler dessus
-            net.localNote("Circuit TNT choisi : fichier SCR-TNT absent (dossier TNT à côté de scr.exe), course ignorée");
+            net.localNote(L("Circuit TNT choisi : fichier SCR-TNT absent (dossier TNT à côté de scr.exe), course ignorée", "TNT track chosen: SCR-TNT file missing (TNT folder next to scr.exe), race skipped"));
             gr = GroupRace(); gr.skip = true;
             net.groupCommand("LOADED");
             continue;
@@ -1557,11 +1569,11 @@ int main(int argc, char **argv) {
       static double statusSince = 0;
       std::string st = net.status();
       if (st != lastStatus) { lastStatus = st; statusSince = tNow; }
-      if (gr.victoryHold) bannerMsg = "VICTOIRE ! Les autres joueurs sont éliminés - Entrée pour continuer";
+      if (gr.victoryHold) bannerMsg = L("VICTOIRE ! Les autres joueurs sont éliminés - Entrée pour continuer", "VICTORY! The other players are out - Enter to continue");
       else if (menuOpen) bannerMsg.clear();   // le menu affiche lui-même l'état
       else if (NetLink::clock() < noteUntil) bannerMsg = note;
       else if (!st.empty() && (net.state() != NetLink::State::Connected || tNow - statusSince < 6))
-        bannerMsg = st + (net.state() == NetLink::State::Failed ? "   (F10 : effacer)" : "");
+        bannerMsg = st + (net.state() == NetLink::State::Failed ? L("   (F10 : effacer)", "   (F10: clear)") : "");
     }
     auto drawBanner = [&](int logicalW) {
       static std::string cachedMsg; static int cachedScale = 0, bw = 0, bh = 0;
@@ -1606,11 +1618,11 @@ int main(int argc, char **argv) {
       int scale = std::max(1, logicalW / 640), big = std::max(2, logicalW / 240);
       double now = NetLink::clock();
       const bool placed = gr.sideDone && std::fabs(gr.sideTarget - gr.sideApplied) <= 0.5;
-      const std::string place = "Grille : rangée " + std::to_string(gr.slot / 2 + 1) + (gr.slot % 2 ? ", à droite" : ", à gauche") +
-                                (placed ? "" : " (placement à la fin de la descente de la grue)");
+      const std::string place = L("Grille : rangée ", "Grid: row ") + std::to_string(gr.slot / 2 + 1) + (gr.slot % 2 ? L(", à droite", ", right") : L(", à gauche", ", left")) +
+                                (placed ? "" : L(" (placement à la fin de la descente de la grue)", " (placed when the crane has lowered the car)"));
       if (gr.waitingGo) {
         int yy = logicalH / 3;
-        yy += drawText("Course à plusieurs : départ dès que tous les joueurs sont prêts...", logicalW / 2, yy, scale,
+        yy += drawText(L("Course à plusieurs : départ dès que tous les joueurs sont prêts...", "Multi-car race: start as soon as every player is ready..."), logicalW / 2, yy, scale,
                        0xffffffffu, 0xc0000000u, 1, logicalW);
         drawText(place, logicalW / 2, yy + 2 * scale, scale, 0xffffff60u, 0xc0000000u, 1, logicalW);
         return;
@@ -1644,14 +1656,14 @@ int main(int argc, char **argv) {
       int y = 2 * scale;
       double el = gr.finished ? gr.finishSecs : now - gr.goAt;
       int lap = std::clamp(int(std::floor(gr.total / std::max(1, ns))) + 1, 1, gr.laps);
-      y += drawText(gr.out ? std::string("Abandon : voiture détruite") : gr.finished ? "Arrivé en " + fmt(gr.finishSecs) : "Tour " + std::to_string(lap) + "/" + std::to_string(gr.laps) + "   " + fmt(el),
+      y += drawText(gr.out ? std::string(L("Abandon : voiture détruite", "Out: car wrecked")) : gr.finished ? L("Arrivé en ", "Finished in ") + fmt(gr.finishSecs) : L("Tour ", "Lap ") + std::to_string(lap) + "/" + std::to_string(gr.laps) + "   " + fmt(el),
                     logicalW - 2 * scale, y, scale, 0xffffffffu, 0xc0000000u, 2, logicalW);
       for (size_t k = 0; k < rows.size(); k++) {
         const Row &r = rows[k];
         std::string t = std::to_string(k + 1) + ". " + r.name.substr(0, 14);
-        if (r.out) t += "  abandon";
+        if (r.out) t += L("  abandon", "  out");
         else if (r.ms >= 0) t += "  " + fmt(r.ms / 1000.0);
-        else if (r.total > -1e8) t += "  tour " + std::to_string(std::clamp(int(std::floor(r.total)) + 1, 1, gr.laps));
+        else if (r.total > -1e8) t += L("  tour ", "  lap ") + std::to_string(std::clamp(int(std::floor(r.total)) + 1, 1, gr.laps));
         y += drawText(t, logicalW - 2 * scale, y, scale, r.me ? 0xffa0e0ffu : 0xffffffa0u, 0xa0000000u, 2, logicalW);
       }
     };
@@ -1667,7 +1679,7 @@ int main(int argc, char **argv) {
           for (auto &w : wrapText(c.from + " : " + c.text, cols)) ls.push_back({w, c.mine ? 0xffa0e0ffu : 0xffffffa0u});
       if (ls.size() > 5) ls.erase(ls.begin(), ls.end() - 5);
       if (typing == Typing::Chat)
-        for (auto &w : wrapText("Message (Entrée : envoyer, Échap : fermer) : " + typed + "_", cols)) ls.push_back({w, 0xffffffffu});
+        for (auto &w : wrapText(L("Message (Entrée : envoyer, Échap : fermer) : ", "Message (Enter: send, Escape: close): ") + typed + "_", cols)) ls.push_back({w, 0xffffffffu});
       if (ls.empty()) return;
       static std::map<std::string, std::tuple<SDL_Texture *, int, int>> cache;
       if (cache.size() > 60) { for (auto &kv : cache) SDL_DestroyTexture(std::get<0>(kv.second)); cache.clear(); }
@@ -1698,9 +1710,9 @@ int main(int argc, char **argv) {
       int scale = std::max(1, logicalW / 400);
       struct Line { std::string text; uint32_t fg, bg; };
       std::vector<Line> lines;
-      lines.push_back({net.inGroup() && net.groupDuel() ? std::string("COURSE A DEUX") + (net.relayRoom() ? " - SALLE " + net.room() : "")
-                       : net.inGroup() ? "COURSE A PLUSIEURS - SALLE " + net.room()
-                       : online() ? "ONLINE MULTIPLAYER - SERVEUR RELAIS" : "COMPUTER LINK - RESEAU LOCAL (LAN)", 0xffffff00u, 0xe0202020u});
+      lines.push_back({net.inGroup() && net.groupDuel() ? std::string(L("COURSE A DEUX", "TWO-PLAYER RACE")) + (net.relayRoom() ? L(" - SALLE ", " - ROOM ") + net.room() : "")
+                       : net.inGroup() ? L("COURSE A PLUSIEURS - SALLE ", "MULTI-CAR RACE - ROOM ") + net.room()
+                       : online() ? L("ONLINE MULTIPLAYER - SERVEUR RELAIS", "ONLINE MULTIPLAYER - RELAY SERVER") : L("COMPUTER LINK - RESEAU LOCAL (LAN)", "COMPUTER LINK - LOCAL NETWORK (LAN)"), 0xffffff00u, 0xe0202020u});
       std::string st = net.status();
       std::vector<Line> groupLines;
       if (net.inGroup()) {   // joueurs du groupe (avec les temps de la dernière course)
@@ -1708,11 +1720,11 @@ int main(int argc, char **argv) {
         for (auto &gm : net.groupMembers()) if (gm.id == net.groupHost()) hostName = gm.name;
         bool host = net.groupHost() == net.groupMe();
         st = net.groupDuel() && net.groupPhase() == "vote"
-                 ? "Circuit proposé : " + trackName(net.groupTrack()) + ", " + std::to_string(net.groupLaps()) + " tours"
-             : net.groupPhase() != "lobby" ? (gr.out ? "Abandon (voiture détruite). Attente des autres..."
-                                                : gr.finished ? "Arrivé ! En attente des autres joueurs..." : "Course en cours...")
-             : host ? (net.groupMembers().size() < 2 ? "En attente d'autres joueurs (2 à 6)" : "Choisissez le circuit puis lancez")
-                    : "En attente du départ donné par " + hostName;
+                 ? L("Circuit proposé : ", "Track offered: ") + trackName(net.groupTrack()) + ", " + std::to_string(net.groupLaps()) + L(" tours", " laps")
+             : net.groupPhase() != "lobby" ? (gr.out ? L("Abandon (voiture détruite). Attente des autres...", "Out (car wrecked). Waiting for the others...")
+                                                : gr.finished ? L("Arrivé ! En attente des autres joueurs...", "Finished! Waiting for the other players...") : L("Course en cours...", "Race in progress..."))
+             : host ? (net.groupMembers().size() < 2 ? L("En attente d'autres joueurs (2 à 6)", "Waiting for other players (2 to 6)") : L("Choisissez le circuit puis lancez", "Choose the track then start"))
+                    : L("En attente du départ donné par ", "Waiting for the start given by ") + hostName;
         std::vector<NetLink::GroupMember> ms = net.groupMembers();
         std::stable_sort(ms.begin(), ms.end(), [](const NetLink::GroupMember &a, const NetLink::GroupMember &b) {
           bool fa = a.state.rfind("finished:", 0) == 0, fb = b.state.rfind("finished:", 0) == 0;
@@ -1726,9 +1738,9 @@ int main(int argc, char **argv) {
             long msv = std::atol(gm.state.c_str() + 9);
             char b[48]; std::snprintf(b, sizeof b, "%d. ", ++rank); t = b + t;
             std::snprintf(b, sizeof b, "  %ld:%04.1f", msv / 60000, (msv % 60000) / 1000.0); t += b;
-          } else t = "-  " + t + (gm.state == "out" ? "  abandon" : "");
-          if (net.groupDuel()) { if (net.groupPhase() == "vote") t += gm.state == "accept" ? "  : circuit accepté" : "  : choisit..."; }
-          else if (gm.id == net.groupHost()) t += "  (organisateur)";
+          } else t = "-  " + t + (gm.state == "out" ? L("  abandon", "  out") : "");
+          if (net.groupDuel()) { if (net.groupPhase() == "vote") t += gm.state == "accept" ? L("  : circuit accepté", "  : track accepted") : L("  : choisit...", "  : choosing..."); }
+          else if (gm.id == net.groupHost()) t += L("  (organisateur)", "  (organiser)");
           groupLines.push_back({t, gm.id == net.groupMe() ? 0xffa0e0ffu : 0xffffffffu, 0xe0202020u});
         }
       }
@@ -1739,21 +1751,21 @@ int main(int argc, char **argv) {
         stCol = probe.state() == RelayProbe::State::Ok ? 0xff80ff80u : probe.state() == RelayProbe::State::Failed ? 0xffff8080u : 0xffffffffu;
         if (probe.ok() && !probe.params().empty()) {   // réglages que le serveur imposera pendant la partie
           lines.push_back({st, stCol, 0xe0202020u});
-          st = "Réglages du serveur : " + paramsSummary(probe.params());
+          st = L("Réglages du serveur : ", "Server settings: ") + paramsSummary(probe.params());
           stCol = 0xffc0c0c0u;
         }
-        lines.push_back({"Serveur : " + (o.relay.empty() ? std::string(DEFAULT_RELAY_NAME) : o.relay),
+        lines.push_back({L("Serveur : ", "Server: ") + (o.relay.empty() ? std::string(defaultRelayName()) : o.relay),
                          0xffc0c0c0u, 0xe0202020u});
         if (probe.ok() && newerVersion(probe.version()))
-          lines.push_back({"Nouvelle version " + probe.version() + " disponible (vous : " SCR_VERSION ")", 0xffffc040u, 0xe0202020u});
+          lines.push_back({L("Nouvelle version ", "New version ") + probe.version() + L(" disponible (vous : " SCR_VERSION ")", " available (you: " SCR_VERSION ")"), 0xffffc040u, 0xe0202020u});
         else if (probe.ok() && !probe.version().empty() && probe.version() != SCR_VERSION)
-          lines.push_back({"Serveur en " + probe.version() + ", jeu en " SCR_VERSION " : mettez le serveur à jour", 0xffffc040u, 0xe0202020u});
+          lines.push_back({L("Serveur en ", "Server is ") + probe.version() + L(", jeu en " SCR_VERSION " : mettez le serveur à jour", ", game is " SCR_VERSION ": update the server"), 0xffffc040u, 0xe0202020u});
       }
       if (net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting)
-        st = net.peers().empty() ? "Recherche de joueurs sur le réseau local..." : "Joueurs trouvés sur le réseau local :";
+        st = net.peers().empty() ? L("Recherche de joueurs sur le réseau local...", "Looking for players on the local network...") : L("Joueurs trouvés sur le réseau local :", "Players found on the local network:");
       if (net.relayRoom() && net.state() == NetLink::State::Waiting && !net.inGroup())
-        st = net.peers().empty() ? "Salle " + net.room() + " : personne d'autre pour l'instant"
-                                 : "Salle " + net.room() + " : joueurs présents";
+        st = net.peers().empty() ? L("Salle ", "Room ") + net.room() + L(" : personne d'autre pour l'instant", ": nobody else yet")
+                                 : L("Salle ", "Room ") + net.room() + L(" : joueurs présents", ": players present");
       lines.push_back({st, stCol, 0xe0202020u});
       lines.insert(lines.end(), groupLines.begin(), groupLines.end());
       bool lobbyWait = net.mode() == NetLink::Mode::Lobby && net.state() == NetLink::State::Waiting;
@@ -1769,15 +1781,15 @@ int main(int argc, char **argv) {
         }
         if (!addrs.empty()) lines.push_back({"Ce PC : " + addrs, 0xffc0c0c0u, 0xe0202020u});
         if (net.peers().empty() && net.sinceStart() > 8)
-          lines.push_back({"Personne ? Pare-feu : autoriser scr.exe", 0xffffc040u, 0xe0202020u});
+          lines.push_back({L("Personne ? Pare-feu : autoriser scr.exe", "Nobody? Firewall: allow scr.exe"), 0xffffc040u, 0xe0202020u});
       }
       auto items = menuItems();
       if (menuSel >= int(items.size())) menuSel = int(items.size()) - 1;
       for (size_t k = 0; k < items.size(); k++) {
         std::string lab = items[k].label;
         if (typing != Typing::None && typing != Typing::Chat && int(k) == menuSel)
-          lab = (typing == Typing::Code ? "Code de salle : " : typing == Typing::Server ? "Serveur : "
-                 : typing == Typing::Pseudo ? "Pseudo : " : "Adresse : ") + typed + "_";
+          lab = std::string(typing == Typing::Code ? L("Code de salle : ", "Room code: ") : typing == Typing::Server ? L("Serveur : ", "Server: ")
+                 : typing == Typing::Pseudo ? L("Pseudo : ", "Nickname: ") : L("Adresse : ", "Address: ")) + typed + "_";
         bool sel = int(k) == menuSel;
         lines.push_back({lab, sel ? 0xff000000u : 0xff202020u, sel ? 0xffff9a00u : 0xffb6b6b6u});
       }
@@ -1790,16 +1802,16 @@ int main(int argc, char **argv) {
         if (cl.size() > 4) cl.erase(cl.begin(), cl.end() - 4);   // au plus 4 lignes dans le panneau
         lines.insert(lines.end(), cl.begin(), cl.end());
         if (typing == Typing::Chat) {
-          auto in = wrapText("Message : " + typed + "_", 44);
+          auto in = wrapText(L("Message : ", "Message: ") + typed + "_", 44);
           for (size_t k = in.size() > 2 ? in.size() - 2 : 0; k < in.size(); k++) lines.push_back({in[k], 0xffffffffu, 0xe0303860u});
         }
       }
-      lines.push_back({typing == Typing::Chat ? "Entrée : envoyer     Échap : fermer"
-                       : typing == Typing::Code ? "Entrée : valider (vide = code au hasard)"
-                       : typing == Typing::Ip ? "Entrée : valider     Échap : retour"
-                       : typing == Typing::Server ? "Adresse[:port], Entrée : enregistrer"
-                       : typing == Typing::Pseudo ? "12 caractères, Entrée : enregistrer"
-                                              : "Flèches + Entrée : choisir  Échap : annuler", 0xffc0c0c0u, 0xe0202020u});
+      lines.push_back({typing == Typing::Chat ? L("Entrée : envoyer     Échap : fermer", "Enter: send     Escape: close")
+                       : typing == Typing::Code ? L("Entrée : valider (vide = code au hasard)", "Enter: confirm (empty = random code)")
+                       : typing == Typing::Ip ? L("Entrée : valider     Échap : retour", "Enter: confirm     Escape: back")
+                       : typing == Typing::Server ? L("Adresse[:port], Entrée : enregistrer", "Address[:port], Enter: save")
+                       : typing == Typing::Pseudo ? L("12 caractères, Entrée : enregistrer", "12 characters, Enter: save")
+                                              : L("Flèches + Entrée : choisir  Échap : annuler", "Arrows + Enter: choose  Escape: cancel"), 0xffc0c0c0u, 0xe0202020u});
       int lineH = 15 * scale, total = int(lines.size()) * lineH;
       int y = std::max(0, (logicalH - total) / 2);
       {   // panneau opaque gris (couleur des menus d'origine) qui masque le menu du jeu en dessous
@@ -1838,14 +1850,14 @@ int main(int argc, char **argv) {
       int scale = std::max(1, std::min(logicalW / 400, logicalH / ((int(items.size()) + 2) * 13 + 16)));
       struct Line { std::string text; uint32_t fg, bg; };
       std::vector<Line> lines;
-      lines.push_back({"OPTIONS" + std::string(!net.active() && !gr.active ? "  (jeu en pause)" : ""), 0xffffff00u, 0xe0202020u});
+      lines.push_back({"OPTIONS" + std::string(!net.active() && !gr.active ? L("  (jeu en pause)", "  (game paused)") : ""), 0xffffff00u, 0xe0202020u});
       optSel = std::clamp(optSel, 0, int(items.size()) - 1);
       for (size_t k = 0; k < items.size(); k++) {
         bool sel = int(k) == optSel;
         lines.push_back({items[k].label, sel ? 0xff000000u : 0xff202020u, sel ? 0xffff9a00u : 0xffb6b6b6u});
       }
-      lines.push_back({optBind >= 0 ? "Nouvelle touche ?   (Échap : annuler)"
-                                    : "Flèches + Entrée : changer   Échap : fermer", 0xffc0c0c0u, 0xe0202020u});
+      lines.push_back({optBind >= 0 ? L("Nouvelle touche ?   (Échap : annuler)", "New key?   (Escape: cancel)")
+                                    : L("Flèches + Entrée : changer   Échap : fermer", "Arrows + Enter: change   Escape: close"), 0xffc0c0c0u, 0xe0202020u});
       int lineH = 13 * scale, total = int(lines.size()) * lineH;
       int y = std::max(0, (logicalH - total) / 2);
       {
@@ -1951,7 +1963,7 @@ int main(int argc, char **argv) {
       if (el >= 1) {
         char title[400];
         std::snprintf(title, sizeof title, "Stunt Car Racer " SCR_VERSION " - HD %dx%d%s%s - %.0f i/s%s%s", o.hdW,
-                      o.hdH, Renderer3D::gpu() ? " - OpenGL" : "", highDetail ? " - détails élevés (F5)" : "", fpsN / el,
+                      o.hdH, Renderer3D::gpu() ? " - OpenGL" : "", highDetail ? L(" - détails élevés (F5)", " - high detail (F5)") : "", fpsN / el,
                       net.active() ? " - " : "", net.active() ? net.status().c_str() : "");
         SDL_SetWindowTitle(win, title);
         if (fpsLog) std::fprintf(stderr, "%s\n", title);

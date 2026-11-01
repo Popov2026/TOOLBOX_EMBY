@@ -21,6 +21,7 @@ densite = 1                   # HD : densité du décor, 1 à 4 / HD: scenery de
 foule = 1                     # HD : encouragements de la foule (effet Doppler) / HD: crowd cheering (Doppler effect)
 volume_foule = 0.4            # volume de la foule, 0 à 2 (menu F1) / crowd volume, 0 to 2 (F1 menu)
 textures_hd = 1               # HD : images du dossier hd ; 0 : graphismes d'origine agrandis / HD: images from the hd folder; 0: original graphics enlarged
+langue = en                   # langue des menus et messages ajoutés : en (anglais) ou fr (français), aussi dans le menu F1 / language of the added menus and messages: en or fr (also in the F1 menu)
 manette = 1                   # 0 : manette ignorée / 0: gamepad ignored
 vibrations = 1                # vibrations de la manette lors des chocs / gamepad rumble on impacts
 # touches de conduite (noms SDL : Up, Down, Left, Right, Space, W, A, S, D, Left Shift...) ;

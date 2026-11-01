@@ -186,7 +186,8 @@ local network, those of the player who chose the opponent.
 The online server announces the latest version of the game: if yours is older, the game says so
 at start-up and in the "4. Online Multiplayer" menu ("Nouvelle version vXX disponible" = new
 version vXX available).
-(The game's menus are in French; the English meaning of each item is given in brackets.)
+(The game's menus are in English by default - the French labels quoted here are what you see
+with the French language chosen in the F1 options menu; the English meaning is given in brackets.)
 
 
 1. Connecting and starting the race

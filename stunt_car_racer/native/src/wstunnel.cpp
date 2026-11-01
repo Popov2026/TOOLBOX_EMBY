@@ -1,5 +1,6 @@
 // wstunnel.cpp — voir wstunnel.hpp
 #include "wstunnel.hpp"
+#include "lang.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -60,11 +61,11 @@ void tlog(const std::string &m) {
 
 // réponse HTTP autre que 101 (mise à niveau WebSocket refusée)
 std::string httpHint(int st) {
-  std::string r = "réponse HTTP " + std::to_string(st) + " au lieu de 101";
-  if (st == 404) r += " : le serveur relais a reçu la requête sans en-tête WebSocket (proxy : ajouter l'en-tête personnalisé WebSocket)";
-  else if (st == 502 || st == 503 || st == 504) r += " : le proxy n'atteint pas le serveur relais (destination, port, serveur arrêté ?)";
-  else if (st == 400 || st == 426) r += " : WebSocket refusée par le proxy (en-tête personnalisé WebSocket ?)";
-  else if (st == 403) r += " : accès refusé par le proxy (profil de contrôle d'accès ?)";
+  std::string r = L("réponse HTTP ", "HTTP answer ") + std::to_string(st) + L(" au lieu de 101", " instead of 101");
+  if (st == 404) r += L(" : le serveur relais a reçu la requête sans en-tête WebSocket (proxy : ajouter l'en-tête personnalisé WebSocket)", " : the relay server got the request without the WebSocket headers (proxy: add the WebSocket custom header)");
+  else if (st == 502 || st == 503 || st == 504) r += L(" : le proxy n'atteint pas le serveur relais (destination, port, serveur arrêté ?)", " : the proxy cannot reach the relay server (destination, port, server stopped?)");
+  else if (st == 400 || st == 426) r += L(" : WebSocket refusée par le proxy (en-tête personnalisé WebSocket ?)", " : WebSocket refused by the proxy (WebSocket custom header?)");
+  else if (st == 403) r += L(" : accès refusé par le proxy (profil de contrôle d'accès ?)", " : access denied by the proxy (access control profile?)");
   return r;
 }
 
@@ -115,7 +116,7 @@ class PlainWs : public Transport {
     s_ = TSock(socket(res->ai_family, res->ai_socktype, res->ai_protocol));
     bool ok = s_ != TBAD && ::connect(s_, res->ai_addr, int(res->ai_addrlen)) == 0;
     freeaddrinfo(res);
-    if (!ok) { setErr("connexion impossible"); return false; }
+    if (!ok) { setErr(L("connexion impossible", "cannot connect")); return false; }
     int on = 1;
     setsockopt(s_, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char *>(&on), sizeof on);
     uint8_t key[16];
@@ -218,35 +219,35 @@ class WinWs : public Transport {
     DWORD e = GetLastError();
     std::string w;
     switch (e) {
-      case 12007: w = "nom du serveur introuvable (DNS)"; break;
-      case 12029: w = "connexion impossible (box, redirection du port 443, NAT en boucle ?)"; break;
-      case 12002: w = "délai dépassé"; break;
-      case 12030: case 12152: w = "connexion coupée par le proxy ou le serveur (serveur relais à jour lancé ?)"; break;
-      case 12175: case 12045: case 12057: case 12037: case 12038: case 12044: w = "certificat refusé"; break;
-      default: w = "erreur"; break;
+      case 12007: w = L("nom du serveur introuvable (DNS)", "server name not found (DNS)"); break;
+      case 12029: w = L("connexion impossible (box, redirection du port 443, NAT en boucle ?)", "cannot connect (router, port 443 forwarding, NAT loopback?)"); break;
+      case 12002: w = L("délai dépassé", "timed out"); break;
+      case 12030: case 12152: w = L("connexion coupée par le proxy ou le serveur (serveur relais à jour lancé ?)", "connection cut by the proxy or the server (up-to-date relay server running?)"); break;
+      case 12175: case 12045: case 12057: case 12037: case 12038: case 12044: w = L("certificat refusé", "certificate refused"); break;
+      default: w = L("erreur", "error"); break;
     }
     return std::string("WinHTTP ") + step + " : " + w + " (" + std::to_string(e) + ")";
   }
   bool open(const Url &u) override {
     std::wstring host = wide(u.host), path = wide(u.path);
     ses_ = WinHttpOpen(L"StuntCarRacer", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!ses_) { setErr(winErr("ouverture")); return false; }
+    if (!ses_) { setErr(winErr(L("ouverture", "opening"))); return false; }
     DWORD keep = 20000;   // trame de maintien toutes les 20 s : les proxys ferment les liaisons muettes
     WinHttpSetOption(ses_, WINHTTP_OPTION_WEB_SOCKET_KEEPALIVE_INTERVAL, &keep, sizeof keep);
     con_ = WinHttpConnect(ses_, host.c_str(), INTERNET_PORT(u.port), 0);
-    if (!con_) { setErr(winErr("connexion")); return false; }
+    if (!con_) { setErr(winErr(L("connexion", "connection"))); return false; }
     HINTERNET req = WinHttpOpenRequest(con_, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
                                        u.secure ? WINHTTP_FLAG_SECURE : 0);
-    if (!req) { setErr(winErr("requête")); return false; }
+    if (!req) { setErr(winErr(L("requête", "request"))); return false; }
     bool ok = true;
     if (!WinHttpSetOption(req, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0)) { setErr(winErr("WebSocket")); ok = false; }
-    else if (!WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0, nullptr, 0, 0, 0)) { setErr(winErr("envoi")); ok = false; }
-    else if (!WinHttpReceiveResponse(req, nullptr)) { setErr(winErr("réponse")); ok = false; }
+    else if (!WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0, nullptr, 0, 0, 0)) { setErr(winErr(L("envoi", "sending"))); ok = false; }
+    else if (!WinHttpReceiveResponse(req, nullptr)) { setErr(winErr(L("réponse", "answer"))); ok = false; }
     DWORD status = 0, sz = sizeof status;
     if (ok && !WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
-                                   &status, &sz, WINHTTP_NO_HEADER_INDEX)) { setErr(winErr("statut")); ok = false; }
+                                   &status, &sz, WINHTTP_NO_HEADER_INDEX)) { setErr(winErr(L("statut", "status"))); ok = false; }
     if (ok && status != 101) { setErr(httpHint(int(status))); ok = false; }
-    if (ok && !(ws_ = WinHttpWebSocketCompleteUpgrade(req, 0))) setErr(winErr("mise à niveau"));
+    if (ok && !(ws_ = WinHttpWebSocketCompleteUpgrade(req, 0))) setErr(winErr(L("mise à niveau", "upgrade")));
     if (ws_) tlog("WebSocket ouverte (HTTP 101)");
     WinHttpCloseHandle(req);
     return ws_ != nullptr;
@@ -331,18 +332,18 @@ std::string tunnelError() { std::lock_guard<std::mutex> l(errMu); return lastErr
 std::string openWsTunnel(const std::string &url, std::string &err) {
   setErr("");
   Url u;
-  if (!parseUrl(url, u)) { err = "adresse wss:// invalide"; return ""; }
+  if (!parseUrl(url, u)) { err = L("adresse wss:// invalide", "invalid wss:// address"); return ""; }
 #ifndef _WIN32
-  if (u.secure) { err = "connexion wss:// disponible seulement sous Windows (ws:// ou adresse:port ici)"; return ""; }
+  if (u.secure) { err = L("connexion wss:// disponible seulement sous Windows (ws:// ou adresse:port ici)", "wss:// connections only on Windows (use ws:// or address:port here)"); return ""; }
 #endif
   TSock ls = TSock(socket(AF_INET, SOCK_STREAM, 0));
-  if (ls == TBAD) { err = "réseau indisponible"; return ""; }
+  if (ls == TBAD) { err = L("réseau indisponible", "network unavailable"); return ""; }
   sockaddr_in a{};
   a.sin_family = AF_INET; a.sin_addr.s_addr = htonl(INADDR_LOOPBACK); a.sin_port = 0;
   socklen_t l = sizeof a;
   if (bind(ls, reinterpret_cast<sockaddr *>(&a), sizeof a) != 0 || listen(ls, 1) != 0 ||
       getsockname(ls, reinterpret_cast<sockaddr *>(&a), &l) != 0) {
-    tclose(ls); err = "tunnel local impossible"; return "";
+    tclose(ls); err = L("tunnel local impossible", "cannot open the local tunnel"); return "";
   }
   std::thread(runTunnel, ls, u).detach();
   return "127.0.0.1:" + std::to_string(ntohs(a.sin_port));

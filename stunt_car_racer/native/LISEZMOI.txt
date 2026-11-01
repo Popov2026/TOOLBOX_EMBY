@@ -27,6 +27,8 @@ Menu d'options (F1, ou bouton Start de la manette) : son et volume, mode HD, dé
 textures HD (images du dossier hd), ciel, décor et sa densité, encouragements de la foule et leur volume, ombres des voitures, étincelles et fumée, lissage des bords, plein écran, circuits d'origine /
 TNT, manette (et vibrations lors des chocs), touches de conduite (accélérer, freiner, gauche,
 droite, boost : Entrée puis la nouvelle touche ; les flèches restent actives pour les menus).
+Langue (dernière ligne du menu) : les menus et messages ajoutés au jeu sont en anglais par défaut,
+en français au choix (langue = fr dans scr.ini) ; les écrans du jeu d'origine restent en anglais.
 Chaque changement est enregistré aussitôt dans scr.ini. Le jeu est en pause pendant ce menu
 (sauf en multijoueur). Flèches + Entrée (ou gauche/droite) pour changer, Échap pour fermer.
 
@@ -134,7 +136,8 @@ gamepad (and rumble on impacts), driving keys (accelerate, brake, left, right, b
 then the new key; the arrow keys always work in the menus).
 Every change is saved immediately in scr.ini. The game is paused while this menu is open
 (except in multiplayer). Arrows + Enter (or left/right) to change, Escape to close.
-(The game's menus are in French; the English name of each item is given in this file.)
+The menus and messages added to the game are in English by default; the last line of this menu
+switches them to French (langue = fr in scr.ini). The original game's screens stay in English.
 
 HD mode: gradient sky with a sun and slowly drifting clouds, scenery around the tracks
 (grandstands full of spectators, advertising boards, fir and leafy trees, cars parked behind
