@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v74"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v75"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -1015,6 +1015,9 @@ int main(int argc, char **argv) {
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
       if (ev.type == SDL_QUIT) running = false;
+      // croix de la fenêtre : la fenêtre cachée du rendu OpenGL empêche SDL_QUIT (envoyé à la
+      // fermeture de la dernière fenêtre seulement)
+      else if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_CLOSE) running = false;
       else if (ev.type == SDL_CONTROLLERDEVICEADDED && !pad) pad = SDL_GameControllerOpen(ev.cdevice.which);
       else if (ev.type == SDL_TEXTINPUT && typing != Typing::None) {   // code de salle ou adresse
         for (const char *c = ev.text.text; *c; c++) {
