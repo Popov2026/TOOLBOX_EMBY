@@ -9,6 +9,10 @@
 //     choisissent leur adversaire (même course à deux), ou font une course à plusieurs (2 à 6).
 //   Le Computer Link (une seule partie menée par le maître) reste pour le réseau local.
 // La fenêtre du serveur affiche en direct les joueurs connectés (option --journal : simple journal).
+// Robots d'internet (scanners de ports, requêtes web...) : toute connexion dont la première trame
+// n'est pas une inscription du jeu est fermée sans être affichée ni journalisée (simple compteur) ;
+// une adresse qui insiste (3 essais) n'a plus que 3 secondes pour s'inscrire pendant une heure
+// (un vrai jeu s'inscrit tout de suite, même depuis cette adresse).
 // Trafic : environ 300 octets/s par joueur pendant une course.
 //
 // Compilation  Linux   : g++ -O2 -std=c++17 scr_relay.cpp -o scr_relay
@@ -54,6 +58,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <iterator>
 #include <map>
 #include <random>
 #include <string>
@@ -110,7 +115,7 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v70"
+#define SCR_RELAY_VERSION "v71"
 
 namespace {
 
@@ -119,7 +124,11 @@ constexpr uint8_t NF_JOIN = 10, NF_INFO = 11, NF_JOIN2 = 12, NF_LIST = 13, NF_PI
 constexpr size_t GROUP_MAX = 6;
 constexpr size_t MAX_CLIENTS = 512, MAX_PER_IP = 16, MAX_BUFFER = 1 << 20;
 const Sock NONE = Sock(-1);
-constexpr double JOIN_TIMEOUT = 20, PAIR_TIMEOUT = 3600, IDLE_TIMEOUT = 90;
+constexpr double JOIN_TIMEOUT = 8, PAIR_TIMEOUT = 3600, IDLE_TIMEOUT = 90;
+constexpr int BOT_STRIKES = 3;            // connexions de robot avant blocage de l'adresse
+constexpr double BOT_BAN = 3600;          // durée de la surveillance (s)
+constexpr double SUSPECT_JOIN_TIMEOUT = 3;   // adresse surveillée : délai d'inscription
+constexpr size_t MAX_JOIN_FRAME = 512;    // une inscription du jeu fait moins de 100 octets
 
 double now() { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 
@@ -175,6 +184,8 @@ struct Client {
   Sock peer = NONE;              // partenaire une fois apparié
   bool joined = false, closing = false, probe = false;
   bool overflow = false;         // ne lit plus ce qu'on lui envoie : déconnecté
+  bool bot = false;              // ne parle pas le protocole du jeu (robot, scanner)
+  bool suspect = false;          // adresse d'un robot récent : délai d'inscription court
   double closingSince = 0;
   double since = 0, lastRx = 0, pairedAt = 0, lastChat = 0;
   bool inGroup = false;          // course à plusieurs
@@ -189,7 +200,9 @@ struct Client {
 
 std::map<Sock, Client> clients;
 uint32_t nextId = 1;
-uint64_t totalConnections = 0, totalGames = 0;
+uint64_t totalConnections = 0, totalGames = 0, totalBots = 0;
+struct Strike { int n = 0; double until = 0, last = 0; };
+std::map<std::string, Strike> strikes;   // adresses des robots
 double startedAt = 0;
 int listenPort = 27420;
 std::string machineAddresses;
@@ -262,6 +275,12 @@ void frame(Client &c, uint8_t type, const std::string &s) {
 }
 
 std::string who(const Client &c) { return c.name.empty() ? c.ip : c.name + " (" + c.ip + ")"; }
+
+size_t playerCount() {   // jeux inscrits (sans les robots ni les connexions en cours)
+  size_t n = 0;
+  for (auto &kv : clients) n += kv.second.joined;
+  return n;
+}
 
 bool free_(const Client &c) { return c.joined && !c.closing && c.peer == NONE && !c.inGroup; }
 
@@ -518,7 +537,13 @@ void drop(Sock fd, const char *why) {
     auto p = clients.find(c.peer);
     if (p != clients.end()) { frame(p->second, NF_INFO, "GONE"); p->second.peer = NONE; p->second.closing = true; }
   }
-  if (!c.probe) logf("%s déconnecté (%s)", who(c).c_str(), why);
+  if (!c.joined && !c.probe) {   // jamais inscrit : robot (ou jeu coupé avant l'inscription), pas de journal
+    totalBots++;
+    Strike &s = strikes[c.ip];
+    if (now() - s.last > BOT_BAN) s.n = 0;
+    s.last = now();
+    if (++s.n >= BOT_STRIKES && s.until < now()) { s.until = now() + BOT_BAN; logf("%s : robot (pas un jeu), adresse surveillée pendant 1 h", c.ip.c_str()); }
+  } else if (!c.probe) logf("%s déconnecté (%s)", who(c).c_str(), why);
   c.closing = true;   // plus disponible : jamais réapparié pendant son départ
   groupLeave(c);
   closeSock(fd);
@@ -629,6 +654,13 @@ void onPick(Client &c, const std::string &s) {
 // trames complètes reçues : inscription avant l'appariement, retransmission ensuite
 void process(Client &c) {
   size_t pos = 0;
+  // avant l'inscription, seules JOIN2, JOIN et PROBE (courtes) sont admises : le reste est un robot
+  if (!c.joined && !c.in.empty()) {
+    uint8_t t0 = c.in[0];
+    bool bad = t0 != NF_JOIN2 && t0 != NF_JOIN && t0 != NF_PROBE;
+    if (!bad && c.in.size() >= 3) bad = ((size_t(c.in[1]) << 8) | c.in[2]) > MAX_JOIN_FRAME;
+    if (bad) { c.bot = c.closing = true; c.in.clear(); return; }
+  }
   while (c.in.size() - pos >= 3) {
     size_t n = (size_t(c.in[pos + 1]) << 8) | c.in[pos + 2];
     if (c.in.size() - pos < 3 + n) break;
@@ -636,6 +668,7 @@ void process(Client &c) {
     const uint8_t *p = c.in.data() + pos + 3;
     if (!c.joined) {
       auto f = fields(p, n);
+      if (type == NF_JOIN2 && f.size() >= 3 && f[0] != "AUTO" && f[0] != "SALLE") { c.bot = c.closing = true; break; }
       if (type == NF_JOIN2 && f.size() >= 3) {
         c.tnt = f.size() > 4 && f[4] == "tnt";   // circuits TNT présents chez ce joueur
         onJoin(c, f[0] == "SALLE" ? Mode::Room : Mode::Auto, f[1], f[2], f.size() > 3 ? f[3] : "");
@@ -648,7 +681,7 @@ void process(Client &c) {
         frame(c, NF_INFO, "SERVER " + std::to_string(players) + " " + std::to_string(games / 2) + ";" + paramsText() + ";version=" SCR_RELAY_VERSION);
         c.probe = c.closing = true;
       }
-      else { frame(c, NF_INFO, "ERR inscription attendue"); c.closing = true; }
+      else { c.bot = c.closing = true; break; }
     } else if (c.peer != NONE) {
       Client &o = clients[c.peer];
       if (o.out.size() < MAX_BUFFER) o.out.insert(o.out.end(), c.in.begin() + long(pos), c.in.begin() + long(pos + 3 + n));
@@ -722,13 +755,13 @@ void draw(double t) {
   o += b;
   if (!machineAddresses.empty()) o += "Adresse(s) de cette machine : " + machineAddresses + "\n";
   o += "Réglages imposés aux jeux : " + paramsText() + "\n";
-  std::snprintf(b, sizeof b, "Joueurs connectés : %zu    parties en cours : %zu    depuis le lancement : %llu connexions, %llu parties\n\n",
-                clients.size(), games / 2, static_cast<unsigned long long>(totalConnections), static_cast<unsigned long long>(totalGames));
+  std::snprintf(b, sizeof b, "Joueurs connectés : %zu    parties en cours : %zu    depuis le lancement : %llu parties, %llu robots refusés\n\n",
+                playerCount(), games / 2, static_cast<unsigned long long>(totalGames), static_cast<unsigned long long>(totalBots));
   o += b;
   o += "\x1b[7m" + col(" N°", 5) + col("Joueur", 18) + col("Adresse IP", 16) + col("Mode", 13) + col("Salle", 10) +
        col("État", 36) + col("Connecté", 10) + col("Trafic", 9) + "\x1b[0m\n";
   std::vector<const Client *> list;
-  for (auto &kv : clients) list.push_back(&kv.second);
+  for (auto &kv : clients) if (kv.second.joined || kv.second.probe) list.push_back(&kv.second);   // pas les robots
   std::sort(list.begin(), list.end(), [](const Client *a, const Client *b) { return a->id < b->id; });
   size_t shown = 0;
   for (const Client *c : list) {
@@ -846,11 +879,13 @@ int main(int argc, char **argv) {
         std::string ip = inet_ntoa(ca.sin_addr);
         size_t same = 0;
         for (auto &kv : clients) same += kv.second.ip == ip;
-        if (clients.size() >= MAX_CLIENTS || same >= MAX_PER_IP) { closeSock(fd); logf("%s refusé (trop de connexions)", ip.c_str()); continue; }
+        auto st = strikes.find(ip);
+        if (clients.size() >= MAX_CLIENTS || same >= MAX_PER_IP) { closeSock(fd); totalBots++; continue; }
         nonBlock(fd);
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char *>(&on), sizeof on);
         setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, reinterpret_cast<const char *>(&on), sizeof on);
         Client c; c.fd = fd; c.id = nextId++; c.ip = ip; c.since = c.lastRx = t;
+        c.suspect = st != strikes.end() && st->second.until > t;
         clients[fd] = c;
         totalConnections++;
         dirty = true;
@@ -888,7 +923,7 @@ int main(int argc, char **argv) {
       if (c.closing && !c.closingSince) c.closingSince = t;
       if (c.overflow) dead.push_back({fd, "trop de données en attente"});
       else if (c.closing && (c.out.empty() || t - c.closingSince > 10)) dead.push_back({fd, "terminé"});
-      else if (!c.joined && t - c.since > JOIN_TIMEOUT) dead.push_back({fd, "pas d'inscription"});
+      else if (!c.joined && t - c.since > (c.suspect ? SUSPECT_JOIN_TIMEOUT : JOIN_TIMEOUT)) dead.push_back({fd, "pas d'inscription"});
       else if (c.joined && c.peer == NONE && t - c.lastRx > PAIR_TIMEOUT) dead.push_back({fd, "inactif trop longtemps"});
       else if (c.peer != NONE && t - c.lastRx > IDLE_TIMEOUT) dead.push_back({fd, "silence"});
     }
@@ -904,7 +939,10 @@ int main(int argc, char **argv) {
       lastSummary = t;
       size_t games = 0;
       for (auto &kv : clients) games += kv.second.peer != NONE;
-      logf("%zu joueur(s) connecté(s), %zu partie(s) en cours", clients.size(), games / 2);
+      logf("%zu joueur(s) connecté(s), %zu partie(s) en cours, %llu robot(s) refusé(s) depuis le lancement", playerCount(), games / 2,
+           static_cast<unsigned long long>(totalBots));
+      for (auto it = strikes.begin(); it != strikes.end();)   // oubli des vieux robots
+        it = t - it->second.last > BOT_BAN && it->second.until < t ? strikes.erase(it) : std::next(it);
     }
   }
 }
