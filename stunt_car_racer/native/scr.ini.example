@@ -1,58 +1,63 @@
 # Stunt Car Racer natif : réglages (clé = valeur). Les options en ligne de commande priment.
-# disk = Stunt_Car_Racer.st   # image disque (sinon : premier .st du dossier DISK)
-# track = 1                   # 1..8 : entraînement direct sur ce circuit ; absent : jeu complet
-scale = 3                     # taille de la fenêtre (× 320×200)
-fullscreen = 0
-smooth = 0                    # 1 : lissage à l'agrandissement
-speed = 1                     # vitesse de la machine (1 = 50 Hz d'origine)
-son = 1                       # 0 : sans son (F3 en jeu)
-volume = 0.8                  # 0 à 2
-hd = 0                        # 1 : démarrer en mode HD (touche F8 pour basculer)
-details = 0                   # 1 : démarrer en détails élevés (touche F5 : sols et voiture texturés, roues rondes)
-hdres = 1920x1080             # définition du mode HD (16/9)
-rendu = opengl                # HD : 3D dessinée par la carte graphique (opengl) ou par le processeur (processeur)
-ombres = 1                    # HD : ombres sous les voitures
-particules = 1                # HD : étincelles et fumée lors des chocs et des réceptions brutales
-lissage = 1                   # HD : lissage des bords (anticrénelage)
-ciel = 1                      # HD : ciel dégradé avec nuages qui dérivent et soleil (0 : ciel uni d'origine)
-decor = 1                     # HD : tribunes avec public, panneaux publicitaires, arbres et voitures garées autour des circuits
-densite = 1                   # HD : densité du décor, 1 à 4 (plus d'arbres, de panneaux, de tribunes et de voitures)
-foule = 1                     # HD : encouragements de la foule devant les tribunes (effet Doppler)
-volume_foule = 0.4            # volume de la foule, 0 à 2 (réglable dans le menu F1)
-textures_hd = 1               # HD : images du dossier hd (cockpit, sprites) ; 0 : graphismes d'origine agrandis
-manette = 1                   # 0 : manette ignorée
-vibrations = 1                # vibrations de la manette lors des chocs
+# Native Stunt Car Racer: settings (key = value). Command-line options take precedence.
+# disk = Stunt_Car_Racer.st   # image disque (sinon : premier .st du dossier DISK) / disk image (else: first .st in the DISK folder)
+# track = 1                   # 1..8 : entraînement direct sur ce circuit ; absent : jeu complet / practice straight on this track; absent: full game
+scale = 3                     # taille de la fenêtre (× 320×200) / window size (× 320×200)
+fullscreen = 0                # 1 : plein écran / full screen
+smooth = 0                    # 1 : lissage à l'agrandissement / smoothing when scaling up
+speed = 1                     # vitesse de la machine (1 = 50 Hz d'origine) / machine speed (1 = original 50 Hz)
+son = 1                       # 0 : sans son (F3 en jeu) / 0: no sound (F3 in game)
+volume = 0.8                  # 0 à 2 / 0 to 2
+hd = 0                        # 1 : démarrer en mode HD (touche F8 pour basculer) / 1: start in HD mode (F8 key toggles)
+details = 0                   # 1 : détails élevés (touche F5 : sols et voiture texturés, roues rondes) / 1: high detail (F5: textured ground and car, round wheels)
+hdres = 1920x1080             # définition du mode HD (16/9) / HD mode resolution (16:9)
+rendu = opengl                # HD : 3D dessinée par la carte graphique (opengl) ou le processeur (processeur) / HD: 3D drawn by the graphics card (opengl) or the CPU (processeur)
+ombres = 1                    # HD : ombres sous les voitures / HD: shadows under the cars
+particules = 1                # HD : étincelles et fumée lors des chocs / HD: sparks and smoke on impacts
+lissage = 1                   # HD : lissage des bords (anticrénelage) / HD: edge smoothing (anti-aliasing)
+ciel = 1                      # HD : ciel dégradé, nuages et soleil (0 : ciel uni d'origine) / HD: gradient sky, clouds and sun (0: original plain sky)
+decor = 1                     # HD : tribunes, panneaux, arbres et voitures garées / HD: grandstands, boards, trees and parked cars
+densite = 1                   # HD : densité du décor, 1 à 4 / HD: scenery density, 1 to 4
+foule = 1                     # HD : encouragements de la foule (effet Doppler) / HD: crowd cheering (Doppler effect)
+volume_foule = 0.4            # volume de la foule, 0 à 2 (menu F1) / crowd volume, 0 to 2 (F1 menu)
+textures_hd = 1               # HD : images du dossier hd ; 0 : graphismes d'origine agrandis / HD: images from the hd folder; 0: original graphics enlarged
+manette = 1                   # 0 : manette ignorée / 0: gamepad ignored
+vibrations = 1                # vibrations de la manette lors des chocs / gamepad rumble on impacts
 # touches de conduite (noms SDL : Up, Down, Left, Right, Space, W, A, S, D, Left Shift...) ;
 # les flèches restent toujours actives. Réglables dans le menu d'options (touche F1).
-# touche_accelerer = Up
-# touche_freiner = Down
-# touche_gauche = Left
-# touche_droite = Right
-# touche_boost = Space
-# touche_klaxon = K            # klaxon en multijoueur (aussi le bouton Y de la manette)
-moteur_v8 = 0                 # 1 : son du moteur V8 réaliste à la place du son d'origine (menu d'options)
-# hddir = hd                  # dossier des images de remplacement (défaut : hd à côté de scr.exe)
-# (les flammes HD suivent l option textures_hd)
-#                              (par défaut : sprites d'origine agrandis, les images de flammes sont ignorées)
+# driving keys (SDL names: Up, Down, Left, Right, Space, W, A, S, D, Left Shift...);
+# the arrow keys always work too. Can be changed in the options menu (F1 key).
+# touche_accelerer = Up        # accélérer / accelerate
+# touche_freiner = Down        # freiner / brake
+# touche_gauche = Left         # gauche / left
+# touche_droite = Right        # droite / right
+# touche_boost = Space         # boost
+# touche_klaxon = K            # klaxon en multijoueur (aussi le bouton Y de la manette) / horn in multiplayer (also gamepad Y button)
+moteur_v8 = 0                 # 1 : son du moteur V8 réaliste à la place du son d'origine / 1: realistic V8 engine sound instead of the original
+# hddir = hd                  # dossier des images de remplacement (défaut : hd à côté de scr.exe) / replacement images folder (default: hd next to scr.exe)
 
 # --- circuits TNT (Stunt Car Racer « The New Tracks », version Amiga) : fichier de l'utilisateur
-# tnt = TNT/StuntCarRacerTNT_v1.4.lha   # SCR-TNT ou archive .lha (défaut : cherché dans le dossier TNT)
-# circuits = tnt                        # tout le jeu sur les circuits TNT (défaut : circuits d'origine)
+# --- TNT tracks (Stunt Car Racer "The New Tracks", Amiga version): the user's own file
+# tnt = TNT/StuntCarRacerTNT_v1.4.lha   # SCR-TNT ou archive .lha (défaut : dossier TNT) / SCR-TNT or .lha archive (default: TNT folder)
+# circuits = tnt                        # circuits TNT (touche F7) ; défaut : circuits d'origine / TNT tracks (F7 key); default: original tracks
 
-# --- multijoueur (mode « Computer Link » par le réseau ; voir LISEZMOI_MULTIJOUEUR.txt)
-# nom = Pierre                # pseudo en multijoueur online, 12 caractères (aussi réglable dans le menu)
-# serveur relais pour jouer par Internet (menu « 4. Online Multiplayer »). Vide : serveur officiel.
-# Pour un autre serveur, par exemple :
-#   relais = 192.168.1.110:27420     (attention : pas de # en début de ligne, sinon elle est ignorée)
+# --- multijoueur (voir LISEZMOI_MULTIJOUEUR.txt) / multiplayer (see LISEZMOI_MULTIJOUEUR.txt)
+# nom = Pierre                # pseudo en ligne, 12 caractères (aussi dans le menu) / online nickname, 12 characters (also in the menu)
+# Serveur relais pour jouer par Internet (menu « 4. Online Multiplayer »). Vide : serveur officiel.
+# Relay server for playing over the Internet ("4. Online Multiplayer" menu). Empty: official server.
+# Pour un autre serveur, par exemple / for another server, for example:
+#   relais = 192.168.1.110:27420     (attention : pas de # en début de ligne / careful: no # at the start of the line)
+#   relais = wss://mon.domaine       (serveur derrière un reverse proxy HTTPS / server behind an HTTPS reverse proxy)
 # L'adresse peut aussi être saisie dans le menu « 4. Online Multiplayer » : elle est enregistrée ici.
+# The address can also be typed in the "4. Online Multiplayer" menu: it is saved here.
 relais =
-reseau_cadence = 400          # échanges réseau par seconde pendant une partie (50 à 2000) : plus haut = moins de lag
+reseau_cadence = 400          # échanges réseau par seconde (50 à 2000) : plus haut = moins de lag / network exchanges per second (50 to 2000): higher = less lag
 
-# --- physique d'origine (1 = valeur du jeu)
-gravity = 1
-thrust = 1
-brake = 1
-timestep = 1
-damping = 1
-boostuse = 1
-# shock = 0                   # tolérance aux chocs
+# --- physique d'origine (1 = valeur du jeu) / original physics (1 = the game's value)
+gravity = 1                   # gravité / gravity
+thrust = 1                    # poussée du moteur / engine thrust
+brake = 1                     # freinage / braking
+timestep = 1                  # pas de temps (vitesse du jeu) / time step (game speed)
+damping = 1                   # amortissement / damping
+boostuse = 1                  # consommation du boost / boost consumption
+# shock = 0                   # tolérance aux chocs / impact tolerance

@@ -1,3 +1,5 @@
+(English version below / version anglaise plus bas)
+
 Stunt Car Racer - jouer à plusieurs en réseau (réseau local et en ligne)
 =================================================================
 
@@ -161,3 +163,184 @@ disponible »).
   serveur/LISEZMOI_SERVEUR.txt). Sa fenêtre affiche en direct les joueurs connectés, leur mode,
   leur salle et les parties en cours. Un petit serveur virtuel à quelques
   euros par mois suffit très largement : le trafic est d'environ 300 octets par seconde par joueur.
+
+  Serveur derrière un reverse proxy web (HTTPS) : relais = wss://domaine (ou
+  wss://domaine:port/chemin) ; le jeu passe alors en WebSocket chiffrée (Windows). Voir
+  serveur/LISEZMOI_SERVEUR.txt, section 6.
+
+
+==============================================================================
+ENGLISH
+==============================================================================
+
+Stunt Car Racer - playing together over a network (local network and online)
+============================================================================
+
+The original game let you link two Atari STs with a serial cable to race against each other.
+Here that cable goes through the network: each player runs scr.exe on their own PC and finds
+the other player as the opponent on the track.
+
+Both players need the same version of scr.exe and the same disk image (checked when
+connecting). Physics settings are made identical automatically: online, the server's; on a
+local network, those of the player who chose the opponent.
+The online server announces the latest version of the game: if yours is older, the game says so
+at start-up and in the "4. Online Multiplayer" menu ("Nouvelle version vXX disponible" = new
+version vXX available).
+(The game's menus are in French; the English meaning of each item is given in brackets.)
+
+
+1. Connecting and starting the race
+-----------------------------------
+
+  The game's first menu offers:
+
+    1. Single Player League
+    2. Multiplayer - Local            several drivers taking turns on this PC (original game)
+    3. Computer Link - Local LAN      two PCs on the same (home) network
+    4. Online Multiplayer             two PCs over the Internet, through the relay server
+
+  Arrows + Enter (or the gamepad) in the menus, Escape to cancel.
+
+  3. Computer Link - Local LAN
+     Each game waiting in this menu shows up on the other one: one of the two players chooses
+     "Affronter ..." (race against ...); the two games link up and the original game's link
+     handshake starts by itself ("Link complete"). On first start, Windows asks whether to allow
+     scr.exe on the network: accept.
+     If the other player does not appear:
+       * both games must be in this menu at the same time (the search only runs there);
+       * Windows firewall: allow scr.exe (Windows Security > Firewall > Allow an app) for
+         private AND public networks, or set your router's network to "Private"; do it on BOTH
+         PCs;
+       * both PCs must be on the same router (not a "guest" network or an isolated Wi-Fi);
+       * otherwise: the line "Ce PC : 192.168.x.y" (this PC) in the menu gives each PC's address;
+         one player chooses "Par adresse IP" (by IP address) and types the address shown on the
+         other PC.
+
+  4. Online Multiplayer
+     By default the game connects to the official server ("Serveur : serveur officiel" in the
+     menu): nothing to set up. To play on another relay server, either (this overrides the
+     official server):
+       * in the menu: "Changer l'adresse du serveur" (change server address), type for example
+         192.168.1.110 then Enter (port 27420 by default): it is saved in scr.ini; an empty
+         address goes back to the official server;
+       * or in scr.ini, next to scr.exe:   relais = 192.168.1.110:27420
+         WARNING: no # at the start of the line (a line starting with # is ignored);
+       * or on the command line: scr.exe --relais 192.168.1.110:27420 (overrides scr.ini).
+     When this menu opens, the game tests the server and shows:
+       "En ligne - ping 25 ms - 3 joueurs"   (green) : online, the server answers;
+       "Hors ligne : ..."                    (red)   : offline, with the reason (server stopped,
+                                                       address not found, no answer...).
+     "Tester à nouveau le serveur" (test the server again) repeats the test.
+     Nickname: "Pseudo : ... (changer)"; each player enters their own (12 characters, saved in
+     scr.ini, line nom =): it is the name shown above their car and in the standings.
+     When the server answers:
+       * "Premier joueur disponible" (first available player): the server puts you in a
+         TWO-PLAYER RACE with the first player waiting (or makes you wait for the next one). No
+         Computer Link: each player runs their own game, without waiting for the other to go
+         through the menus. A track is drawn at random (among the 8 original ones, or 16 with the
+         TNT tracks if both players have them) and offered to both: "Accepter ce circuit"
+         (accept this track); the race starts as soon as both have accepted. "Autre circuit"
+         (another track) refuses: another track is offered, to be accepted again by both.
+         Grid: one on the left, one on the right, the crane brings each car in from its own side
+         (as in the multi-car race below: boost flames, collisions, live standings).
+         Tracks are drawn without repeats: each one is offered once before a track comes back.
+         Chat during the two-player race: F9 or "Écrire un message" (write a message).
+         After the finish, a new track is offered for a rematch; "Quitter la course" (leave the
+         race) or Escape disconnects you, and the other player waits for a new opponent;
+       * "Salle privée (code)" (private room): type a code (letters or digits; empty = the game
+         makes one up, give it to your friends). The menu shows the players in the room:
+         "Affronter ..." (race against ...) to pick one: same two-player race (track offered,
+         accepted by both). Several players can wait in the same room; those already racing no
+         longer appear in it.
+     Multi-car race (2 to 6 players): in the private room, "Course à plusieurs (2 à 6 joueurs)".
+     The first one in is the organiser: they choose the track and the number of laps (left /
+     right arrows; with the TNT tracks, 16 to choose from: the 8 original then the 8 TNT ones,
+     which every player must have, see LISEZMOI.txt), then "Lancer la course" (start the race)
+     as soon as at least two players are there.
+     Each game sets itself up on the track and waits until everyone is ready: the start is given
+     to all at the same time. Starting grid: 3 rows of 2 (left / right), order drawn at random for
+     each race; rows 2 and 3 start a little further back (time and standings count from the start
+     line). The crane brings each car in from its own side: a left-hand place arrives from the
+     left of the road, a right-hand place from the right (the original crane's path, mirrored for
+     the left); no car goes through the others. You see the other players driving (with their
+     name above, and the V8 engine's 8 flames, in a V, shading from yellow to orange and red, when
+     they boost). Cars collide: each one is pushed out of the other, speeds are shared in the
+     impact (you can push a car or be pushed), and a violent impact damages the car like a bad
+     landing. Each game computes the impact for its own car from the position received from the
+     others: with lag, the contact can look slightly off. The game switches to HD (F8) at the
+     start, because the original renderer can only draw one opponent car.
+     Top right: lap, time and live standings. The number of laps is the organiser's (1 to 9; the
+     original practice mode's stop after 3 laps is disabled).
+     If all the other players are eliminated (car wrecked) or gone, the last one still racing
+     wins: "VICTOIRE !" (victory) stays on screen until they press Enter (or the gamepad's A
+     button), then the race menu opens.
+     As soon as a player crosses the finish line, the group menu opens for them (live standings).
+     Car wrecked: the player is out, the group menu opens for them and "abandon" (retired) is
+     shown next to their name. At the end (all finished or out, or two minutes after the first
+     finisher), the menu shows the times and the organiser can start another race. "Quitter la
+     course à plusieurs" (leave the multi-car race) or Escape goes back to the game's title.
+     Horn: K key (or the gamepad's Y button) to taunt the others: they hear it, louder when your
+     car is close (also in Computer Link).
+     Chat: in the private room, "Écrire un message (F9)" (write a message) or the F9 key: the
+     message goes to every player in the room; the latest ones are shown in the menu. Once the
+     game has started, F9 writes to the opponent (also on a local network); their messages appear
+     at the bottom of the picture for 10 seconds. Enter sends, Escape closes the input.
+     No port to open on the players' routers: the PCs call the relay server.
+     Settings: online, the server imposes the physics and the network rate on all players (the
+     server's scr_relay.ini file); the menu shows them ("Réglages du serveur" = server settings).
+     On a local network (menu 3), the joining game takes the settings of the one who chose it.
+     By IP address (no server): menu 3, "Par adresse IP".
+
+  Computer Link on a local network (menu 3): the player who chose the opponent is the "master":
+  they enter the drivers (at least two: both players) with "1. Enter another driver", then
+  "2. Continue", and run the menus (league, practice, track). The other one shows "Please wait"
+  then follows the same screens. In the race, each player drives their own car and sees the
+  other as the opponent.
+
+  F10 disconnects. A banner at the top of the picture shows the state (linked, ping, or the
+  reason for a failure).
+
+  On the command line (without going through the menu):
+    scr.exe --online auto                 relay server, first available player
+    scr.exe --online CODE                 relay server, private room (relais = in scr.ini)
+    scr.exe --join ADDRESS[:PORT]         address of another player who is waiting (--host)
+    scr.exe --host / --joinlan            host / join on a local network
+
+
+2. Ping and game speed
+----------------------
+
+  The original game waits for the other machine at each step of the race. With a ping (round
+  trip) of up to about 50 ms - the normal case between players in the same country - the speed
+  is normal. Beyond that, the game slows down a little (about 87 % at 80 ms, 76 % at 120 ms) but
+  does not get out of sync.
+
+  HD mode (F8) and high detail (F5) also work in multiplayer.
+
+  Exchange rate (scr.ini):
+
+    reseau_cadence = 400
+
+  This is how many times per second the game reads and sends race data (positions,
+  joystick...): each game frame is emulated in small slices spread over time, and the network is
+  handled at each slice. The higher the value, the sooner received data is taken into account
+  (less "lag"); 400 = every 2.5 ms. From 50 (once per frame, as before) to 2000. If the game
+  stutters: try 800 or 1000; on a slow PC, 200.
+  The original game exchanges its data at each step of the race and waits for the other machine:
+  the rate reduces the waiting added by the PC, but not the ping itself (distance, Wi-Fi, router).
+  Tips against lag: Ethernet cable rather than Wi-Fi, relay server close to the players, original
+  display mode or HD without high detail (F5) on a modest PC.
+
+
+3. The relay server
+-------------------
+
+  It is only needed to play over the Internet. It is a small stand-alone program, for Windows
+  (scr_relay.exe: double-click) or for a Linux server (see the serveur folder and
+  serveur/LISEZMOI_SERVEUR.txt). Its window shows live the connected players, their mode, their
+  room and the races in progress. A small virtual server at a few euros a month is more than
+  enough: the traffic is about 300 bytes per second per player.
+
+  Server behind a web reverse proxy (HTTPS): relais = wss://domain (or wss://domain:port/path);
+  the game then uses an encrypted WebSocket (Windows). See serveur/LISEZMOI_SERVEUR.txt,
+  section 6.

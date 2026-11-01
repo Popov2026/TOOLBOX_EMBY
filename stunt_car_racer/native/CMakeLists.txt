@@ -57,13 +57,13 @@ if(NOT MSVC)
 endif()
 
 # --- cœur du jeu (sans dépendance graphique)
-add_library(scrcore STATIC src/scrdata.cpp src/machine.cpp src/track.cpp src/tnt.cpp src/render3d.cpp src/scenery.cpp src/crowd.cpp src/sound.cpp src/hdview.cpp src/hdassets.cpp src/ym2149.cpp src/net.cpp src/banner.cpp)
+add_library(scrcore STATIC src/scrdata.cpp src/machine.cpp src/track.cpp src/tnt.cpp src/render3d.cpp src/scenery.cpp src/crowd.cpp src/sound.cpp src/hdview.cpp src/hdassets.cpp src/ym2149.cpp src/net.cpp src/wstunnel.cpp src/banner.cpp)
 find_package(Threads REQUIRED)
 target_link_libraries(scrcore PUBLIC Threads::Threads)
 target_include_directories(scrcore PUBLIC src)
 target_link_libraries(scrcore PUBLIC musashi)
 if(WIN32)
-  target_link_libraries(scrcore PUBLIC ws2_32)
+  target_link_libraries(scrcore PUBLIC ws2_32 winhttp)
 endif()
 
 # --- serveur relais (multijoueur en ligne), programme autonome pour Windows ou Linux

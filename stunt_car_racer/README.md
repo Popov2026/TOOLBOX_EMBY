@@ -1,11 +1,58 @@
 # Stunt Car Racer — rétro-ingénierie et réplique PC paramétrable
 
+*[English below](#english) — version anglaise plus bas.*
+
 Projet de décompilation de **Stunt Car Racer** (Geoff Crammond, Micro Style, 1989),
 version **Atari ST**, et réplique jouable sur PC dont tous les réglages sont modifiables.
 
 > **Aucune donnée du jeu n'est incluse dans ce dépôt.** Les outils et la réplique lisent
 > les circuits directement depuis **votre** image disque (`.st`). Sans disquette, la
 > réplique propose des circuits de démonstration originaux.
+
+## English
+
+**Stunt Car Racer** (Geoff Crammond, Micro Style, 1989), **Atari ST** version: reverse
+engineering project and a PC version whose settings can all be changed.
+
+> **No game data is included in this repository.** The tools and the PC version read the
+> tracks directly from **your own** disk image (`.st`).
+
+**Download:** the ready-to-play Windows version and the multiplayer relay server are on the
+[Releases page](https://github.com/Popov2026/stuntcar-racer/releases): `StuntCarRacer-win64-vNN.zip`
+(the game) and `ServeurRelaisStuntCar-vNN.zip` (relay server for Windows and Linux). Unzip the game,
+put your `.st` image in the `DISK` folder and double-click `scr.exe`. Every readme in the zips
+(`LISEZMOI*.txt`) has an English version below the French text; settings files (`scr.ini`,
+`scr_relay.ini`) are commented in both languages. The game's own menus are in French.
+
+**What the native PC version offers**
+* The original game program, read from your disk, runs on the Musashi 68000 CPU with a minimal
+  simulated TOS: exact original gameplay and physics, at full speed.
+* **HD mode** (F8): 1920×1080, 16:9, smooth picture interpolated between game ticks, 3D scene
+  redrawn in high definition (drawn by the graphics card with OpenGL 3.3, or by the CPU), wider
+  field of view, sky, scenery (grandstands with crowds, boards, trees, parked cars), shadows,
+  sparks and smoke, anti-aliasing, optional HD images for the cockpit (`hd/` folder).
+* Sound: emulated YM2149 chip, optional realistic V8 engine, crowd cheering with Doppler effect.
+* Options menu (F1), saved in `scr.ini`; gamepad support; redefinable keys.
+* **TNT tracks** (Amiga "The New Tracks", your own file) switchable live with F7.
+* **Multiplayer**: local network (Computer Link over LAN) or **online** through the relay
+  server: two-player races, private rooms, multi-car races of 2 to 6 players, chat (F9), horn (K).
+  The relay server can run directly (TCP port 27420) or behind an HTTPS web reverse proxy
+  (WebSocket, `relais = wss://your.domain`).
+
+**Building** (Linux, macOS, Windows; CMake ≥ 3.16, SDL2):
+
+```sh
+cmake -S native -B native/build && cmake --build native/build --config Release
+native/build/scr Stunt_Car_Racer.st              # full game (title screen, menus)
+native/build/scr Stunt_Car_Racer.st --track 3    # practice straight on track 3
+```
+
+**Other parts of the repository:** `replica/` (HTML5/JavaScript replica with a 68000 CPU written
+in JavaScript and a fully adjustable remake), `tools/` (disk extraction, decompression, track
+decoding, test emulator, disassembler), `docs/` (formats, addresses, decompiled routines),
+`falcon/` (Atari Falcon030 / CT60 version). The detailed documentation below is in French.
+
+---
 
 ## Contenu
 

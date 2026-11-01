@@ -1,3 +1,5 @@
+(English version below / version anglaise plus bas)
+
 Serveur relais Stunt Car Racer (multijoueur par Internet)
 =========================================================
 
@@ -153,3 +155,212 @@ données. Façons de se trouver (menu « 4. Online Multiplayer » du jeu) :
   - lancer le serveur sans droits d'administrateur (sous Linux, scr-relay.service le fait avec
     un compte dédié et des protections systemd) ; pare-feu Windows : « réseaux privés » suffit ;
   - fermer la redirection quand vous ne jouez pas, ou héberger le serveur sur un petit VPS.
+
+6. Derrière un reverse proxy web (HTTPS, par exemple un NAS Synology)
+--------------------------------------------------------------------
+
+  Un reverse proxy web ne transmet que du HTTP/HTTPS : le jeu y passe en WebSocket sécurisée
+  (adresse wss://... côté jeu ; serveur v73 et jeu v73 ou plus récents). Le serveur relais
+  accepte ces connexions sur son port habituel (27420), en plus des connexions directes.
+  Exemple avec le reverse proxy d'un NAS Synology (Panneau de configuration > Portail de
+  connexion > Avancé > Proxy inversé > Créer) :
+    - Source : protocole HTTPS, nom d'hôte = votre nom de domaine, port 443 ;
+      un certificat valide pour ce nom (Panneau de configuration > Sécurité > Certificat) ;
+    - Destination : protocole HTTP, nom d'hôte = adresse du PC du serveur relais (par exemple
+      192.168.1.110), port 27420 ;
+    - onglet « En-tête personnalisé » : bouton « Créer » > « WebSocket » (ajoute les en-têtes
+      Upgrade et Connection) : INDISPENSABLE, sans lui la connexion est refusée ;
+    - Enregistrer. Sur la box, le port 443 doit arriver sur le NAS.
+  Côté joueurs : relais = wss://votre.domaine (port 443 par défaut ; wss://domaine:port/chemin
+  possible). Connexion chiffrée par Windows (WinHTTP) avec ses certificats.
+  Le serveur voit les joueurs avec leur vraie adresse IP (en-têtes X-Real-IP / X-Forwarded-For
+  ajoutés par le proxy, lus seulement quand la connexion vient du réseau local) ; il envoie une
+  trame de maintien toutes les 20 s, et le jeu aussi, pour que le proxy ne coupe pas une liaison
+  muette (délai de 60 s par défaut chez Synology). Les requêtes web ordinaires (robots) reçoivent
+  une réponse « 404 » et sont traitées comme les autres robots.
+
+
+==============================================================================
+ENGLISH
+==============================================================================
+
+Stunt Car Racer relay server (multiplayer over the Internet)
+============================================================
+
+Role: the games connect to the server, which puts the players in touch and then passes their
+data along. Ways to find each other (the game's "4. Online Multiplayer" menu):
+  - "premier joueur disponible" (first available player): the server puts the player in a
+    two-player race with the first one waiting; each runs their own game, the track is drawn at
+    random and accepted by both ("Autre circuit" draws another one);
+  - "salle privée (code)" (private room): players who type the same code see who is there,
+    choose their opponent (same two-player race) or run a multi-car race (2 to 6).
+  Players have no port to open: only the server listens (TCP port 27420 by default).
+  Traffic: about 300 bytes/s per player during a race.
+
+
+0. Settings imposed on players: scr_relay.ini
+---------------------------------------------
+
+  The server imposes its settings on every game that connects to it: physics (gravity, thrust,
+  brake, timestep, damping, boostuse, shock) and network rate (reseau_cadence). The players'
+  scr.ini files no longer matter online: everyone plays with the same physics.
+  Edit scr_relay.ini (next to scr_relay.exe / scr_relay) then restart the server. The listening
+  port is set there too (port = 27420). The current settings are shown in the server window, and
+  in the players' "4. Online Multiplayer" menu ("Réglages du serveur : ..." = server settings).
+  Another file: scr_relay --config my_settings.ini
+
+
+1. Server on Windows (the easiest way to start)
+-----------------------------------------------
+
+  scr_relay.exe is a stand-alone program (no installation, no DLL).
+
+  - Double-click scr_relay.exe (or lancer_serveur.bat, which also keeps a log in
+    scr_relay.log). A window opens and shows:
+        écoute sur le port TCP 27420          (listening on TCP port 27420)
+        adresse(s) de cette machine : 192.168.1.20   (this machine's address(es))
+    Leave it open while people play; closing the window stops the server.
+  - On first start, Windows asks whether to allow scr_relay.exe on the network: accept
+    (private networks, and public ones if the PC is on a network marked "public").
+  - Players on the same network as this PC: relais = 192.168.1.20 (the address shown).
+  - Players over the Internet: on your router, forward TCP port 27420 to the server PC's address
+    (the router's "NAT / port forwarding" menu), then give the players the router's public
+    address (or a domain name, for example a DynDNS / No-IP address): relais = ADDRESS:27420.
+  - Options: scr_relay.exe --port 30000 --log journal.txt
+             --journal : plain log instead of the live display (service, redirection)
+
+  The window shows live (updated every second):
+    - the port, the machine's addresses, the number of players and of races in progress;
+    - a table of the connected players: number, name, IP address, mode (automatic or private
+      room), room, state (waiting for an opponent / in the room, free / racing against X with
+      the duration), connection time and traffic (bytes received per second: ~300 in a race);
+    - the latest events (arrivals, races, departures, room chat messages).
+  Internet robots: an open port is constantly visited by robots (port scanners, web requests,
+  etc.). They are not players: the server immediately closes any connection that does not start
+  with a game registration, without showing it in the table or in the log; only the "robots
+  refusés" (robots refused) counter goes up. An address that comes back 3 times is reported once
+  ("robot (pas un jeu), adresse surveillée pendant 1 h" = robot, not a game, address watched for
+  1 hour) and then has only 3 seconds to register; a real game from that address can still play.
+  When a player opens "4. Online Multiplayer", their game tests the server (line "test du
+  serveur par un jeu" = server test by a game, a fraction of a second) and shows "En ligne -
+  ping ..." (online) or "Hors ligne" (offline).
+
+  Starting automatically with Windows (until there is a "Windows service" version):
+  Task Scheduler > Create Task > Trigger "At startup", Action "Start a program" =
+  scr_relay.exe, with "Run whether user is logged on or not".
+
+
+2. Linux server (VPS or a machine at home)
+------------------------------------------
+
+  Any small Linux server reachable from the Internet will do: an entry-level virtual server
+  (VPS) at a few euros a month (OVH, Scaleway, Hetzner, Ionos...), a Raspberry Pi, or a free
+  offer. A server in the players' country gives the best ping.
+
+  The folder contains:
+    scr_relay            the program, already compiled for Linux x86-64 (no dependencies)
+    scr_relay.exe        the same for Windows
+    scr_relay.cpp        its source code (the same for Windows and Linux)
+    scr_relay.ini        settings imposed on the players (physics, network rate) and port
+    scr-relay.service    automatic start at boot (systemd)
+
+  On the server (as root):
+
+    # copy the files (from your PC):
+    #   scp scr_relay scr-relay.service root@SERVER_ADDRESS:/root/
+
+    install -m 755 scr_relay /usr/local/bin/scr_relay
+    install -m 644 scr_relay.ini /usr/local/bin/scr_relay.ini   # settings (read next to the program)
+    useradd --system --no-create-home scrrelay
+    install -m 644 scr-relay.service /etc/systemd/system/scr-relay.service
+    systemctl daemon-reload
+    systemctl enable --now scr-relay
+
+    # the server's firewall, if there is one (example with ufw):
+    ufw allow 27420/tcp
+
+  Check:  systemctl status scr-relay      log:  journalctl -u scr-relay -f
+  Live display: just run ./scr_relay in a terminal (ssh); as a service, the program writes a
+  log (arrivals, races, and the number of players every 5 minutes).
+
+  Other processor (ARM, Raspberry Pi...) or recompiling:
+    g++ -O2 -std=c++17 scr_relay.cpp -o scr_relay
+
+  Different port:  scr_relay --port 30000   (to be copied into the players' scr.ini)
+
+
+3. On the players' side
+-----------------------
+
+  In scr.ini, next to scr.exe:
+
+    relais = SERVER_ADDRESS:27420
+
+  (IP address or domain name). Then in the game: "4. Online Multiplayer", "Premier joueur
+  disponible" (first available player) or "Salle privée (code)" (private room), the same code
+  for all players, Enter.
+
+
+4. How it works and limits
+--------------------------
+
+  - Automatic: the first player waits (one hour at most without activity), the next one is
+    linked to them.
+  - Private room: as many players as you like; each sees the free players in the room and picks
+    one. Once racing, both players disappear from the list.
+  - Multi-car race: in a private room, 2 to 6 players; the server gives the start when everyone
+    is ready (30 s at most), relays the positions and collects the times; the race ends when
+    everyone has finished or is out (car wrecked), or two minutes after the first finisher.
+    (Server v34 or later.)
+    TNT tracks (8 to 15) offered by the organiser: server v46 or later.
+  - Both players must have the same version of scr.exe (otherwise the server refuses).
+  - Updates: the server has the same version number as the game and announces it to the games
+    that test it (at start-up and in the "4. Online Multiplayer" menu, game v49 or later); an
+    older game shows "Nouvelle version vXX disponible" (new version available). Update the server
+    at the same time as the game you give to the players.
+  - A connection silent for more than 90 s is closed; the game must register within 8 s; at most
+    16 connections per IP address, 512 in total.
+  - The server only sees game bytes: no account, no personal data.
+
+5. Security (port open on the router)
+-------------------------------------
+
+  Opening a port is not a security hole in itself: the risk lies in the program that listens.
+  This server only relays game frames; it runs nothing, opens no file at a player's request and
+  gives no access to the machine.
+  Protections: 16 connections per IP address, 512 in total; at most 1 MB waiting per player in
+  each direction (beyond that, the player is disconnected: neither flooding nor a client that no
+  longer reads can fill the memory); registration within 8 s (robots dropped silently, see
+  above); names and messages reduced to valid UTF-8 without control characters (no escape
+  sequences in the console); bounded values (track, laps, times, 6 players per race). Tested with
+  random frames, booby-trapped names and floods, under AddressSanitizer: no errors.
+  What remains: someone malicious can overload the server (it spoils the game, but gives no
+  access to the machine), and the players know your public IP address.
+  Advice:
+  - router: forward only this port, in TCP, to the server machine (never a "DMZ");
+  - run the server without administrator rights (on Linux, scr-relay.service does so with a
+    dedicated account and systemd protections); Windows firewall: "private networks" is enough;
+  - close the port forwarding when you are not playing, or host the server on a small VPS.
+
+6. Behind a web reverse proxy (HTTPS, for example a Synology NAS)
+-----------------------------------------------------------------
+
+  A web reverse proxy only forwards HTTP/HTTPS: the game goes through it as a secure WebSocket
+  (address wss://... on the game side; server v73 and game v73 or later). The relay server
+  accepts these connections on its usual port (27420), in addition to direct connections.
+  Example with a Synology NAS reverse proxy (Control Panel > Login Portal > Advanced > Reverse
+  Proxy > Create):
+    - Source: protocol HTTPS, hostname = your domain name, port 443;
+      a valid certificate for that name (Control Panel > Security > Certificate);
+    - Destination: protocol HTTP, hostname = address of the relay server PC (for example
+      192.168.1.110), port 27420;
+    - "Custom Header" tab: "Create" button > "WebSocket" (adds the Upgrade and Connection
+      headers): ESSENTIAL, without it the connection is refused;
+    - Save. On your router, port 443 must reach the NAS.
+  On the players' side: relais = wss://your.domain (port 443 by default; wss://domain:port/path
+  also works). The connection is encrypted by Windows (WinHTTP) with its certificates.
+  The server sees the players with their real IP address (X-Real-IP / X-Forwarded-For headers
+  added by the proxy, only read when the connection comes from the local network); it sends a
+  keep-alive frame every 20 s, and so does the game, so the proxy does not cut an idle link (60 s
+  timeout by default on Synology). Ordinary web requests (robots) get a "404" answer and are
+  treated like the other robots.

@@ -1,3 +1,5 @@
+(English version below / version anglaise plus bas)
+
 Images HD de remplacement (mode HD, touche F8)
 ==============================================
 
@@ -77,3 +79,87 @@ hd.ini (facultatif)
 Les flammes du boost utilisent les images sprite_06, 07, 08, 09, 49 et 50 de ce dossier quand
 l'option « Textures HD » est active (menu F1, textures_hd = 1 dans scr.ini). Sans ces images,
 ou avec les textures HD coupées, ce sont les sprites d'origine agrandis en haute définition.
+
+
+==============================================================================
+ENGLISH
+==============================================================================
+
+Replacement HD images (HD mode, F8 key)
+=======================================
+
+Put PNG (or JPG) images here: in HD mode they replace the original cockpit sprites, in the same
+place and at the same moment. F2 in the game reloads the folder (handy while you are touching
+up your images).
+
+File names
+  sprite_06.png                a still image for sprite no. 6
+  sprite_06_1.png, _2, _3 ...  several images = animation (rate: fps, 15 by default)
+
+Useful numbers (full sheet: see the graphics pack)
+  boost flames: 6, 7, 49 (left exhausts) and 8, 9, 50 (right) - 64x28 originally
+                the game alternates 6+8, 7+9, 49+50; you may use the same images for all three
+  crane chains: 19 to 22
+
+Fixed cockpit (frame, pillars, dashboard)
+  cockpit.png                  image with the proportions of the original screen (320x200, for
+                               example 1280x800), windscreen and side windows transparent. It
+                               replaces the cockpit drawn by the game. Leave the displays (grey
+                               plates) and the speedometer WITHOUT digits or marks: the game's
+                               figures (lap, boost, damage, time) and the speed bar are drawn on
+                               top. The damage crack and everything that changes during the race
+                               stay visible over the image. The bottom of the engine (under sprite
+                               10) is part of the fixed cockpit: draw it in cockpit.png.
+                               The damage crack (top bar of the original screen) is moved onto the
+                               top tube of cockpit.png, whatever its height.
+  cockpit_avant.png            (optional) part of the cockpit drawn IN FRONT of the wheels, for
+                               example the base of the engine; same proportions as cockpit.png,
+                               the rest transparent. It goes under the engine (sprite 10) and the
+                               flames.
+  cockpit_fond.png             (optional) background drawn UNDER the wheels and the engine, same
+                               proportions as cockpit.png: for example it fills the gap between
+                               the engine and the tube without hiding the wheels.
+
+  foule.wav                    (optional) crowd sound looped by each grandstand instead of the
+                               synthesised crowd: 16-bit PCM WAV, mono or stereo, a few seconds
+                               or more (start and end are cross-faded). Use a sound you have the
+                               rights to (your own recording or a royalty-free sound effect).
+
+HD textures can be turned off in the options menu (F1 key) or with textures_hd = 0 in scr.ini.
+
+Rules for sprites
+  - same proportions as the original sprite (full sheet);
+  - the drawing must fill the frame like the original: no large empty margin around it
+    (the whole image is fitted to the sprite's place);
+  - where the original is solid (black included), do not leave a transparent hole.
+
+Transparency
+  - PNG with transparency   -> pasted as is ("alpha" blending)
+  - image without transparency -> "add" blending: black disappears, the rest is added as
+    light. Ideal for fire, sparks, reflections: use flames ON A BLACK BACKGROUND.
+
+Size
+  Any resolution: the image is fitted to the original sprite's place (keep its proportions,
+  for example 64x28 -> 512x224). To overflow (longer flames), use scale in hd.ini.
+
+hd.ini (optional)
+  [sprite_06]
+  blend = add       ; add or alpha
+  scale = 1.3       ; size relative to the original place
+  anchor = bottom   ; fixed point for scale: bottom, center or top
+  dx = 0            ; offset, in pixels of the original screen (320x200)
+  dy = -2
+  fps = 20          ; animation rate
+  wind = 1          ; effect of the race wind: the image leans outwards and flattens with
+                    ; speed (1 by default for the flames, 0 = none)
+  pad_top = 0.4     ; the image extends beyond the sprite's place (fraction of its height or
+  pad_bottom = 0    ; width): pad_top, pad_bottom, pad_left, pad_right - for example flames
+                    ; placed higher than the original place
+  layer = 1         ; drawing order: higher = on top. Defaults: flames 2, engine (sprite 10)
+                    ; and bottom of the big pipes (11, 12) 1, wheels (0-5) and their pieces
+                    ; (37-48) -1, the rest 0. A negative layer is drawn UNDER the cockpit
+                    ; (cockpit.png): the wheels go behind the frame and the engine
+
+The boost flames use the images sprite_06, 07, 08, 09, 49 and 50 from this folder when the
+"Textures HD" option is on (F1 menu, textures_hd = 1 in scr.ini). Without these images, or with
+HD textures off, they are the original sprites enlarged in high definition.

@@ -1,3 +1,5 @@
+(English version below / version anglaise plus bas)
+
 Stunt Car Racer (Atari ST, Geoff Crammond / Micro Style 1989) - version native PC
 
 Aucune donnée du jeu n'est fournie : il faut votre propre image disque .st.
@@ -96,3 +98,108 @@ relais, touches, options).
 
 Images HD : le dossier hd contient des images qui remplacent les sprites du cockpit (et le
 cockpit fixe : cockpit.png) en mode HD ; sans image, les flammes du boost sont les sprites d'origine agrandis en HD. Voir hd/LISEZMOI_HD.txt.
+
+
+==============================================================================
+ENGLISH
+==============================================================================
+
+Stunt Car Racer (Atari ST, Geoff Crammond / Micro Style 1989) - native PC version
+
+No game data is supplied: you need your own .st disk image.
+
+Starting: put your .st image in the DISK folder and double-click scr.exe
+(or drag the image onto scr.exe, or: scr.exe Stunt_Car_Racer.st --track 1).
+
+Controls: arrow keys = joystick (up accelerates, down brakes, left/right),
+Space, Ctrl, Shift or Alt = fire button (boost), full ST keyboard for the menus.
+Escape goes back up the menus: back to the previous menu ("Cancel" choice, practice menus,
+name entry, multiplayer driver menu); "Hall of Fame / Practise / Start the Racing Season"
+menu: back to the title; title and start menu: Escape twice = quit the game.
+During a race: give up (as in the original); practice started directly: back to the title;
+multi-car race: give up, then the group menu.
+If steering seems stuck while boosting with Space, your keyboard cannot read three keys at
+once: use Shift or Alt for the boost.
+XInput gamepads are supported. F8 HD mode (1920x1080, 16:9, smooth picture at the screen's
+refresh rate), F2 reload the HD images, F3 mute,
+F4, F11 or Alt+Enter full screen, F5 high detail (textured ground, road and opponent car,
+round wheels; turns HD mode on), F6 restart,
+Page Up/Down previous/next track (practice mode), F7 original / TNT tracks,
+F1 options menu, F12 quit.
+
+Options menu (F1, or the gamepad's Start button): sound and volume, HD mode, high detail,
+HD textures (images from the hd folder), sky, scenery and its density, crowd cheering and its
+volume, car shadows, sparks and smoke, edge smoothing, full screen, original / TNT tracks,
+gamepad (and rumble on impacts), driving keys (accelerate, brake, left, right, boost: Enter
+then the new key; the arrow keys always work in the menus).
+Every change is saved immediately in scr.ini. The game is paused while this menu is open
+(except in multiplayer). Arrows + Enter (or left/right) to change, Escape to close.
+(The game's menus are in French; the English name of each item is given in this file.)
+
+HD mode: gradient sky with a sun and slowly drifting clouds, scenery around the tracks
+(grandstands full of spectators, advertising boards, fir and leafy trees, cars parked behind
+the grandstands; "Densité du décor" (scenery density) 1 to 4 in the options menu for more),
+shadows under the cars, showers of sparks and smoke on impacts and hard landings (yours and
+the other players' in multi-car races), smoothed edges (anti-aliasing). Each effect can be
+turned off in the options menu. During jumps the opponent car follows the trajectory computed
+by the original game (it stays in the air until it lands) and throws sparks when it lands
+hard; its suspension absorbs the landings (the body dips then rises, the wheels never go
+through the road). After a big fall off the track, the camera no longer goes below the ground.
+
+3D renderer (options menu, "Rendu 3D"; rendu = opengl or processeur in scr.ini): in HD mode the
+3D (road, scenery, cars, sky, shadows, smoothing) is drawn by the graphics card with OpenGL 3.3,
+which takes load off the processor; the cockpit and the HD images are then laid on top as
+before. If the graphics card does not support OpenGL 3.3 (old driver), the game automatically
+draws everything on the processor, like the previous versions. The window title shows "OpenGL"
+when the graphics card is used.
+
+Engine sound (options menu, "Son du moteur"): "d'origine" (original) or "V8 réaliste" (realistic
+V8). The V8 is synthesised by the game: cross-plane crankshaft (the irregular burble of an
+American V8), deep, torquey big-cam idle (hunting revs, uneven firing), resonant exhausts, revs
+that follow the game's directly (no gear changes), louder roar when accelerating and boosting,
+engine that races with the wheels in the air. Only the original engine sound is replaced; the
+game's other sound effects remain.
+
+Horn (K key, can be changed in the options menu; gamepad Y button): in multiplayer (two-player
+race, multi-car race, Computer Link) the other players hear it too, louder or quieter depending
+on how close your car is. Alone, only you hear it.
+
+Crowd cheering (HD mode, with scenery): each grandstand has its own crowd that shouts and
+claps; it gets louder as you approach, with the Doppler effect (higher pitched as you arrive,
+lower as you drive away). A synthesised sound is supplied; to use your own recording, put a
+foule.wav file in the hd folder (see LISEZMOI_HD.txt).
+
+Updates: at start-up the game asks the online server; if a newer version is out, a banner says
+so ("Nouvelle version vXX disponible" = new version vXX available), as does the
+"4. Online Multiplayer" menu.
+
+Multiplayer (two players, over a network): first game menu, "3. Computer Link - Local LAN" (same
+network: opponents found are listed, or type an IP address) or "4. Online Multiplayer" (over the
+Internet, through the relay server, whose availability is tested: one-to-one race, or a
+multi-car race of 2 to 6 players in a private room).
+F9 chat with the other players, F10 disconnects. See LISEZMOI_MULTIJOUEUR.txt.
+
+TNT tracks: the 8 tracks of "Stunt Car Racer TNT" (The New Tracks, Amiga version: DIZZY DESCENT,
+WITTY WAY, CRAZY CAPER, AMAZING ADEPT, JERKILY JUMP, EVILLY EPISODE, TEASING TEMPER, RAT RACE).
+No data is supplied: put your SCR-TNT file, or directly the WHDLoad archive
+StuntCarRacerTNT_v1.4.lha that contains it, in the TNT folder next to scr.exe (or give its path
+in scr.ini: tnt = path). Then:
+  - F7 key (or options menu): original tracks <-> TNT tracks, live, WITHOUT restarting the game:
+    the game's menus (practice, league) immediately offer the other set and the current season
+    is kept. During a race the switch happens at the end of the race. The choice is saved in
+    scr.ini (circuits = tnt; also scr.exe --circuits tnt). The divisions screen keeps the
+    original names (it is a picture from the game);
+  - in practice, Page Up/Down go through the 16 tracks (8 original then 8 TNT);
+  - in a multi-car race the organiser chooses among 16 tracks: the 8 original then the 8 TNT
+    (marked "(TNT)"). A player who does not have the file is told and does not race.
+
+Sound: the Atari ST's YM2149 sound chip is emulated (engine, impacts...).
+
+Settings: scr.ini (gravity, thrust, braking, time step, damping, boost use, window size...).
+See scr --help. The game comes with a template, scr.ini.exemple: on first start, scr.ini is
+created from it. A new version unzipped over the old one therefore never touches your scr.ini
+(relay server address, keys, options).
+
+HD images: the hd folder holds images that replace the cockpit sprites (and the fixed cockpit:
+cockpit.png) in HD mode; without images, the boost flames are the original sprites enlarged in
+HD. See hd/LISEZMOI_HD.txt.

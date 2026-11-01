@@ -1,5 +1,6 @@
 // net.cpp — voir net.hpp
 #include "net.hpp"
+#include "wstunnel.hpp"
 
 #include <cctype>
 #include <cmath>
@@ -302,6 +303,13 @@ bool NetLink::joinRelay(const std::string &server, const std::string &room, cons
   for (auto &ch : room_) ch = char(std::toupper(static_cast<unsigned char>(ch)));
   std::string host; int port = NET_PORT;
   if (server.empty()) { fail("aucun serveur relais configuré (scr.ini : relais = adresse:port)"); return false; }
+  if (isWsUrl(server)) {   // par un reverse proxy web : tunnel local vers la WebSocket
+    std::string err, local = openWsTunnel(server, err);
+    if (local.empty()) { fail(err); return false; }
+    if (shown_.empty()) shown_ = server;
+    splitHostPort(local, host, port);
+    return connectTo(host, port);
+  }
   if (!splitHostPort(server, host, port)) { fail("adresse du relais invalide : " + (shown_.empty() ? server : shown_)); return false; }
   return connectTo(host, port);
 }
@@ -663,6 +671,11 @@ void RelayProbe::start(const std::string &server) {
   th_ = std::thread([sh] {
     auto fin = [&](State st, const std::string &err) { std::lock_guard<std::mutex> l(sh->mu); sh->state = st; sh->error = err; };
     std::string host = sh->server; int port = NET_PORT;
+    if (isWsUrl(host)) {   // par un reverse proxy web : tunnel local vers la WebSocket
+      std::string err;
+      host = openWsTunnel(sh->server, err);
+      if (host.empty()) { fin(State::Failed, err); return; }
+    }
     size_t c = host.rfind(':');
     if (c != std::string::npos && host.find(':') == c) { port = std::atoi(host.c_str() + c + 1); host = host.substr(0, c); }
     addrinfo hints{}, *res = nullptr;
@@ -685,7 +698,8 @@ void RelayProbe::start(const std::string &server) {
     int err = 0; socklen_t l = sizeof err;
     getsockopt(s, SOL_SOCKET, SO_ERROR, reinterpret_cast<char *>(&err), &l);
     if (err != 0) { closeRaw(intptr_t(s)); fin(State::Failed, "connexion refusée (serveur arrêté ?)"); return; }
-    double t1 = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    const bool tunnel = isWsUrl(sh->server);
+    double t1 = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(), t2 = 0;
     const char q[3] = {char(NF_PROBE), 0, 0};
     ::send(s, q, 3, 0);
     std::string got;
@@ -694,12 +708,14 @@ void RelayProbe::start(const std::string &server) {
       char b[512];
       int r = int(::recv(s, b, sizeof b, 0));
       if (r <= 0) break;
+      if (got.empty()) t2 = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
       got.append(b, size_t(r));
     }
     closeRaw(intptr_t(s));
     if (got.size() < 3) { fin(State::Failed, "pas de réponse (est-ce bien le relais ?)"); return; }
     std::lock_guard<std::mutex> lk(sh->mu);
-    sh->pingMs = int((t1 - t0) * 1000 + 0.5);
+    // ping : temps de connexion ; par un tunnel, temps de la réponse (connexion chiffrée comprise)
+    sh->pingMs = int(((tunnel ? t2 - t1 : t1 - t0)) * 1000 + 0.5);
     std::string msg = got.substr(3);
     if (uint8_t(got[0]) == NF_INFO && msg.compare(0, 7, "SERVER ") == 0) {
       std::sscanf(msg.c_str() + 7, "%d %d", &sh->players, &sh->games);

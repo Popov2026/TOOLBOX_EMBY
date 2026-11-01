@@ -1,5 +1,7 @@
 [Unit]
-Description=Serveur relais Stunt Car Racer (multijoueur en ligne)
+# Serveur relais Stunt Car Racer : voir LISEZMOI_SERVEUR.txt, section 2
+# Stunt Car Racer relay server: see LISEZMOI_SERVEUR.txt, section 2
+Description=Stunt Car Racer relay server (online multiplayer) / serveur relais Stunt Car Racer
 After=network-online.target
 Wants=network-online.target
 

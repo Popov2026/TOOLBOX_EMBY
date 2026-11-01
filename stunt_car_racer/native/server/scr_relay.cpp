@@ -13,6 +13,10 @@
 // n'est pas une inscription du jeu est fermée sans être affichée ni journalisée (simple compteur) ;
 // une adresse qui insiste (3 essais) n'a plus que 3 secondes pour s'inscrire pendant une heure
 // (un vrai jeu s'inscrit tout de suite, même depuis cette adresse).
+// Reverse proxy web (HTTPS, par exemple celui d'un NAS) : le jeu peut aussi arriver en WebSocket
+// (adresse wss://... côté jeu) ; le serveur accepte la mise à niveau HTTP sur le même port, puis le
+// même protocole circule dans des messages binaires. L'adresse du joueur est prise dans les en-têtes
+// X-Real-IP / X-Forwarded-For quand la connexion vient du réseau local (le proxy).
 // Trafic : environ 300 octets/s par joueur pendant une course.
 //
 // Compilation  Linux   : g++ -O2 -std=c++17 scr_relay.cpp -o scr_relay
@@ -115,7 +119,7 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v72"
+#define SCR_RELAY_VERSION "v73"
 
 namespace {
 
@@ -186,6 +190,9 @@ struct Client {
   bool overflow = false;         // ne lit plus ce qu'on lui envoie : déconnecté
   bool bot = false;              // ne parle pas le protocole du jeu (robot, scanner)
   bool suspect = false;          // adresse d'un robot récent : délai d'inscription court
+  bool ws = false;               // arrivé en WebSocket (par un reverse proxy web)
+  std::vector<uint8_t> raw, wsOut;   // WebSocket : octets reçus non décodés, trames à envoyer
+  double lastWsPing = 0;
   double closingSince = 0;
   double since = 0, lastRx = 0, pairedAt = 0, lastChat = 0;
   bool inGroup = false;          // course à plusieurs
@@ -272,6 +279,150 @@ void frame(Client &c, uint8_t type, const std::string &s) {
   size_t n = std::min<size_t>(s.size(), 0xffff);
   c.out.push_back(type); c.out.push_back(uint8_t(n >> 8)); c.out.push_back(uint8_t(n));
   c.out.insert(c.out.end(), s.begin(), s.begin() + long(n));
+}
+
+// ------------------------------------------------------------------ WebSocket (reverse proxy web)
+std::string sha1(const std::string &msg) {
+  uint32_t h[5] = {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0};
+  std::string m = msg;
+  uint64_t bits = uint64_t(msg.size()) * 8;
+  m += char(0x80);
+  while (m.size() % 64 != 56) m += char(0);
+  for (int k = 7; k >= 0; k--) m += char(bits >> (8 * k));
+  auto rol = [](uint32_t x, int n) { return (x << n) | (x >> (32 - n)); };
+  for (size_t off = 0; off < m.size(); off += 64) {
+    uint32_t w[80];
+    for (int i = 0; i < 16; i++)
+      w[i] = uint32_t(uint8_t(m[off + 4 * i])) << 24 | uint32_t(uint8_t(m[off + 4 * i + 1])) << 16 |
+             uint32_t(uint8_t(m[off + 4 * i + 2])) << 8 | uint8_t(m[off + 4 * i + 3]);
+    for (int i = 16; i < 80; i++) w[i] = rol(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+    uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4];
+    for (int i = 0; i < 80; i++) {
+      uint32_t f, k;
+      if (i < 20) { f = (b & c) | (~b & d); k = 0x5A827999; }
+      else if (i < 40) { f = b ^ c ^ d; k = 0x6ED9EBA1; }
+      else if (i < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8F1BBCDC; }
+      else { f = b ^ c ^ d; k = 0xCA62C1D6; }
+      uint32_t t = rol(a, 5) + f + e + k + w[i];
+      e = d; d = c; c = rol(b, 30); b = a; a = t;
+    }
+    h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e;
+  }
+  std::string r;
+  for (uint32_t x : h) for (int k = 3; k >= 0; k--) r += char(x >> (8 * k));
+  return r;
+}
+
+std::string base64(const std::string &s) {
+  static const char T[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string r;
+  for (size_t i = 0; i < s.size(); i += 3) {
+    uint32_t v = uint32_t(uint8_t(s[i])) << 16 | (i + 1 < s.size() ? uint32_t(uint8_t(s[i + 1])) << 8 : 0) |
+                 (i + 2 < s.size() ? uint8_t(s[i + 2]) : 0);
+    r += T[v >> 18 & 63]; r += T[v >> 12 & 63];
+    r += i + 1 < s.size() ? T[v >> 6 & 63] : '='; r += i + 2 < s.size() ? T[v & 63] : '=';
+  }
+  return r;
+}
+
+// adresse du réseau local (proxy, joueurs de la maison) : pas de limite par adresse ni de surveillance
+bool isPrivate(const std::string &ip) {
+  unsigned a = 0, b = 0;
+  if (std::sscanf(ip.c_str(), "%u.%u", &a, &b) != 2) return false;
+  return a == 10 || a == 127 || (a == 192 && b == 168) || (a == 172 && b >= 16 && b <= 31) || (a == 169 && b == 254);
+}
+
+void wsFrame(Client &c, uint8_t op, const uint8_t *p, size_t n) {   // serveur -> jeu : trame non masquée
+  c.wsOut.push_back(uint8_t(0x80 | op));
+  if (n < 126) c.wsOut.push_back(uint8_t(n));
+  else if (n < 65536) { c.wsOut.push_back(126); c.wsOut.push_back(uint8_t(n >> 8)); c.wsOut.push_back(uint8_t(n)); }
+  else { c.wsOut.push_back(127); for (int k = 7; k >= 0; k--) c.wsOut.push_back(uint8_t(uint64_t(n) >> (8 * k))); }
+  c.wsOut.insert(c.wsOut.end(), p, p + n);
+}
+
+// trames WebSocket reçues -> octets du protocole du jeu (c.in)
+void wsDecode(Client &c) {
+  for (;;) {
+    if (c.raw.size() < 2) return;
+    size_t len = c.raw[1] & 0x7f, h = 2;
+    if (len == 126) { if (c.raw.size() < 4) return; len = (size_t(c.raw[2]) << 8) | c.raw[3]; h = 4; }
+    else if (len == 127) {
+      if (c.raw.size() < 10) return;
+      len = 0;
+      for (int k = 2; k < 10; k++) len = (len << 8) | c.raw[size_t(k)];
+      h = 10;
+    }
+    bool masked = c.raw[1] & 0x80;
+    if (masked) h += 4;
+    if (len > MAX_BUFFER) { c.closing = true; c.raw.clear(); return; }
+    if (c.raw.size() < h + len) return;
+    uint8_t op = c.raw[0] & 0x0f;
+    std::vector<uint8_t> pay(c.raw.begin() + long(h), c.raw.begin() + long(h + len));
+    if (masked) for (size_t i = 0; i < len; i++) pay[i] ^= c.raw[h - 4 + (i & 3)];
+    c.raw.erase(c.raw.begin(), c.raw.begin() + long(h + len));
+    if (op == 0x8) { wsFrame(c, 0x8, nullptr, 0); c.closing = true; c.raw.clear(); return; }   // fermeture
+    if (op == 0x9) { wsFrame(c, 0xA, pay.data(), pay.size()); continue; }                     // ping -> pong
+    if (op == 0xA) continue;                                                                    // pong
+    c.in.insert(c.in.end(), pay.begin(), pay.end());
+  }
+}
+
+// requête HTTP en tête de connexion : mise à niveau WebSocket (le jeu, par le reverse proxy), sinon
+// un robot (réponse 404). Rend vrai quand la connexion est passée en WebSocket.
+bool httpUpgrade(Client &c) {
+  std::string req(c.in.begin(), c.in.end());
+  size_t end = req.find("\r\n\r\n");
+  if (end == std::string::npos) {
+    if (req.size() > 8192) { c.bot = c.closing = true; c.in.clear(); }
+    return false;
+  }
+  std::map<std::string, std::string> hd;
+  size_t pos = req.find("\r\n");
+  std::string first = req.substr(0, pos);
+  while (pos < end) {
+    size_t nl = req.find("\r\n", pos + 2);
+    std::string line = req.substr(pos + 2, nl - pos - 2);
+    pos = nl;
+    size_t colon = line.find(':');
+    if (colon == std::string::npos) continue;
+    std::string k = line.substr(0, colon), v = line.substr(colon + 1);
+    for (auto &ch : k) ch = char(std::tolower(static_cast<unsigned char>(ch)));
+    while (!v.empty() && (v[0] == ' ' || v[0] == '\t')) v.erase(0, 1);
+    while (!v.empty() && (v.back() == ' ' || v.back() == '\t')) v.pop_back();
+    hd[k] = v;
+  }
+  std::vector<uint8_t> rest(c.in.begin() + long(end + 4), c.in.end());
+  c.in.clear();
+  if (isPrivate(c.ip)) {   // derrière le proxy : adresse réelle du joueur
+    std::string real = hd.count("x-real-ip") ? hd["x-real-ip"] : hd.count("x-forwarded-for") ? hd["x-forwarded-for"] : "";
+    real = real.substr(0, real.find(','));
+    while (!real.empty() && real.back() == ' ') real.pop_back();
+    bool okIp = !real.empty() && real.size() <= 45;
+    for (char ch : real) okIp = okIp && (std::isxdigit(static_cast<unsigned char>(ch)) || ch == '.' || ch == ':');
+    if (okIp) c.ip = real;
+  }
+  std::string up = hd.count("upgrade") ? hd["upgrade"] : "";
+  for (auto &ch : up) ch = char(std::tolower(static_cast<unsigned char>(ch)));
+  if (first.compare(0, 4, "GET ") != 0 || up != "websocket" || !hd.count("sec-websocket-key")) {
+    static const std::string nf = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    c.out.insert(c.out.end(), nf.begin(), nf.end());
+    c.bot = c.closing = true;
+    return false;
+  }
+  size_t same = 0;
+  for (auto &kv : clients) same += &kv.second != &c && kv.second.ip == c.ip;
+  if (!isPrivate(c.ip) && same >= MAX_PER_IP) { c.bot = c.closing = true; return false; }
+  auto st = strikes.find(c.ip);
+  c.suspect = st != strikes.end() && st->second.until > now();
+  std::string acc = base64(sha1(hd["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"));
+  std::string resp = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                     "Sec-WebSocket-Accept: " + acc + "\r\n\r\n";
+  c.wsOut.insert(c.wsOut.end(), resp.begin(), resp.end());
+  c.ws = true; c.lastWsPing = now();
+  c.raw = rest;
+  wsDecode(c);
+  dirty = true;
+  return true;
 }
 
 std::string who(const Client &c) { return c.name.empty() ? c.ip : c.name + " (" + c.ip + ")"; }
@@ -537,7 +688,8 @@ void drop(Sock fd, const char *why) {
     auto p = clients.find(c.peer);
     if (p != clients.end()) { frame(p->second, NF_INFO, "GONE"); p->second.peer = NONE; p->second.closing = true; }
   }
-  if (!c.joined && !c.probe) {   // jamais inscrit : robot (ou jeu coupé avant l'inscription), pas de journal
+  if (!c.joined && !c.probe && isPrivate(c.ip)) totalBots++;   // réseau local (proxy compris) : jamais surveillé
+  else if (!c.joined && !c.probe) {   // jamais inscrit : robot (ou jeu coupé avant l'inscription), pas de journal
     totalBots++;
     Strike &s = strikes[c.ip];
     if (now() - s.last > BOT_BAN) s.n = 0;
@@ -654,6 +806,8 @@ void onPick(Client &c, const std::string &s) {
 // trames complètes reçues : inscription avant l'appariement, retransmission ensuite
 void process(Client &c) {
   size_t pos = 0;
+  if (c.ws) wsDecode(c);
+  else if (!c.joined && !c.in.empty() && c.in[0] == 'G' && !httpUpgrade(c)) return;   // HTTP : WebSocket ou robot
   // avant l'inscription, seules JOIN2, JOIN et PROBE (courtes) sont admises : le reste est un robot
   if (!c.joined && !c.in.empty()) {
     uint8_t t0 = c.in[0];
@@ -866,7 +1020,7 @@ int main(int argc, char **argv) {
     PollFd l0{}; l0.fd = ls; l0.events = POLLIN;
     pf.push_back(l0);
     for (auto &kv : clients) {
-      PollFd p{}; p.fd = kv.first; p.events = short(POLLIN | (kv.second.out.empty() ? 0 : POLLOUT));
+      PollFd p{}; p.fd = kv.first; p.events = short(POLLIN | (kv.second.out.empty() && kv.second.wsOut.empty() ? 0 : POLLOUT));
       pf.push_back(p);
     }
     pollSocks(pf.data(), pf.size(), 250);
@@ -880,7 +1034,7 @@ int main(int argc, char **argv) {
         size_t same = 0;
         for (auto &kv : clients) same += kv.second.ip == ip;
         auto st = strikes.find(ip);
-        if (clients.size() >= MAX_CLIENTS || same >= MAX_PER_IP) { closeSock(fd); totalBots++; continue; }
+        if (clients.size() >= MAX_CLIENTS || (same >= MAX_PER_IP && !isPrivate(ip))) { closeSock(fd); totalBots++; continue; }
         nonBlock(fd);
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char *>(&on), sizeof on);
         setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, reinterpret_cast<const char *>(&on), sizeof on);
@@ -902,8 +1056,9 @@ int main(int argc, char **argv) {
         for (;;) {
           int r = int(recv(fd, buf, sizeof buf, 0));
           if (r > 0) {
-            c.in.insert(c.in.end(), buf, buf + r); c.lastRx = t; c.rxBytes += uint64_t(r);
-            if (c.in.size() > MAX_BUFFER) { dead.push_back({fd, "trop de données"}); break; }
+            auto &dst = c.ws ? c.raw : c.in;
+            dst.insert(dst.end(), buf, buf + r); c.lastRx = t; c.rxBytes += uint64_t(r);
+            if (dst.size() > MAX_BUFFER) { dead.push_back({fd, "trop de données"}); break; }
             continue;
           }
           if (r == 0) { dead.push_back({fd, "fermé"}); break; }
@@ -915,14 +1070,20 @@ int main(int argc, char **argv) {
     }
     for (auto &kv : clients) {
       Sock fd = kv.first; Client &c = kv.second;
-      while (!c.out.empty()) {
-        int r = int(send(fd, reinterpret_cast<const char *>(c.out.data()), int(c.out.size()), SEND_FLAGS));
-        if (r > 0) c.out.erase(c.out.begin(), c.out.begin() + r);
+      if (c.ws) {   // WebSocket : protocole du jeu dans des messages binaires, maintien toutes les 20 s
+        if (!c.out.empty()) { wsFrame(c, 0x2, c.out.data(), c.out.size()); c.out.clear(); }
+        if (t - c.lastWsPing > 20) { c.lastWsPing = t; wsFrame(c, 0x9, nullptr, 0); }
+        if (c.wsOut.size() > MAX_BUFFER) c.overflow = true;
+      }
+      auto &ob = c.ws ? c.wsOut : c.out;
+      while (!ob.empty()) {
+        int r = int(send(fd, reinterpret_cast<const char *>(ob.data()), int(ob.size()), SEND_FLAGS));
+        if (r > 0) ob.erase(ob.begin(), ob.begin() + r);
         else { if (r < 0 && !wouldBlock(sockErr())) dead.push_back({fd, "envoi impossible"}); break; }
       }
       if (c.closing && !c.closingSince) c.closingSince = t;
       if (c.overflow) dead.push_back({fd, "trop de données en attente"});
-      else if (c.closing && (c.out.empty() || t - c.closingSince > 10)) dead.push_back({fd, "terminé"});
+      else if (c.closing && ((c.out.empty() && c.wsOut.empty()) || t - c.closingSince > 10)) dead.push_back({fd, "terminé"});
       else if (!c.joined && t - c.since > (c.suspect ? SUSPECT_JOIN_TIMEOUT : JOIN_TIMEOUT)) dead.push_back({fd, "pas d'inscription"});
       else if (c.joined && c.peer == NONE && t - c.lastRx > PAIR_TIMEOUT) dead.push_back({fd, "inactif trop longtemps"});
       else if (c.peer != NONE && t - c.lastRx > IDLE_TIMEOUT) dead.push_back({fd, "silence"});
