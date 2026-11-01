@@ -79,7 +79,7 @@ disponible »).
      Course à plusieurs (2 à 6 joueurs) : dans la salle privée, « Course à plusieurs (2 à 6
      joueurs) ». Le premier entré est l'organisateur : il choisit le circuit et le nombre de tours
      (flèches gauche / droite ; avec les circuits TNT, 16 au choix : les 8 d'origine puis les 8 TNT,
-     que chaque joueur doit avoir, cf. LISEZMOI.txt), puis « Lancer la course » dès que deux joueurs au moins sont là.
+     que chaque joueur doit avoir, cf. README.txt), puis « Lancer la course » dès que deux joueurs au moins sont là.
      Chaque jeu se place sur le circuit et attend que tous soient prêts : le départ est donné en
      même temps à tous. Grille de départ : 3 rangées de 2 (gauche / droite), ordre tiré au sort
      à chaque course ; les rangées 2 et 3 partent un peu en arrière (le temps et le classement
@@ -160,13 +160,13 @@ disponible »).
 
   Il n'est utile que pour jouer par Internet. C'est un petit programme autonome, pour Windows
   (scr_relay.exe : double-clic) ou pour un serveur Linux (voir le dossier serveur et
-  serveur/LISEZMOI_SERVEUR.txt). Sa fenêtre affiche en direct les joueurs connectés, leur mode,
+  serveur/README_SERVER.txt). Sa fenêtre affiche en direct les joueurs connectés, leur mode,
   leur salle et les parties en cours. Un petit serveur virtuel à quelques
   euros par mois suffit très largement : le trafic est d'environ 300 octets par seconde par joueur.
 
   Serveur derrière un reverse proxy web (HTTPS) : relais = wss://domaine (ou
   wss://domaine:port/chemin) ; le jeu passe alors en WebSocket chiffrée (Windows). Voir
-  serveur/LISEZMOI_SERVEUR.txt, section 6.
+  serveur/README_SERVER.txt, section 6.
 
 
 ==============================================================================
@@ -256,7 +256,7 @@ with the French language chosen in the F1 options menu; the English meaning is g
      Multi-car race (2 to 6 players): in the private room, "Course à plusieurs (2 à 6 joueurs)".
      The first one in is the organiser: they choose the track and the number of laps (left /
      right arrows; with the TNT tracks, 16 to choose from: the 8 original then the 8 TNT ones,
-     which every player must have, see LISEZMOI.txt), then "Lancer la course" (start the race)
+     which every player must have, see README.txt), then "Lancer la course" (start the race)
      as soon as at least two players are there.
      Each game sets itself up on the track and waits until everyone is ready: the start is given
      to all at the same time. Starting grid: 3 rows of 2 (left / right), order drawn at random for
@@ -338,10 +338,10 @@ with the French language chosen in the F1 options menu; the English meaning is g
 
   It is only needed to play over the Internet. It is a small stand-alone program, for Windows
   (scr_relay.exe: double-click) or for a Linux server (see the serveur folder and
-  serveur/LISEZMOI_SERVEUR.txt). Its window shows live the connected players, their mode, their
+  serveur/README_SERVER.txt). Its window shows live the connected players, their mode, their
   room and the races in progress. A small virtual server at a few euros a month is more than
   enough: the traffic is about 300 bytes per second per player.
 
   Server behind a web reverse proxy (HTTPS): relais = wss://domain (or wss://domain:port/path);
-  the game then uses an encrypted WebSocket (Windows). See serveur/LISEZMOI_SERVEUR.txt,
+  the game then uses an encrypted WebSocket (Windows). See serveur/README_SERVER.txt,
   section 6.

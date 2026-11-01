@@ -42,7 +42,7 @@ moteur_v8 = 0                 # 1 : son du moteur V8 réaliste à la place du so
 # tnt = TNT/StuntCarRacerTNT_v1.4.lha   # SCR-TNT ou archive .lha (défaut : dossier TNT) / SCR-TNT or .lha archive (default: TNT folder)
 # circuits = tnt                        # circuits TNT (touche F7) ; défaut : circuits d'origine / TNT tracks (F7 key); default: original tracks
 
-# --- multijoueur (voir LISEZMOI_MULTIJOUEUR.txt) / multiplayer (see LISEZMOI_MULTIJOUEUR.txt)
+# --- multijoueur (voir README_MULTIPLAYER.txt) / multiplayer (see README_MULTIPLAYER.txt)
 # nom = Pierre                # pseudo en ligne, 12 caractères (aussi dans le menu) / online nickname, 12 characters (also in the menu)
 # Serveur relais pour jouer par Internet (menu « 4. Online Multiplayer »). Vide : serveur officiel.
 # Relay server for playing over the Internet ("4. Online Multiplayer" menu). Empty: official server.

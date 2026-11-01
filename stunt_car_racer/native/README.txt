@@ -64,7 +64,7 @@ ou moins fort selon la distance de votre voiture. Seul, vous êtes le seul à l'
 Encouragements de la foule (mode HD, avec le décor) : chaque tribune a son public qui crie et
 applaudit ; on l'entend de plus en plus fort en s'approchant, avec l'effet Doppler (plus aigu
 en arrivant, plus grave en s'éloignant). Son fourni par défaut (synthétisé) ; pour utiliser
-votre propre enregistrement, placez un fichier foule.wav dans le dossier hd (voir LISEZMOI_HD.txt).
+votre propre enregistrement, placez un fichier foule.wav dans le dossier hd (voir README_HD.txt).
 
 Mises à jour : au démarrage, le jeu interroge le serveur online ; si une version plus récente
 est sortie, un bandeau le signale (« Nouvelle version vXX disponible »), ainsi que le menu
@@ -74,7 +74,7 @@ Multijoueur (à deux, en réseau) : premier menu du jeu, « 3. Computer Link - L
 réseau : les adversaires trouvés sont proposés, ou une adresse IP) ou « 4. Online Multiplayer »
 (par Internet, via le serveur relais de scr.ini, dont la disponibilité est testée : duel, ou
 course à plusieurs de 2 à 6 joueurs dans une salle privée).
-F9 discuter avec les autres joueurs, F10 coupe la connexion. Voir LISEZMOI_MULTIJOUEUR.txt.
+F9 discuter avec les autres joueurs, F10 coupe la connexion. Voir README_MULTIPLAYER.txt.
 
 Circuits TNT : les 8 circuits de « Stunt Car Racer TNT » (The New Tracks, version Amiga :
 DIZZY DESCENT, WITTY WAY, CRAZY CAPER, AMAZING ADEPT, JERKILY JUMP, EVILLY EPISODE, TEASING
@@ -99,7 +99,7 @@ décompressée par-dessus l'ancienne ne touche donc plus à votre scr.ini (adres
 relais, touches, options).
 
 Images HD : le dossier hd contient des images qui remplacent les sprites du cockpit (et le
-cockpit fixe : cockpit.png) en mode HD ; sans image, les flammes du boost sont les sprites d'origine agrandis en HD. Voir hd/LISEZMOI_HD.txt.
+cockpit fixe : cockpit.png) en mode HD ; sans image, les flammes du boost sont les sprites d'origine agrandis en HD. Voir hd/README_HD.txt.
 
 
 ==============================================================================
@@ -170,7 +170,7 @@ on how close your car is. Alone, only you hear it.
 Crowd cheering (HD mode, with scenery): each grandstand has its own crowd that shouts and
 claps; it gets louder as you approach, with the Doppler effect (higher pitched as you arrive,
 lower as you drive away). A synthesised sound is supplied; to use your own recording, put a
-foule.wav file in the hd folder (see LISEZMOI_HD.txt).
+foule.wav file in the hd folder (see README_HD.txt).
 
 Updates: at start-up the game asks the online server; if a newer version is out, a banner says
 so ("Nouvelle version vXX disponible" = new version vXX available), as does the
@@ -180,7 +180,7 @@ Multiplayer (two players, over a network): first game menu, "3. Computer Link - 
 network: opponents found are listed, or type an IP address) or "4. Online Multiplayer" (over the
 Internet, through the relay server, whose availability is tested: one-to-one race, or a
 multi-car race of 2 to 6 players in a private room).
-F9 chat with the other players, F10 disconnects. See LISEZMOI_MULTIJOUEUR.txt.
+F9 chat with the other players, F10 disconnects. See README_MULTIPLAYER.txt.
 
 TNT tracks: the 8 tracks of "Stunt Car Racer TNT" (The New Tracks, Amiga version: DIZZY DESCENT,
 WITTY WAY, CRAZY CAPER, AMAZING ADEPT, JERKILY JUMP, EVILLY EPISODE, TEASING TEMPER, RAT RACE).
@@ -205,4 +205,4 @@ created from it. A new version unzipped over the old one therefore never touches
 
 HD images: the hd folder holds images that replace the cockpit sprites (and the fixed cockpit:
 cockpit.png) in HD mode; without images, the boost flames are the original sprites enlarged in
-HD. See hd/LISEZMOI_HD.txt.
+HD. See hd/README_HD.txt.

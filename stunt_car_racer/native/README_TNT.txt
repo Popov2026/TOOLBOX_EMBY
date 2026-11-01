@@ -7,7 +7,7 @@ le contient (aucune donnée n'est fournie).
 Puis touche F7 en jeu (ou menu d'options, F1) : circuits d'origine <-> circuits TNT, en direct,
 sans relancer le jeu ; le choix est enregistré dans scr.ini (circuits = tnt).
 En course à plusieurs, l'organisateur peut choisir les circuits TNT sans rien régler.
-Voir LISEZMOI.txt.
+Voir README.txt.
 
 
 ==============================================================================
@@ -21,4 +21,4 @@ contains it (no data is supplied).
 Then press F7 in the game (or use the options menu, F1) to switch between the original tracks
 and the TNT tracks, live, without restarting; the choice is saved in scr.ini (circuits = tnt).
 In a multi-car race, the organiser can pick TNT tracks without any setting.
-See LISEZMOI.txt.
+See README.txt.

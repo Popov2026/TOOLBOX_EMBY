@@ -21,7 +21,7 @@ engineering project and a PC version whose settings can all be changed.
 [Releases page](https://github.com/Popov2026/stuntcar-racer/releases): `StuntCarRacer-win64-vNN.zip`
 (the game) and `ServeurRelaisStuntCar-vNN.zip` (relay server for Windows and Linux). Unzip the game,
 put your `.st` image in the `DISK` folder and double-click `scr.exe`. Every readme in the zips
-(`LISEZMOI*.txt`) has an English version below the French text; settings files (`scr.ini`,
+(`README*.txt`) has an English version below the French text; settings files (`scr.ini`,
 `scr_relay.ini`) are commented in both languages. The game's own menus are in French.
 
 **What the native PC version offers**
@@ -129,7 +129,7 @@ la fenêtre affiche le nombre d'images par seconde.
 sprites du cockpit en mode HD, au même endroit et au même moment (`sprite_06.png`, ou
 `sprite_06_1.png`, `_2`… pour une animation). Sans transparence, l'image est ajoutée en
 lumière (flammes sur fond noir). Réglages par sprite dans `hd/hd.ini` (taille, ancrage,
-décalage, cadence), **F2** recharge le dossier en jeu. Mode d'emploi : `native/LISEZMOI_HD.txt`.
+décalage, cadence), **F2** recharge le dossier en jeu. Mode d'emploi : `native/README_HD.txt`.
 Sans image, les **flammes du boost** sont les sprites d'origine (6/7/49, 8/9/50) agrandis en HD :
 silhouette, place, couleurs et animation identiques, contours lissés (flou puis seuil doux) et léger
 halo. Les lignes de bord alternent jaune et rouge sombre d'une section à l'autre, comme l'original. Le jeu enregistre chaque appel de ses routines
@@ -141,8 +141,8 @@ partent vers l'autre joueur. Quand on choisit « 3. Computer Link », le jeu est
 décide maître/esclave (`$453EC`), et un menu propose les adversaires trouvés en réseau local
 (annonces UDP), une salle sur le serveur relais (`native/server/scr_relay`, code de salle) ou une
 adresse IP. Celui qui choisit devient le maître ; l'esclave n'est relâché qu'après réception du
-premier octet du maître. Voir `native/LISEZMOI_MULTIJOUEUR.txt` et
-`native/server/LISEZMOI_SERVEUR.txt`.
+premier octet du maître. Voir `native/README_MULTIPLAYER.txt` et
+`native/server/README_SERVER.txt`.
 
 Réglages dans `scr.ini` (modèle : `native/scr.ini.example`) ou en ligne de commande :
 `--gravity --thrust --brake --timestep --damping --boostuse --shock` (facteurs, 1 = jeu
