@@ -78,12 +78,12 @@ struct Options {
 };
 
 // serveur relais par défaut, quand ni la ligne de commande ni scr.ini n'en donnent un ; adresse
-// stockée chiffrée (absente du texte du programme) et jamais affichée
+// et port stockés chiffrés (absents du texte du programme) et jamais affichés
 static std::string defaultRelay() {
-  static const uint8_t enc[] = {0x29, 0x13, 0x06, 0xaf, 0xe3, 0xfa, 0xdb, 0xd6, 0xa3, 0xbd, 0xbd, 0x8d, 0x93, 0x2d, 0x73, 0x7e};
+  static const uint8_t enc[] = {0x29, 0x13, 0x06, 0xaf, 0xe3, 0xfa, 0xdb, 0xd6, 0xa3, 0xbd, 0xbd, 0x8d, 0x93, 0x2d, 0x73, 0x7e, 0x10, 0x03, 0x70, 0x62};
   std::string r;
   for (size_t i = 0; i < sizeof enc; i++) r += char(enc[i] ^ uint8_t(0x5a + 13 * i));
-  return r + ":443";   // par le reverse proxy (flux TCP retransmis au serveur relais)
+  return r;
 }
 static const char *const DEFAULT_RELAY_NAME = "serveur officiel";
 static std::string relayAddr(const std::string &configured) { return configured.empty() ? defaultRelay() : configured; }
