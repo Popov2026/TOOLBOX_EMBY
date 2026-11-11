@@ -31,8 +31,8 @@ données. Façons de se trouver (menu « 4. Online Multiplayer » du jeu) :
 
   scr_relay.exe est un programme autonome (aucune installation, aucune DLL).
 
-  - Double-cliquez sur scr_relay.exe (ou sur lancer_serveur.bat, qui garde aussi un journal dans
-    scr_relay.log). Une fenêtre s'ouvre et affiche :
+  - Double-cliquez sur scr_relay.exe (il garde aussi un journal dans scr_relay.log, à côté du
+    programme). Une fenêtre s'ouvre et affiche :
         écoute sur le port TCP 27420
         adresse(s) de cette machine : 192.168.1.20
     Laissez-la ouverte tant qu'on joue ; fermer la fenêtre arrête le serveur.
@@ -223,8 +223,8 @@ data along. Ways to find each other (the game's "4. Online Multiplayer" menu):
 
   scr_relay.exe is a stand-alone program (no installation, no DLL).
 
-  - Double-click scr_relay.exe (or lancer_serveur.bat, which also keeps a log in
-    scr_relay.log). A window opens and shows:
+  - Double-click scr_relay.exe (it also keeps a log in scr_relay.log, next to the program).
+    A window opens and shows:
         écoute sur le port TCP 27420          (listening on TCP port 27420)
         adresse(s) de cette machine : 192.168.1.20   (this machine's address(es))
     Leave it open while people play; closing the window stops the server.

@@ -123,7 +123,7 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v83"
+#define SCR_RELAY_VERSION "v84"
 
 namespace {
 
@@ -141,7 +141,7 @@ constexpr size_t MAX_JOIN_FRAME = 512;    // une inscription du jeu fait moins d
 double now() { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 
 // ------------------------------------------------------------------ journal et console
-FILE *logFile = nullptr;      // --log : copie du journal dans un fichier
+FILE *logFile = nullptr;      // --log : copie du journal dans un fichier (Windows : scr_relay.log par défaut)
 bool live = false;            // affichage en direct des joueurs (console)
 bool dirty = true;            // à redessiner
 std::vector<std::string> events;   // derniers événements (affichage en direct)
@@ -1297,6 +1297,11 @@ int main(int argc, char **argv) {
       if (!logFile) { std::fprintf(stderr, "impossible d'ouvrir le journal %s\n", argv[i]); return 1; }
     } else { std::fprintf(stderr, "usage : %s [--port N] [--log fichier] [--journal] [--config scr_relay.ini]\n", argv[0]); return 1; }
   }
+#ifdef _WIN32
+  // Windows (double-clic) : journal gardé par défaut dans scr_relay.log à côté du programme (plus de
+  // fichier .bat de lancement, que les antivirus prenaient pour un script suspect)
+  if (!logFile) logFile = std::fopen((exeDir() + "scr_relay.log").c_str(), "a");
+#endif
 #ifdef _WIN32
   WSADATA wsa;
   if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) { std::fprintf(stderr, "Winsock indisponible\n"); return 1; }
