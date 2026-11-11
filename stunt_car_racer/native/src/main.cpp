@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v81"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v82"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -755,13 +755,21 @@ int main(int argc, char **argv) {
   // joueur regarde la course depuis les tribunes du décor ; flèches : autre voiture, Entrée : menu du groupe
   bool specMenu = false;            // menu du groupe ouvert par le joueur pendant qu'il est spectateur
   int specFollow = 0;               // voiture suivie (rang parmi celles encore en course)
-  auto specCars = [&] {             // autres joueurs encore en course (indices dans view->ghosts)
-    std::vector<int> v;
-    for (size_t i = 0; i < view->ghosts.size(); i++)
+  auto racingCars = [&](const HdView &v) {   // joueurs encore en course (indices dans v.ghosts)
+    std::vector<int> r;
+    for (size_t i = 0; i < v.ghosts.size(); i++)
       for (auto &gm : net.groupMembers())
-        if (gm.id == view->ghosts[i].id && gm.state == "racing" && view->ghosts[i].pose.valid) v.push_back(int(i));
-    return v;
+        if (gm.id == v.ghosts[i].id && gm.state == "racing" && v.ghosts[i].pose.valid) r.push_back(int(i));
+    return r;
   };
+  auto specCars = [&] { return racingCars(*view); };   // autres joueurs encore en course
+  // spectateur de salle : une course est lancée dans la salle (salle publique...) sans ce joueur ; il la
+  // regarde depuis les tribunes avec une machine à part (circuit et palette de la course), son jeu reste
+  // où il est ; Entrée : menu de la salle (« Regarder la course » pour revenir)
+  bool watchOn = false, watchMenu = false;
+  int watchTrack = 0;
+  std::unique_ptr<Machine> specM;
+  std::unique_ptr<HdView> specView;
   auto canSpectate = [&] {
     return gr.active && net.inGroup() && gr.finished && net.groupPhase() == "racing" && !gr.victoryHold && !specCars().empty();
   };
@@ -789,6 +797,7 @@ int main(int argc, char **argv) {
     bool idle = !net.active() || net.state() == NetLink::State::Failed;
     if (online()) {
       bool inRoom = net.relayRoom() && net.state() == NetLink::State::Waiting;   // salle privée du relais
+      if (watchOn && !net.inGroup()) it.push_back({L("Regarder la course (tribunes)", "Watch the race (grandstands)"), 19, {}});
       if (net.inGroup() && net.groupDuel()) {   // course à deux : circuit proposé, accepté par les deux
         if (net.groupPhase() == "vote") {
           bool accepted = false;
@@ -821,6 +830,7 @@ int main(int argc, char **argv) {
       if (idle) {
         if (probe.ok()) {
           it.push_back({L("Premier joueur disponible", "First available player"), 5, {}});
+          it.push_back({L("Salle publique", "Public room"), 20, {}});
           it.push_back({L("Salle privée (code)", "Private room (code)"), 1, {}});
         }
         if (probe.ok()) it.push_back({L("État du serveur (parties, joueurs, salles)", "Server status (games, players, rooms)"), 17, {}});
@@ -880,7 +890,8 @@ int main(int argc, char **argv) {
         statusProbe.start(relayAddr(o.relay), true); statusAt = NetLink::clock();
         break;
       case 18: statusView = false; menuSel = 0; break;
-      case 19: specMenu = false; menuSel = 0; break;   // retour dans les tribunes
+      case 19: specMenu = false; watchMenu = false; menuSel = 0; break;   // retour dans les tribunes
+      case 20: net.joinRelay(relayAddr(o.relay), "PUBLIC", relayShown(o.relay)); menuSel = 0; break;   // salle publique
     }
   };
   // aide aux tests automatiques (aucun effet sinon) : SCR_AUTOKEYS="trame:Touche,..." simule des appuis
@@ -1135,16 +1146,21 @@ int main(int argc, char **argv) {
           typing = Typing::None; SDL_StopTextInput(); menuSel = 0;
         }
       }
-      else if (ev.type == SDL_KEYDOWN && !menuOpen && !optOpen && typing == Typing::None && !specMenu && canSpectate() &&
+      else if (ev.type == SDL_KEYDOWN && !optOpen && typing == Typing::None &&
+               ((watchOn && !watchMenu && !net.inGroup()) || (!menuOpen && !specMenu && canSpectate())) &&
                (ev.key.keysym.scancode == SDL_SCANCODE_LEFT || ev.key.keysym.scancode == SDL_SCANCODE_RIGHT ||
                 ev.key.keysym.scancode == SDL_SCANCODE_UP || ev.key.keysym.scancode == SDL_SCANCODE_DOWN ||
                 ev.key.keysym.scancode == SDL_SCANCODE_TAB || ev.key.keysym.scancode == SDL_SCANCODE_RETURN ||
                 ev.key.keysym.scancode == SDL_SCANCODE_KP_ENTER || ev.key.keysym.scancode == SDL_SCANCODE_ESCAPE)) {
         // spectateur : voiture suivie, ou menu du groupe
         SDL_Scancode sc = ev.key.keysym.scancode;
-        if (sc == SDL_SCANCODE_LEFT || sc == SDL_SCANCODE_UP) { specFollow--; view->resetSpectator(); }
-        else if (sc == SDL_SCANCODE_RIGHT || sc == SDL_SCANCODE_DOWN || sc == SDL_SCANCODE_TAB) { specFollow++; view->resetSpectator(); }
-        else if (!ev.key.repeat) { specMenu = true; menuSel = 0; menuOpenedAt = NetLink::clock(); }
+        HdView &sv = watchOn && specView && !net.inGroup() ? *specView : *view;
+        if (sc == SDL_SCANCODE_LEFT || sc == SDL_SCANCODE_UP) { specFollow--; sv.resetSpectator(); }
+        else if (sc == SDL_SCANCODE_RIGHT || sc == SDL_SCANCODE_DOWN || sc == SDL_SCANCODE_TAB) { specFollow++; sv.resetSpectator(); }
+        else if (!ev.key.repeat) {
+          if (watchOn && !net.inGroup()) watchMenu = true; else specMenu = true;
+          menuSel = 0; menuOpenedAt = NetLink::clock();
+        }
       }
       else if (ev.type == SDL_KEYDOWN && menuOpen) {   // menu « Computer Link »
         SDL_Scancode sc = ev.key.keysym.scancode;
@@ -1365,8 +1381,25 @@ int main(int argc, char **argv) {
           }
         } else if (ev == "END") {
           gr.racing = false; gr.waitingGo = false;
+        } else if (ev.rfind("WATCH ", 0) == 0 && !net.inGroup()) {   // course lancée dans la salle sans nous : spectateur
+          int t = 0, l = 3;
+          std::sscanf(ev.c_str() + 6, "%d %d", &t, &l);
+          if ((t & 15) >= 8 && !haveTnt) {
+            net.localNote(L("Course sur un circuit TNT : fichier SCR-TNT absent, impossible de la regarder", "Race on a TNT track: SCR-TNT file missing, cannot watch it"));
+            continue;
+          }
+          specM = start(disk, o, t & 7, (t & 15) >= 8 ? &tntSet : nullptr);
+          for (int k = 0; k < 60; k++) specM->runFrame();   // couleurs de la course en place
+          specView = std::make_unique<HdView>(*specM);
+          specView->params = view->params;
+          watchOn = true; watchMenu = false; watchTrack = t & 7; specFollow = 0;
+          if (typing != Typing::None && typing != Typing::Chat) { typing = Typing::None; SDL_StopTextInput(); }
+          if (!hd) { hd = true; applyMode(true); }   // la course est montrée en HD
+        } else if (ev == "WATCHEND") {
+          watchOn = false; watchMenu = false; specView.reset(); specM.reset();
         }
       }
+      if (watchOn && (!net.active() || net.inGroup())) { watchOn = false; watchMenu = false; specView.reset(); specM.reset(); }
       if (!net.inGroup() && gr.active) {   // groupe perdu (connexion coupée...) : retour au titre, la raison reste affichée
         gr = GroupRace();
         restartMachine(-1);
@@ -1662,6 +1695,36 @@ int main(int argc, char **argv) {
     };
     // course à plusieurs : départ, tour, temps, classement en direct, noms au-dessus des voitures
     auto drawRaceHud = [&](int logicalW, int logicalH) {
+      if (watchOn && specView && !watchMenu && !net.inGroup()) {   // spectateur de salle
+        int scale = std::max(1, logicalW / 640);
+        auto cars = racingCars(*specView);
+        const int n = int(cars.size());
+        for (auto &g : specView->ghosts)   // noms au-dessus des voitures
+          if (g.onScreen && g.dist < 20000) drawText(g.name, int(g.sx), int(g.sy) - 10 * scale, scale, 0xffffff60u, 0x90000000u, 1, logicalW);
+        std::string title = L("SPECTATEUR - salle ", "SPECTATOR - room ") + net.room();
+        if (n) title += L(" - tribunes : ", " - grandstands: ") + specView->ghosts[size_t(cars[size_t(((specFollow % n) + n) % n)])].name;
+        else title += net.groupPhase() == "racing" ? L(" - course terminée pour tous", " - nobody racing any more") : L(" - départ imminent...", " - the race is about to start...");
+        drawText(title, logicalW / 2, logicalH / 14, scale, 0xffffff60u, 0xc0000000u, 1, logicalW);
+        int y = logicalH / 14 + 16 * scale;   // joueurs de la course et leur état
+        for (auto &gm : net.groupMembers()) {
+          std::string t = gm.name.substr(0, 16) + "  ";
+          if (gm.state.rfind("finished:", 0) == 0) {
+            long ms = std::atol(gm.state.c_str() + 9); char b[32];
+            std::snprintf(b, sizeof b, "%ld:%04.1f", ms / 60000, (ms % 60000) / 1000.0);
+            t += L("arrivé ", "finished ") + std::string(b);
+          } else if (gm.state == "out") t += L("abandon", "out");
+          else if (gm.state == "racing") {
+            int lap = 1;
+            auto it = net.ghosts().find(gm.id);
+            if (it != net.ghosts().end() && !it->second.empty()) lap = std::max(1, int(it->second.back().lap));
+            t += L("tour ", "lap ") + std::to_string(lap) + "/" + std::to_string(net.groupLaps());
+          } else t += L("prêt", "ready");
+          y += drawText(t, logicalW - logicalW / 7, y, scale, 0xffffffffu, 0xa0000000u, 1, logicalW);
+        }
+        drawText(L("< > : autre voiture     Entrée : menu de la salle", "< > : other car     Enter: room menu"), logicalW / 2,
+                 logicalH - logicalH / 10, scale, 0xffffffffu, 0xc0000000u, 1, logicalW);
+        return;
+      }
       if (!gr.active || !net.inGroup() || menuOpen) return;
       int scale = std::max(1, logicalW / 640), big = std::max(2, logicalW / 240);
       double now = NetLink::clock();
@@ -1761,7 +1824,7 @@ int main(int argc, char **argv) {
     };
     // menu « Computer Link », dessiné par-dessus le jeu (même allure que les menus d'origine)
     auto drawMenu = [&](int logicalW, int logicalH) {
-      if (!menuOpen) return;
+      if (!menuOpen || (watchOn && !watchMenu && !net.inGroup())) return;
       static std::map<std::string, std::tuple<SDL_Texture *, int, int>> cache;
       if (cache.size() > 80) { for (auto &kv : cache) SDL_DestroyTexture(std::get<0>(kv.second)); cache.clear(); }
       int scale = std::max(1, logicalW / 400);
@@ -1793,6 +1856,7 @@ int main(int argc, char **argv) {
         auto stateTxt = [&](const std::string &c) -> std::string {
           if (c == "wait") return L("attend un adversaire", "waiting for an opponent");
           if (c == "free") return L("dans la salle, libre", "in the room, free");
+          if (c == "watch") return L("regarde la course (spectateur)", "watching the race (spectator)");
           if (c.rfind("vs:", 0) == 0) return L("en course contre ", "racing against ") + c.substr(3);
           if (c == "vote") return L("choisit le circuit", "choosing the track");
           if (c == "accept") return L("circuit accepté", "track accepted");
@@ -2054,8 +2118,8 @@ int main(int argc, char **argv) {
       uint64_t t = SDL_GetPerformanceCounter();
       if (lastPresent && double(t - lastPresent) / double(freq) < 0.9 / refresh) { SDL_Delay(1); continue; }
       lastPresent = t;
-      view->ghosts.clear();
-      if (gr.active && net.inGroup()) {   // autres joueurs : position interpolée 0,3 s en arrière
+      auto fillGhosts = [&](HdView &hv) {   // autres joueurs : position interpolée 0,3 s en arrière
+        hv.ghosts.clear();
         const double tt = NetLink::clock() - 0.3;
         for (auto &kv : net.ghosts()) {
           const auto &q = kv.second;
@@ -2068,18 +2132,26 @@ int main(int argc, char **argv) {
           Pose ps{a->v[0] + (b->v[0] - a->v[0]) * f, a->v[1] + (b->v[1] - a->v[1]) * f, a->v[2] + (b->v[2] - a->v[2]) * f,
                   lerpA(a->v[3], b->v[3]), lerpA(a->v[4], b->v[4]), lerpA(a->v[5], b->v[5])};
           HdView::Ghost g;
-          g.pose = view->ghostFromPose(ps);
+          g.pose = hv.ghostFromPose(ps);
           g.boost = (b->flags & 2) != 0;
           g.impactStamp = (q.back().flags >> 2) & 3;
           g.impact = (q.back().flags >> 4) * 4;
           g.id = kv.first;
           for (auto &gm : net.groupMembers()) if (gm.id == kv.first) g.name = gm.name;
-          view->ghosts.push_back(g);
+          hv.ghosts.push_back(g);
         }
-      }
+      };
+      view->ghosts.clear();
+      if (gr.active && net.inGroup()) fillGhosts(*view);
       view->viewSide = gr.active ? craneView() : 0;   // course à plusieurs : grue du côté de sa place
       bool spectated = false;
-      if (canSpectate() && !specMenu) {   // spectateur : course vue depuis les tribunes
+      if (watchOn && specView && specM && !watchMenu && !net.inGroup()) {   // spectateur de salle
+        specM->runFrame(); specView->afterFrame(*specM);
+        fillGhosts(*specView);
+        auto cars = racingCars(*specView);
+        const int n = int(cars.size());
+        if (n) spectated = specView->renderSpectator(*specM, watchTrack, cars[size_t(((specFollow % n) + n) % n)], hdPixels.data(), o.hdW, o.hdH);
+      } else if (canSpectate() && !specMenu) {   // spectateur : course vue depuis les tribunes
         auto cars = specCars();
         const int n = int(cars.size());
         spectated = view->renderSpectator(*m, -1, cars[size_t(((specFollow % n) + n) % n)], hdPixels.data(), o.hdW, o.hdH);

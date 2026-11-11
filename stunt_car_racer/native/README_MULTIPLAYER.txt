@@ -75,6 +75,9 @@ disponible »).
          revienne. Discussion pendant la course à deux : F9 ou « Écrire un message ».
          Après l'arrivée, un nouveau circuit est proposé pour la revanche ; « Quitter la course »
          (ou Échap) vous déconnecte, et l'autre joueur attend un nouvel adversaire ;
+       * « Salle publique » : la salle ouverte à tous les joueurs du serveur (même salle que le code
+         PUBLIC), avec les mêmes possibilités qu'une salle privée. Quand une course y est lancée, les
+         joueurs de la salle qui n'y participent pas deviennent spectateurs (voir plus bas) ;
        * « Salle privée (code) » : tapez un code (lettres ou chiffres ; vide = le jeu en invente
          un, à donner à vos amis). Le menu affiche les joueurs présents dans la salle :
          « Affronter ... » pour en choisir un : même course à deux (circuit proposé, accepté par
@@ -99,6 +102,10 @@ disponible »).
      au départ, car le rendu d'origine ne sait dessiner qu'une seule voiture adverse.
      En haut à droite : tour, temps et classement en direct. Le nombre de tours est celui de
      l'organisateur (1 à 9 ; l'arrêt de l'entraînement d'origine après 3 tours est désactivé).
+     Spectateurs de la salle : quand une course est lancée dans une salle (salle publique ou privée), les
+     joueurs de la salle qui n'y participent pas la regardent aussitôt depuis les tribunes, avec le nom
+     et le tour de chaque joueur ; flèches gauche / droite : autre voiture ; Entrée : menu de la salle,
+     où « Regarder la course (tribunes) » ramène dans les tribunes (serveur v82 ou plus récent).
      Spectateur : un joueur éliminé (voiture détruite), ou déjà arrivé, regarde la suite de la course
      depuis les tribunes du décor (mode HD, avec le décor) : la caméra se place dans la tribune la plus
      proche de la voiture suivie et la suit des yeux, en zoomant quand elle s'éloigne. Flèches gauche /
@@ -261,6 +268,9 @@ with the French language chosen in the F1 options menu; the English meaning is g
          Chat during the two-player race: F9 or "Écrire un message" (write a message).
          After the finish, a new track is offered for a rematch; "Quitter la course" (leave the
          race) or Escape disconnects you, and the other player waits for a new opponent;
+       * "Public room": the room open to every player on the server (the same room as the code
+         PUBLIC), with the same options as a private room. When a race is started there, the players
+         in the room who are not taking part become spectators (see below);
        * "Salle privée (code)" (private room): type a code (letters or digits; empty = the game
          makes one up, give it to your friends). The menu shows the players in the room:
          "Affronter ..." (race against ...) to pick one: same two-player race (track offered,
@@ -285,6 +295,10 @@ with the French language chosen in the F1 options menu; the English meaning is g
      start, because the original renderer can only draw one opponent car.
      Top right: lap, time and live standings. The number of laps is the organiser's (1 to 9; the
      original practice mode's stop after 3 laps is disabled).
+     Room spectators: when a race is started in a room (public or private), the players in the room
+     who are not taking part watch it at once from the grandstands, with each player's name and lap;
+     left / right arrows: another car; Enter: the room menu, where "Watch the race (grandstands)"
+     takes you back to the stands (server v82 or later).
      Spectator: a player who is out (car wrecked), or has already finished, watches the rest of the
      race from the grandstands of the scenery (HD mode, with scenery): the camera sits in the
      grandstand closest to the car being followed and follows it, zooming in as it gets further away.

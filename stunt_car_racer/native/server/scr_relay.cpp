@@ -51,6 +51,8 @@
 //                                   racing, finished:ms, out = abandon)
 //                       GEVENT (20) "START circuit tours n1 n2 ..." (ordre sur la grille) | "GO" | "END"
 //                                   | "VICTORY n" (seul encore en course, les autres éliminés)
+//                                   | "WATCH circuit tours n1 n2 ..." / "WATCHEND" (spectateur : joueur de la
+//                                     salle hors de la course ; il reçoit aussi GSTATE et les positions GPOS)
 //                       PARAMS (16) "gravity=1 thrust=1 ... cadence=400" (réglages imposés, après l'inscription)
 //   ensuite, les trames de chaque joueur sont retransmises telles quelles à l'autre.
 #include <algorithm>
@@ -121,7 +123,7 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v81"
+#define SCR_RELAY_VERSION "v82"
 
 namespace {
 
@@ -194,6 +196,7 @@ struct Client {
   bool suspect = false;          // adresse d'un robot récent : délai d'inscription court
   bool ws = false;               // arrivé en WebSocket (par un reverse proxy web)
   bool web = false;              // navigateur : page d'état servie (pas un robot)
+  std::string watchKey;          // spectateur de la course de ce groupe (joueur de la salle hors de la course)
   std::vector<uint8_t> raw, wsOut;   // WebSocket : octets reçus non décodés, trames à envoyer
   double lastWsPing = 0;
   bool wsCloseSent = false, wsCloseGot = false;   // fermeture WebSocket propre (les deux sens)
@@ -477,7 +480,53 @@ void groupSend(Group &g, uint8_t type, const std::string &msg) {
   for (Sock f : g.members) { auto it = clients.find(f); if (it != clients.end()) frame(it->second, type, msg); }
 }
 
-void groupState(const std::string &room, bool force = false) {
+// spectateurs : joueurs de la salle de la course (même version), ni dans la course ni en partie, pendant
+// le chargement et la course ; ils reçoivent l'état du groupe et les positions, et regardent la course
+std::string groupRoom(const Group &g) {
+  for (Sock f : g.members) { auto it = clients.find(f); if (it != clients.end() && it->second.mode == Mode::Room) return it->second.room; }
+  return "";
+}
+std::vector<Sock> watchersOf(const std::string &key, const Group &g) {
+  std::vector<Sock> v;
+  const std::string room = groupRoom(g);
+  if (room.empty() || (g.phase != "loading" && g.phase != "racing") || g.members.empty()) return v;
+  const std::string &ver = clients[g.members[0]].version;
+  for (auto &kv : clients) {
+    const Client &c = kv.second;
+    if (c.joined && !c.closing && c.mode == Mode::Room && c.room == room && !c.inGroup && c.peer == NONE && c.version == ver &&
+        (c.watchKey.empty() || c.watchKey == key))
+      v.push_back(kv.first);
+  }
+  return v;
+}
+void groupState(const std::string &room, bool force = false);
+// nouveaux spectateurs : départ de la course à regarder ; anciens (course finie, partis) : fin
+void watchSync(const std::string &key) {
+  auto git = groups.find(key);
+  std::vector<Sock> now;
+  bool added = false;
+  if (git != groups.end()) now = watchersOf(key, git->second);
+  for (auto &kv : clients) {
+    Client &c = kv.second;
+    bool want = std::find(now.begin(), now.end(), kv.first) != now.end();
+    if (want && c.watchKey.empty()) {
+      const Group &g = git->second;
+      c.watchKey = key;
+      std::string msg = "WATCH " + std::to_string(g.track) + " " + std::to_string(g.laps);
+      for (Sock f : g.members) msg += " " + std::to_string(clients[f].id);
+      frame(c, NF_GEVENT, msg);
+      logf("%s regarde la course %s (spectateur)", who(c).c_str(), key.c_str());
+      dirty = added = true;
+    } else if (!want && c.watchKey == key) {
+      c.watchKey.clear();
+      frame(c, NF_GEVENT, "WATCHEND");
+      dirty = true;
+    }
+  }
+  if (git != groups.end() && added) groupState(key, true);   // état complet pour les nouveaux spectateurs
+}
+
+void groupState(const std::string &room, bool force) {
   auto git = groups.find(room);
   if (git == groups.end()) return;
   Group &g = git->second;
@@ -490,6 +539,8 @@ void groupState(const std::string &room, bool force = false) {
   if (body == g.lastState && !force) return;
   g.lastState = body;
   for (Sock f : g.members) frame(clients[f], NF_GSTATE, "me " + std::to_string(clients[f].id) + "\n" + body);
+  for (auto &kv : clients)   // spectateurs : même état (ils ne sont pas dans la liste des membres)
+    if (kv.second.watchKey == room) frame(kv.second, NF_GSTATE, "me " + std::to_string(kv.second.id) + "\n" + body);
   dirty = true;
 }
 
@@ -585,6 +636,7 @@ void groupStart(const std::string &key, Group &g) {
   for (uint32_t id : grid) startMsg += " " + std::to_string(id);
   groupSend(g, NF_GEVENT, startMsg);
   logf("%s : course à %zu joueurs lancée (circuit %d, %d tour(s))", key.c_str(), g.members.size(), g.track + 1, g.laps);
+  watchSync(key);   // les autres joueurs de la salle deviennent spectateurs
 }
 
 void groupCmd(Client &c, const std::string &cmd) {
@@ -636,6 +688,7 @@ void groupCmd(Client &c, const std::string &cmd) {
 void groupTick() {
   double t = now();
   std::vector<std::string> duelDoomed;   // courses à deux réduites à un joueur : dissoutes après la boucle
+  std::vector<std::string> ended;        // courses finies : fin pour leurs spectateurs
   for (auto &kv : groups) {
     Group &g = kv.second;
     if (g.phase == "loading") {
@@ -674,11 +727,21 @@ void groupTick() {
         groupState(kv.first, true);
         for (Sock f : g.members) if (clients[f].gstate.rfind("finished", 0) != 0 && clients[f].gstate != "out") clients[f].gstate = g.duel ? "vote" : "lobby";
         logf("%s : course terminée", kv.first.c_str());
+        ended.push_back(kv.first);
         if (g.duel && g.members.size() < 2) { duelDoomed.push_back(kv.first); }
       }
     }
   }
   for (auto &key : duelDoomed) duelDissolve(key);
+  for (auto &key : ended) watchSync(key);
+  // spectateurs : arrivées dans la salle pendant une course, groupes disparus
+  static double lastSync = 0;
+  if (t - lastSync > 1) {
+    lastSync = t;
+    for (auto &kv : groups) if (kv.second.phase == "loading" || kv.second.phase == "racing") watchSync(kv.first);
+    for (auto &kv : clients)
+      if (!kv.second.watchKey.empty() && !groups.count(kv.second.watchKey)) { kv.second.watchKey.clear(); frame(kv.second, NF_GEVENT, "WATCHEND"); }
+  }
 }
 
 void pair(Client &master, Client &other) {
@@ -877,6 +940,7 @@ void process(Client &c) {
       for (int k = 0; k < 4; k++) m[size_t(k)] = char((c.id >> (24 - 8 * k)) & 255);
       m.append(reinterpret_cast<const char *>(p), n);
       for (Sock f : groups[c.gkey].members) if (f != c.fd) frame(clients[f], NF_GPOS, m);
+      for (auto &kv : clients) if (kv.second.watchKey == c.gkey) frame(kv.second, NF_GPOS, m);   // spectateurs
     }
     else if (type == NF_HORN && c.inGroup && now() - c.lastHorn > 0.25) {   // klaxon : aux autres membres
       c.lastHorn = now();
@@ -919,6 +983,7 @@ std::string stateOf(const Client &c, double t) {
     std::string o = p == clients.end() ? "?" : (p->second.name.empty() ? p->second.ip : p->second.name);
     return "en partie contre " + o + " (" + duration(t - c.pairedAt) + ")";
   }
+  if (!c.watchKey.empty()) return "spectateur de la course";
   if (c.inGroup) {
     const std::string &g = c.gstate;
     if (g.rfind("finished:", 0) == 0) { long ms = std::atol(g.c_str() + 9); char b[64]; std::snprintf(b, sizeof b, "course à plusieurs : arrivé %ld,%ld s", ms / 1000, ms % 1000 / 100); return b; }
@@ -1000,6 +1065,7 @@ std::string stateEn(const Client &c, double t) {   // état d'un joueur, en angl
     if (g == "lobby") return "waiting for the start";
     return "loading the track";
   }
+  if (!c.watchKey.empty()) return "watching the race (spectator)";
   return c.mode == Mode::Room ? "in the room, free" : "waiting for an opponent";
 }
 
@@ -1148,6 +1214,7 @@ std::string statusText() {
       if (g == "out" || g == "vote" || g == "accept" || g == "racing" || g == "lobby") return g;
       return "loading";
     }
+    if (!c.watchKey.empty()) return "watch";
     return c.mode == Mode::Room ? "free" : "wait";
   };
   std::vector<const Client *> players;

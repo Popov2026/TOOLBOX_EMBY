@@ -451,7 +451,8 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
     }
     case NF_GEVENT:
       groupEvents_.emplace_back(reinterpret_cast<const char *>(p), n);
-      if (groupEvents_.back().rfind("START", 0) == 0) ghosts_.clear();
+      if (groupEvents_.back().rfind("START", 0) == 0 || groupEvents_.back().rfind("WATCH ", 0) == 0) ghosts_.clear();
+      if (groupEvents_.back() == "WATCHEND" && !groupIn_) { groupMembers_.clear(); ghosts_.clear(); groupPhase_.clear(); }   // fin du spectacle
       break;
     case NF_GPOS:
       if (n >= 4 + 30) {
