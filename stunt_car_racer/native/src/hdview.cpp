@@ -491,7 +491,7 @@ void HdView::addCar(const OppPose &o, double hs, const Machine &m, bool closed) 
   };
   // caisse (châssis, cabine) : abaissée de la compression des suspensions, roues posées
   auto WB = [&](double x, double y, double z) { return W(x, y - o.squat, z); };
-  auto pal = [&](int i) { return m.paletteARGB(i); };
+  auto pal = [&](int i) { return palOf(m, i); };
   const uint32_t red = pal(10), redLight = pal(11), pink = pal(12), black = pal(0), grey = pal(14), dark = pal(9);
   // boîte : 6 faces, couleurs dessus / côtés / avant-arrière
   auto box = [&](double x0, double x1, double y0, double y1, double z0, double z1, uint32_t top, uint32_t side, uint32_t end) {
@@ -750,11 +750,6 @@ void HdView::drawScenery(const Camera &c, int track, double hs) {
 void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, double focal, double cx, double cy,
                          const Machine &m, const OppPose *opp) {
   const HdParams &P = params;
-  // couleurs : palette courante du jeu
-  auto pal = [&](int i) { return m.paletteARGB(i); };
-  uint32_t sky = pal(7), ground = pal(13), hill = pal(5), hillFar = shadeARGB(pal(5), 1.25), road = pal(1),
-           road2 = pal(2), line = pal(3), line2 = pal(9), wall = pal(10), wall2 = pal(15);
-
   // caméra : position de la voiture + œil, dans le repère de la voiture
   Camera c;
   double pitch = P.pitchSign * p.pitch, roll = P.rollSign * p.roll;
@@ -772,6 +767,16 @@ void HdView::renderScene(const Pose &p, int track, uint32_t *out, int W, int H, 
   eyeLift_ *= 0.85;   // la remontée de l'œil retombe progressivement (pas de saut de caméra)
   c.yaw = p.yaw + P.yawOffset; c.pitch = pitch + P.pitchOffset; c.roll = roll;
   c.focal = focal; c.focalY = focal * P.aspect; c.cx = cx; c.cy = cy; c.nearZ = 2;
+  drawWorld(c, track, out, W, H, m, opp);
+}
+
+void HdView::drawWorld(const Camera &c, int track, uint32_t *out, int W, int H, const Machine &m, const OppPose *opp) {
+  const HdParams &P = params;
+  // couleurs : palette courante du jeu
+  auto pal = [&](int i) { return palOf(m, i); };
+  uint32_t sky = pal(7), ground = pal(13), hill = pal(5), hillFar = shadeARGB(pal(5), 1.25), road = pal(1),
+           road2 = pal(2), line = pal(3), line2 = pal(9), wall = pal(10), wall2 = pal(15);
+  const double HSCALE = P.hScale;
   r3d_.begin(W, H, c, sky);
   r3d_.setSky(P.sky, sky, frame_ / 50.0);
 
@@ -1164,6 +1169,77 @@ void HdView::drawCockpitHd(const Machine &m, uint32_t *out, int W, int H, double
   }
 }
 
+bool HdView::renderSpectator(const Machine &m, int track, int follow, uint32_t *out, int W, int H) {
+  if (ghosts.empty() || tracks_.empty()) return false;
+  if (track < 0) track = snaps_.empty() ? 0 : snaps_.back().track;   // circuit de la dernière course
+  follow = std::clamp(follow, 0, int(ghosts.size()) - 1);
+  const Ghost &g = ghosts[size_t(follow)];
+  if (!g.pose.valid) return false;
+  const double HS = params.hScale, gy = GROUND_RAW * HS;
+  const double dtF = specFrame_ ? std::clamp(double(frame_ - specFrame_), 0.0, 10.0) : 0;   // trames émulées depuis l'image précédente
+  specFrame_ = frame_;
+  specT_ += dtF / 50.0;
+  // voiture suivie : posée sur la route (même correction que pour l'affichage des fantômes)
+  double ty = g.pose.yRaw;
+  {
+    const int keepHint = hint_;
+    double sv;
+    if (surfaceRaw(tracks_[track & 7], g.pose.x, g.pose.z, ty, sv) && sv > ty && sv - ty < 260) ty = sv;
+    hint_ = keepHint;
+  }
+  const Vec3 target{g.pose.x, ty * HS + 40, g.pose.z};
+  // tribune la plus proche de la voiture ; on n'en change que si une autre est nettement plus proche
+  // (et au plus toutes les 3 s) : pas de va-et-vient de la caméra
+  auto it = scenery_.find(track & 7);
+  if (it == scenery_.end()) it = scenery_.emplace(track & 7, buildScenery(tracks_[track & 7], params.density)).first;
+  const std::vector<SceneObj> &sc = it->second;
+  auto standDist = [&](int i) { return std::hypot(sc[size_t(i)].x - target.x, sc[size_t(i)].z - target.z); };
+  int best = -1;
+  for (int i = 0; i < int(sc.size()); i++)
+    if (sc[size_t(i)].kind == SCENE_STAND && (best < 0 || standDist(i) < standDist(best))) best = i;
+  bool jump = false;
+  if (best >= 0 && (specStand_ < 0 || specStand_ >= int(sc.size()) || sc[size_t(specStand_)].kind != SCENE_STAND ||
+                    (best != specStand_ && specT_ > 3 && standDist(best) < 0.7 * standDist(specStand_)))) {
+    jump = specStand_ != best;
+    specStand_ = best; specT_ = 0;
+  }
+  Camera c;
+  if (specStand_ >= 0 && specStand_ < int(sc.size()) && params.scenery) {
+    // place au 6e rang des gradins, en face de la voiture le long de la tribune (regard au-dessus du public)
+    const SceneObj &o = sc[size_t(specStand_)];
+    const double ax = o.fz, az = -o.fx, hl = o.len / 2;
+    const double a = std::clamp((target.x - o.x) * ax + (target.z - o.z) * az, -hl + 80, hl - 80);
+    const int row = 5;
+    const double depth = row * 95 + 70, y = gy + 40 + row * 55 + 75;
+    c.pos = {o.x + ax * a - o.fx * depth, y, o.z + az * a - o.fz * depth};
+  } else {
+    // pas de tribune (décor coupé) : caméra de bord de piste, en hauteur, à côté de la voiture
+    c.pos = {target.x + g.pose.right.x * 2600 - g.pose.fwd.x * 1200, target.y + 900, target.z + g.pose.right.z * 2600 - g.pose.fwd.z * 1200};
+    jump = true;
+  }
+  const double dx = target.x - c.pos.x, dy = target.y - c.pos.y, dz = target.z - c.pos.z, dh = std::hypot(dx, dz);
+  const double yaw = std::atan2(dx, dz), pitch = std::atan2(dy, std::max(1.0, dh));
+  // zoom : la voiture garde une taille lisible quand elle s'éloigne (comme une caméra de télévision)
+  const double zoom = std::clamp(dh / 5000.0, 1.0, 3.5);
+  if (jump || specZoom_ <= 0) { specYaw_ = yaw; specPitch_ = pitch; specZoom_ = zoom; }
+  else {   // visée lissée (la caméra suit la voiture sans à-coups)
+    const double k = 1 - std::pow(0.82, dtF);
+    specYaw_ += std::remainder(yaw - specYaw_, 2 * PI) * k;
+    specPitch_ += (pitch - specPitch_) * k;
+    specZoom_ += (zoom - specZoom_) * (1 - std::pow(0.95, dtF));
+  }
+  c.yaw = specYaw_; c.pitch = specPitch_; c.roll = 0;
+  const double s = H / 200.0;
+  c.focal = params.focal * s * specZoom_; c.focalY = c.focal * params.aspect; c.cx = W / 2.0; c.cy = H / 2.0; c.nearZ = 2;
+  useRacePal_ = true;
+  {   // particules (chocs des autres voitures) : avancées comme en course
+    stepParticles(dtF);
+  }
+  drawWorld(c, track, out, W, H, m, nullptr);
+  useRacePal_ = false;
+  return true;
+}
+
 void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
   const double s = H / 200.0, ox = (W - 320 * s) / 2;
   // fin de course (épave, victoire) : le jeu ne calcule plus la course mais montre encore le
@@ -1197,6 +1273,8 @@ void HdView::render(const Machine &m, double t, uint32_t *out, int W, int H) {
     }
     return;
   }
+  if (racing())   // palette de la course, gardée pour la vue spectateur (le jeu revient ensuite à ses menus)
+    for (int i = 0; i < 16; i++) { racePal_[i] = m.paletteARGB(i); racePalOk_ = true; }
   double T = playTime(t);
   wind_ += (windTarget_ - wind_) * 0.08;   // lissé (affichage à 60 i/s)
   Pose p = poseAt(T);

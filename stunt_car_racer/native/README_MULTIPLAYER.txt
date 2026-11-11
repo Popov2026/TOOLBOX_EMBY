@@ -99,6 +99,11 @@ disponible »).
      au départ, car le rendu d'origine ne sait dessiner qu'une seule voiture adverse.
      En haut à droite : tour, temps et classement en direct. Le nombre de tours est celui de
      l'organisateur (1 à 9 ; l'arrêt de l'entraînement d'origine après 3 tours est désactivé).
+     Spectateur : un joueur éliminé (voiture détruite), ou déjà arrivé, regarde la suite de la course
+     depuis les tribunes du décor (mode HD, avec le décor) : la caméra se place dans la tribune la plus
+     proche de la voiture suivie et la suit des yeux, en zoomant quand elle s'éloigne. Flèches gauche /
+     droite : autre voiture ; Entrée : menu du groupe (classement en direct), où « Regarder la course
+     (tribunes) » ramène dans les tribunes.
      Si tous les autres joueurs sont éliminés (voiture détruite) ou partis, le dernier encore en
      course gagne : « VICTOIRE ! » reste affiché jusqu'à ce qu'il appuie sur Entrée (ou le bouton A
      de la manette), puis le menu de la course s'ouvre.
@@ -280,6 +285,11 @@ with the French language chosen in the F1 options menu; the English meaning is g
      start, because the original renderer can only draw one opponent car.
      Top right: lap, time and live standings. The number of laps is the organiser's (1 to 9; the
      original practice mode's stop after 3 laps is disabled).
+     Spectator: a player who is out (car wrecked), or has already finished, watches the rest of the
+     race from the grandstands of the scenery (HD mode, with scenery): the camera sits in the
+     grandstand closest to the car being followed and follows it, zooming in as it gets further away.
+     Left / right arrows: another car; Enter: the group menu (live standings), where "Watch the race
+     (grandstands)" takes you back to the stands.
      If all the other players are eliminated (car wrecked) or gone, the last one still racing
      wins: "VICTOIRE !" (victory) stays on screen until they press Enter (or the gamepad's A
      button), then the race menu opens.

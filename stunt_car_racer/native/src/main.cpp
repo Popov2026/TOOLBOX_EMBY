@@ -751,6 +751,20 @@ int main(int argc, char **argv) {
     int dmgPrev = -1, impSeq = 0, impStr = 0;   // chocs de notre voiture (hausse des dégâts) signalés aux autres
     bool skip = false;        // circuit TNT choisi mais fichier SCR-TNT absent : ne participe pas
   } gr;
+  // spectateur : après un abandon (voiture détruite) ou l'arrivée, tant que d'autres joueurs roulent, le
+  // joueur regarde la course depuis les tribunes du décor ; flèches : autre voiture, Entrée : menu du groupe
+  bool specMenu = false;            // menu du groupe ouvert par le joueur pendant qu'il est spectateur
+  int specFollow = 0;               // voiture suivie (rang parmi celles encore en course)
+  auto specCars = [&] {             // autres joueurs encore en course (indices dans view->ghosts)
+    std::vector<int> v;
+    for (size_t i = 0; i < view->ghosts.size(); i++)
+      for (auto &gm : net.groupMembers())
+        if (gm.id == view->ghosts[i].id && gm.state == "racing" && view->ghosts[i].pose.valid) v.push_back(int(i));
+    return v;
+  };
+  auto canSpectate = [&] {
+    return gr.active && net.inGroup() && gr.finished && net.groupPhase() == "racing" && !gr.victoryHold && !specCars().empty();
+  };
   int gTrack = 0, gLaps = 3;      // choix de l'organisateur
   const int nTracks = haveTnt ? 16 : 8;   // choix de l'organisateur : 8 d'origine, puis 8 TNT
   auto trackName = [&](int t) {
@@ -782,6 +796,7 @@ int main(int argc, char **argv) {
           it.push_back({accepted ? L("Circuit accepté : en attente de l'autre joueur", "Track accepted: waiting for the other player") : L("Accepter ce circuit", "Accept this track"), accepted ? 17 : 15, {}});
           it.push_back({L("Autre circuit", "Another track"), 16, {}});
         }
+        if (canSpectate()) it.push_back({L("Regarder la course (tribunes)", "Watch the race (grandstands)"), 19, {}});
         it.push_back({L("Écrire un message (F9)", "Write a message (F9)"), 8, {}});
         it.push_back({L("Quitter la course", "Leave the race"), 13, {}});
         return it;
@@ -794,6 +809,7 @@ int main(int argc, char **argv) {
           if (net.groupMembers().size() >= 2)
             it.push_back({L("Lancer la course (", "Start the race (") + std::to_string(net.groupMembers().size()) + L(" joueurs)", " players)"), 12, {}});
         }
+        if (canSpectate()) it.push_back({L("Regarder la course (tribunes)", "Watch the race (grandstands)"), 19, {}});
         it.push_back({L("Écrire un message (F9)", "Write a message (F9)"), 8, {}});
         it.push_back({L("Quitter la course à plusieurs", "Leave the multi-car race"), 13, {}});
         return it;
@@ -864,6 +880,7 @@ int main(int argc, char **argv) {
         statusProbe.start(relayAddr(o.relay), true); statusAt = NetLink::clock();
         break;
       case 18: statusView = false; menuSel = 0; break;
+      case 19: specMenu = false; menuSel = 0; break;   // retour dans les tribunes
     }
   };
   // aide aux tests automatiques (aucun effet sinon) : SCR_AUTOKEYS="trame:Touche,..." simule des appuis
@@ -1027,7 +1044,7 @@ int main(int argc, char **argv) {
       if (cancelUntil > 0 && t > cancelUntil) { cancelUntil = -1; m->setKey(0x01, false); }
       // menu du groupe : entre les courses, et dès que ce joueur a franchi l'arrivée (il attend les autres ;
       // le jeu d'origine peut finir l'entraînement de son côté et laisser un écran noir derrière)
-      gr.menu = net.inGroup() && (!gr.racing || gr.finished) && !gr.waitingGo && !gr.victoryHold;
+      gr.menu = net.inGroup() && (!gr.racing || gr.finished) && !gr.waitingGo && !gr.victoryHold && !(canSpectate() && !specMenu);
       bool open = (m->linkHeld() && cancelUntil < 0 && !net.connected()) || gr.menu;
       if (open && !menuOpen && !gr.menu) {   // le joueur vient de choisir « Computer Link » ou « Online Multiplayer »
         menuSel = 0;
@@ -1117,6 +1134,17 @@ int main(int argc, char **argv) {
           } else if (!typed.empty()) net.joinDirect(typed);
           typing = Typing::None; SDL_StopTextInput(); menuSel = 0;
         }
+      }
+      else if (ev.type == SDL_KEYDOWN && !menuOpen && !optOpen && typing == Typing::None && !specMenu && canSpectate() &&
+               (ev.key.keysym.scancode == SDL_SCANCODE_LEFT || ev.key.keysym.scancode == SDL_SCANCODE_RIGHT ||
+                ev.key.keysym.scancode == SDL_SCANCODE_UP || ev.key.keysym.scancode == SDL_SCANCODE_DOWN ||
+                ev.key.keysym.scancode == SDL_SCANCODE_TAB || ev.key.keysym.scancode == SDL_SCANCODE_RETURN ||
+                ev.key.keysym.scancode == SDL_SCANCODE_KP_ENTER || ev.key.keysym.scancode == SDL_SCANCODE_ESCAPE)) {
+        // spectateur : voiture suivie, ou menu du groupe
+        SDL_Scancode sc = ev.key.keysym.scancode;
+        if (sc == SDL_SCANCODE_LEFT || sc == SDL_SCANCODE_UP) { specFollow--; view->resetSpectator(); }
+        else if (sc == SDL_SCANCODE_RIGHT || sc == SDL_SCANCODE_DOWN || sc == SDL_SCANCODE_TAB) { specFollow++; view->resetSpectator(); }
+        else if (!ev.key.repeat) { specMenu = true; menuSel = 0; menuOpenedAt = NetLink::clock(); }
       }
       else if (ev.type == SDL_KEYDOWN && menuOpen) {   // menu « Computer Link »
         SDL_Scancode sc = ev.key.keysym.scancode;
@@ -1310,6 +1338,7 @@ int main(int argc, char **argv) {
             net.groupCommand("LOADED");
             continue;
           }
+          specMenu = false; specFollow = 0; view->resetSpectator();
           gr.track = t & 15; gr.laps = l; gr.active = true; gr.waitingGo = true; gr.racing = false; gr.finished = false; gr.out = false; gr.wreckFrames = 0;
           gr.lastRel = -1; gr.total = 0; gr.lapOffset = 0; gr.lastTick = 0; gr.goAt = 0;
           if (typing != Typing::None && typing != Typing::Chat) { typing = Typing::None; SDL_StopTextInput(); }
@@ -1645,6 +1674,15 @@ int main(int argc, char **argv) {
                        0xffffffffu, 0xc0000000u, 1, logicalW);
         drawText(place, logicalW / 2, yy + 2 * scale, scale, 0xffffff60u, 0xc0000000u, 1, logicalW);
         return;
+      }
+      if (canSpectate() && !specMenu) {   // spectateur : voiture suivie, touches
+        auto cars = specCars();
+        const int n = int(cars.size());
+        const std::string who = view->ghosts[size_t(cars[size_t(((specFollow % n) + n) % n)])].name;
+        drawText(L("SPECTATEUR - tribunes : ", "SPECTATOR - grandstands: ") + who, logicalW / 2, logicalH / 14, scale,
+                 0xffffff60u, 0xc0000000u, 1, logicalW);
+        drawText(L("< > : autre voiture     Entrée : menu", "< > : other car     Enter: menu"), logicalW / 2, logicalH - logicalH / 10, scale,
+                 0xffffffffu, 0xc0000000u, 1, logicalW);
       }
       if (gr.racing && now - gr.goAt < 15)   // place sur la grille, rappelée pendant la descente de la grue
         drawText(place, logicalW / 2, logicalH / 3 + 20 * scale, scale, 0xffffff60u, 0xc0000000u, 1, logicalW);
@@ -2040,7 +2078,13 @@ int main(int argc, char **argv) {
         }
       }
       view->viewSide = gr.active ? craneView() : 0;   // course à plusieurs : grue du côté de sa place
-      view->render(*m, view->now() + acc / framePeriod, hdPixels.data(), o.hdW, o.hdH);
+      bool spectated = false;
+      if (canSpectate() && !specMenu) {   // spectateur : course vue depuis les tribunes
+        auto cars = specCars();
+        const int n = int(cars.size());
+        spectated = view->renderSpectator(*m, -1, cars[size_t(((specFollow % n) + n) % n)], hdPixels.data(), o.hdW, o.hdH);
+      }
+      if (!spectated) view->render(*m, view->now() + acc / framePeriod, hdPixels.data(), o.hdW, o.hdH);
       SDL_UpdateTexture(texHd, nullptr, hdPixels.data(), o.hdW * 4);
       SDL_RenderClear(ren);
       SDL_RenderCopy(ren, texHd, nullptr, nullptr);

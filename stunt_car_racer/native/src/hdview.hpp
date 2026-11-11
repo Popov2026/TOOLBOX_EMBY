@@ -84,6 +84,11 @@ class HdView {
   void renderScene(const Pose &p, int track, uint32_t *out, int W, int H, double focal, double cx, double cy, const Machine &m,
                    const OppPose *opp = nullptr);
   OppPose opponentAt(double t) const;
+  // spectateur (course à plusieurs, après un abandon ou l'arrivée) : vue depuis la tribune du décor la
+  // plus proche de la voiture suivie (ghosts[follow]), tournée vers elle ; sans tribune, caméra de
+  // bord de piste ; track < 0 : circuit de la dernière course. Faux s'il n'y a aucune voiture à suivre.
+  bool renderSpectator(const Machine &m, int track, int follow, uint32_t *out, int W, int H);
+  void resetSpectator() { specStand_ = -1; specT_ = 0; }
 
   // course à plusieurs : voitures des autres joueurs (fantômes : dessinées, sans collision),
   // remplies par l'appelant avant render() ; render() calcule la place de leur nom à l'écran
@@ -121,6 +126,16 @@ class HdView {
   std::map<uint32_t, GhostWheels> ghostWheels_;
   bool oppHave_ = false;
   void addCar(const OppPose &o, double hs, const Machine &m, bool closed = false);
+  // monde 3D (ciel, sol, décor, circuit, voitures, particules) vu par la caméra c
+  void drawWorld(const Camera &c, int track, uint32_t *out, int W, int H, const Machine &m, const OppPose *opp);
+  // palette : celle du jeu pendant la course ; en spectateur (le jeu est revenu à ses menus), la
+  // dernière palette de course
+  uint32_t racePal_[16] = {};
+  bool racePalOk_ = false, useRacePal_ = false;
+  uint32_t palOf(const Machine &m, int i) const { return useRacePal_ && racePalOk_ ? racePal_[i & 15] : m.paletteARGB(i); }
+  int specStand_ = -1;                       // tribune du spectateur (indice dans le décor du circuit)
+  double specYaw_ = 0, specPitch_ = 0, specZoom_ = 1, specT_ = 0;   // visée lissée, temps passé à cette tribune
+  uint32_t specFrame_ = 0;
   std::map<int, std::vector<SceneObj>> scenery_;   // décor de chaque circuit (calculé à la première vue)
   void drawScenery(const Camera &c, int track, double hs);
   void drawCockpitHd(const Machine &m, uint32_t *out, int W, int H, double s, double ox);
