@@ -1205,13 +1205,19 @@ bool HdView::renderSpectator(const Machine &m, int track, int follow, uint32_t *
   }
   Camera c;
   if (specStand_ >= 0 && specStand_ < int(sc.size()) && params.scenery) {
-    // place au 6e rang des gradins, en face de la voiture le long de la tribune (regard au-dessus du public)
+    // place en haut des gradins, en face de la voiture le long de la tribune (regard au-dessus du public) ;
+    // les routes sont souvent surélevées : quand la voiture roule plus haut que les gradins, la caméra
+    // monte sur le devant du toit de la tribune pour voir la piste par-dessus ses murs
     const SceneObj &o = sc[size_t(specStand_)];
     const double ax = o.fz, az = -o.fx, hl = o.len / 2;
     const double a = std::clamp((target.x - o.x) * ax + (target.z - o.z) * az, -hl + 80, hl - 80);
-    const int row = 5;
-    const double depth = row * 95 + 70, y = gy + 40 + row * 55 + 75;
-    c.pos = {o.x + ax * a - o.fx * depth, y, o.z + az * a - o.fz * depth};
+    const double seatY = gy + 40 + 6 * 55 + 70;                         // dernier rang, assis
+    const double wantH = std::clamp(target.y + 380, seatY, gy + 2600);   // au-dessus de la route de la voiture
+    if (jump || specH_ <= 0) specH_ = wantH;
+    else specH_ += (wantH - specH_) * (1 - std::pow(0.96, dtF));
+    const double up = std::clamp((specH_ - seatY) / 200, 0.0, 1.0);    // 0 : dans les gradins, 1 : sur le toit
+    const double depth = 6 * 95 + 40 + (-70 - (6 * 95 + 40)) * up;
+    c.pos = {o.x + ax * a - o.fx * depth, specH_, o.z + az * a - o.fz * depth};
   } else {
     // pas de tribune (décor coupé) : caméra de bord de piste, en hauteur, à côté de la voiture
     c.pos = {target.x + g.pose.right.x * 2600 - g.pose.fwd.x * 1200, target.y + 900, target.z + g.pose.right.z * 2600 - g.pose.fwd.z * 1200};
@@ -1220,7 +1226,7 @@ bool HdView::renderSpectator(const Machine &m, int track, int follow, uint32_t *
   const double dx = target.x - c.pos.x, dy = target.y - c.pos.y, dz = target.z - c.pos.z, dh = std::hypot(dx, dz);
   const double yaw = std::atan2(dx, dz), pitch = std::atan2(dy, std::max(1.0, dh));
   // zoom : la voiture garde une taille lisible quand elle s'éloigne (comme une caméra de télévision)
-  const double zoom = std::clamp(dh / 5000.0, 1.0, 3.5);
+  const double zoom = std::clamp(dh / 1100.0, 1.0, 6.0);
   if (jump || specZoom_ <= 0) { specYaw_ = yaw; specPitch_ = pitch; specZoom_ = zoom; }
   else {   // visée lissée (la caméra suit la voiture sans à-coups)
     const double k = 1 - std::pow(0.82, dtF);

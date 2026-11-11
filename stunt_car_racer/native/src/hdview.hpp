@@ -134,7 +134,7 @@ class HdView {
   bool racePalOk_ = false, useRacePal_ = false;
   uint32_t palOf(const Machine &m, int i) const { return useRacePal_ && racePalOk_ ? racePal_[i & 15] : m.paletteARGB(i); }
   int specStand_ = -1;                       // tribune du spectateur (indice dans le décor du circuit)
-  double specYaw_ = 0, specPitch_ = 0, specZoom_ = 1, specT_ = 0;   // visée lissée, temps passé à cette tribune
+  double specYaw_ = 0, specPitch_ = 0, specZoom_ = 1, specT_ = 0, specH_ = 0;   // visée et hauteur lissées, temps passé à cette tribune
   uint32_t specFrame_ = 0;
   std::map<int, std::vector<SceneObj>> scenery_;   // décor de chaque circuit (calculé à la première vue)
   void drawScenery(const Camera &c, int track, double hs);
