@@ -199,6 +199,43 @@ vec3 shade(int kind, vec3 color, vec3 p, float foot) {
     uint glyph = hash2(li, int(vR.x), 5u) & 0x7fffu;
     bool on = ((glyph >> uint(py * 3 + px)) & 1u) != 0u || px == 0;
     return on ? rgb(0xfafafau) : color;
+  } else if (kind == 8) {   // compartiment moteur vu du dessus (voir Renderer3D::shade)
+    float x = dot(d, vU) / vR.x, z = dot(d, vV) / vR.x, px = foot / vR.x, ax = abs(x);
+    if (px > 5.0) return rgb(0x4a3434u);
+    vec3 c = rgb(0x26262au);
+    float kk = 1.0;
+    if (ax > 31.0) c = rgb(0x3c3c42u);
+    for (int i = 0; i < 4; i++) {
+      float zc = 128.0 - 22.0 * float(i), rr = length(vec2(ax - 24.0, z - zc));
+      if (rr < 7.0) return rr < 3.6 ? rgb(0x0a0a0au) : clamp(rgb(0xb8b8bcu) * (1.15 - 0.25 * rr / 7.0), 0.0, 1.0);
+      if (ax > 24.0 && ax < 31.0 && abs(z - zc) < 3.0) c = rgb(0x8c8c90u);
+    }
+    if (z > 50.0 && z < 142.0) {
+      if (ax > 8.0 && ax < 21.0) {
+        c = rgb(0xb81e1eu);
+        float rib = abs(mod(z - 50.0, 9.0) - 4.5);
+        if (rib > 3.6 && px < 2.0) kk = 0.7;
+        if (ax < 9.2 || ax > 19.8) kk = 0.6;
+      } else if (ax <= 8.0) {
+        c = rgb(0x9c9ca4u);
+        if (abs(mod(x + 40.0, 4.0) - 2.0) < 0.5 && px < 1.5) kk = 0.82;
+        float rr = length(vec2(x, z - 98.0));
+        if (rr < 11.0) return rr < 8.5 ? clamp(rgb(0x141416u) * (1.0 + 0.4 * (1.0 - rr / 8.5)), 0.0, 1.0) : rgb(0xd0d0d4u);
+      }
+    }
+    return clamp(c * kk * (0.9 + 0.2 * clamp((z - 40.0) / 110.0, 0.0, 1.0)), 0.0, 1.0);
+  } else if (kind == 9) {   // pare-brise teinté (voir Renderer3D::shade)
+    float s = dot(d, vU), w = dot(d, vV);
+    float x = s / vR.x, z = w / vR.x, px = foot / vR.x;
+    float e = min(min(s - s0, s1 - s), min(w - w0, w1 - w)) / vR.x;
+    if (e < max(3.0, px)) return clamp(color * 0.8, 0.0, 1.0);
+    float zz = (w - w0) / max(1e-6, w1 - w0);
+    vec3 c = rgb(0x22323eu) * (0.85 + 0.35 * zz);
+    float hz = w0 / vR.x + 16.0, rr = length(vec2(x, (z - hz) * 1.3));
+    if (rr < 11.0 && px < 4.0) c = abs(x) < 2.5 ? rgb(0x7a2020u) : (rr < 3.0 ? rgb(0x1a1a1au) : rgb(0x8a8a90u));
+    float refl = exp(-pow((x * 0.55 + (z - hz) * 0.9 - 6.0) / 5.0, 2.0)) + 0.5 * exp(-pow((x * 0.55 + (z - hz) * 0.9 - 20.0) / 3.0, 2.0));
+    float kb = clamp(1.5 - px / 3.0, 0.3, 1.0);
+    return clamp(c * (1.0 + 0.9 * refl * kb), 0.0, 1.0);
   } else if (kind == 5) {   // flanc du pneu, jante, moyeu
     float s = dot(d, vU), w = dot(d, vV);
     float r = sqrt(s * s + w * w) / vR.x, a = atan(w, s);

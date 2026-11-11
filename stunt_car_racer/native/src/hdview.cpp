@@ -550,7 +550,21 @@ void HdView::addCar(const OppPose &o, double hs, const Machine &m, bool closed) 
     Vec3 fb0 = WB(x0, yb, zf), fb1 = WB(x1, yb, zf), ft0 = WB(-xt, yf, zf), ft1 = WB(xt, yf, zf);
     Vec3 rear[4] = {rb0, rb1, rt1, rt0}, front[4] = {fb0, ft0, ft1, fb1}, top[4] = {rt0, rt1, ft1, ft0};
     Vec3 left[4] = {rb0, rt0, ft0, fb0}, right[4] = {rb1, fb1, ft1, rt1}, bottom[4] = {rb0, fb0, fb1, rb1};
-    paint(rear, 4, red, r, u, x0, x1, yb, yr); r3d_.poly(front, 4, red); paint(top, 4, pink, r, f, x0, x1, zrt, zf);
+    paint(rear, 4, red, r, u, x0, x1, yb, yr); r3d_.poly(front, 4, red);
+    if (!hd) paint(top, 4, pink, r, f, x0, x1, zrt, zf);
+    else {   // détails élevés : toit rose à l'arrière, pare-brise, compartiment moteur à l'avant (sous les flammes)
+      auto slope = [&](double x, double z) { return WB(x, yr + (yf - yr) * (z - zrt) / (zf - zrt), z); };
+      const double zg0 = -50, zg1 = 46;   // pare-brise ; moteur de zg1 à l'avant (échappements z 62 à 128)
+      Vec3 roof[4] = {rt0, rt1, slope(xt, zg0), slope(-xt, zg0)};
+      Vec3 glass[4] = {slope(-xt, zg0), slope(xt, zg0), slope(xt, zg1), slope(-xt, zg1)};
+      Vec3 eng[4] = {slope(-xt, zg1), slope(xt, zg1), ft1, ft0};
+      paint(roof, 4, pink, r, f, x0, x1, zrt, zg0);
+      TexInfo tg; tg.kind = TEX_GLASS; tg.o = WB(0, 0, 0); tg.u = r; tg.v = f; tg.r = K;
+      tg.s0 = -xt * K; tg.s1 = xt * K; tg.w0 = zg0 * K; tg.w1 = zg1 * K;
+      r3d_.polyTex(glass, 4, pink, tg);
+      TexInfo te = tg; te.kind = TEX_ENGINE; te.w0 = zg1 * K; te.w1 = zf * K;
+      r3d_.polyTex(eng, 4, 0xff26262au, te);
+    }
     // comme l'original : seul le flanc droit (rose) est dessiné, jamais le gauche
     // (voitures des autres joueurs : carrosserie fermée, on ne voit pas les flammes à travers)
     paint(right, 4, pink, f, u, zr, zf, yb, yr); r3d_.poly(bottom, 4, black);

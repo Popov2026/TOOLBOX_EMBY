@@ -289,6 +289,49 @@ uint32_t Renderer3D::shade(const TexPlane &tp, uint32_t color, const Vec3 &p, do
       k += oct(s, w, 3, 0.025, foot, 31);
       break;
     }
+    case TEX_ENGINE: {   // compartiment moteur vu du dessus : V8, couvre-culbuteurs, admission, échappements
+      // coordonnées en unités de la voiture (t.r : échelle voiture -> monde) : x en travers, z vers l'avant
+      Vec3 d{p.x - t.o.x, p.y - t.o.y, p.z - t.o.z};
+      const double x = (d.x * t.u.x + d.y * t.u.y + d.z * t.u.z) / t.r, z = (d.x * t.v.x + d.y * t.v.y + d.z * t.v.z) / t.r;
+      const double px = foot / t.r, ax = std::fabs(x);
+      if (px > 5) return 0xff4a3434u;   // de loin : teinte moyenne
+      uint32_t c = 0xff26262au;                                   // fond du compartiment
+      double k = 1;
+      if (ax > 31) c = 0xff3c3c42u;                               // longerons
+      for (int i = 0; i < 4; i++) {                               // collecteurs d'échappement (sorties des flammes)
+        const double zc = 128 - 22 * i, rr = std::hypot(ax - 24, z - zc);
+        if (rr < 7) return rr < 3.6 ? 0xff0a0a0au : mulRGB(0xffb8b8bcu, 1.15 - 0.25 * rr / 7);
+        if (ax > 24 && ax < 31 && std::fabs(z - zc) < 3) c = 0xff8c8c90u;   // tube vers le bloc
+      }
+      if (z > 50 && z < 142) {
+        if (ax > 8 && ax < 21) {                                  // couvre-culbuteurs rouges, nervurés
+          c = 0xffb81e1eu;
+          const double rib = std::fabs(std::fmod(z - 50, 9.0) - 4.5);
+          if (rib > 3.6 && px < 2) k = 0.7;
+          if (ax < 9.2 || ax > 19.8) k = 0.6;
+        } else if (ax <= 8) {                                     // admission en aluminium, rainures
+          c = 0xff9c9ca4u;
+          if (std::fabs(std::fmod(x + 40, 4.0) - 2) < 0.5 && px < 1.5) k = 0.82;
+          const double rr = std::hypot(x, z - 98);                // prise d'air : écope noire cerclée de chrome
+          if (rr < 11) return rr < 8.5 ? mulRGB(0xff141416u, 1 + 0.4 * (1 - rr / 8.5)) : 0xffd0d0d4u;
+        }
+      }
+      return mulRGB(c, k * (0.9 + 0.2 * std::clamp((z - 40) / 110, 0.0, 1.0)));
+    }
+    case TEX_GLASS: {   // pare-brise teinté : cadre, reflet en biais, casque du pilote derrière la vitre
+      Vec3 d{p.x - t.o.x, p.y - t.o.y, p.z - t.o.z};
+      const double s = d.x * t.u.x + d.y * t.u.y + d.z * t.u.z, w = d.x * t.v.x + d.y * t.v.y + d.z * t.v.z;
+      const double x = s / t.r, z = w / t.r, px = foot / t.r;
+      const double e = std::min(std::min(s - t.s0, t.s1 - s), std::min(w - t.w0, t.w1 - w)) / t.r;
+      if (e < std::max(3.0, px)) return mulRGB(color, 0.8);       // cadre de la couleur de la carrosserie
+      const double zz = (w - t.w0) / std::max(1e-6, t.w1 - t.w0);   // 0 : arrière, 1 : avant
+      uint32_t c = mulRGB(0xff22323eu, 0.85 + 0.35 * zz);
+      const double hz = t.w0 / t.r + 16, rr = std::hypot(x, (z - hz) * 1.3);   // casque, assombri par la vitre
+      if (rr < 11 && px < 4) c = std::fabs(x) < 2.5 ? 0xff7a2020u : (rr < 3 ? 0xff1a1a1au : 0xff8a8a90u);
+      const double refl = std::exp(-std::pow((x * 0.55 + (z - hz) * 0.9 - 6) / 5.0, 2)) + 0.5 * std::exp(-std::pow((x * 0.55 + (z - hz) * 0.9 - 20) / 3.0, 2));
+      const double kb = std::clamp(1.5 - px / 3, 0.3, 1.0);
+      return mulRGB(c, 1 + 0.9 * refl * kb);
+    }
     case TEX_TIRE: {   // bande de roulement : sculptures transversales
       Vec3 d{p.x - t.o.x, p.y - t.o.y, p.z - t.o.z};
       double a = std::atan2(d.x * t.v.x + d.y * t.v.y + d.z * t.v.z, d.x * t.u.x + d.y * t.u.y + d.z * t.u.z);

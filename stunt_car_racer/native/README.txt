@@ -19,7 +19,7 @@ pas trois touches à la fois : prenez Maj ou Alt pour le boost.
 Manette XInput reconnue. F8 mode HD (1920x1080, 16/9, image fluide à la
 fréquence de l'écran), F2 recharger les images HD, F3 couper le son,
 F4, F11 ou Alt+Entrée plein écran, F5 détails élevés (sols, route et voiture
-adverse texturés, roues rondes ; active le mode HD), F6 recommencer,
+adverse texturés : moteur V8 et pare-brise sur le dessus, roues rondes ; active le mode HD), F6 recommencer,
 Page préc./suiv. circuit précédent/suivant (mode entraînement), F7 circuits d'origine / TNT,
 F1 menu d'options, F12 quitter.
 
@@ -124,8 +124,8 @@ If steering seems stuck while boosting with Space, your keyboard cannot read thr
 once: use Shift or Alt for the boost.
 XInput gamepads are supported. F8 HD mode (1920x1080, 16:9, smooth picture at the screen's
 refresh rate), F2 reload the HD images, F3 mute,
-F4, F11 or Alt+Enter full screen, F5 high detail (textured ground, road and opponent car,
-round wheels; turns HD mode on), F6 restart,
+F4, F11 or Alt+Enter full screen, F5 high detail (textured ground, road and opponent car:
+V8 engine and windscreen on top, round wheels; turns HD mode on), F6 restart,
 Page Up/Down previous/next track (practice mode), F7 original / TNT tracks,
 F1 options menu, F12 quit.
 
