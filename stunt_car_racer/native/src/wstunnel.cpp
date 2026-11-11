@@ -16,6 +16,9 @@
 #include <vector>
 
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX   // windows.h : pas de macros min / max
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>

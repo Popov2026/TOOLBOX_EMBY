@@ -15,6 +15,7 @@ env:
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: SDL2 (VC)
@@ -35,7 +36,7 @@ jobs:
           New-Item -ItemType Directory dist | Out-Null
           Copy-Item build/Release/scr.exe, build/Release/scr_headless.exe dist/
           Copy-Item "$env:RUNNER_TEMP\SDL2-$env:SDL2_VERSION\lib\x64\SDL2.dll" dist/
-          Copy-Item stunt_car_racer/native/scr.ini.example dist/scr.ini
+          Copy-Item stunt_car_racer/native/scr.ini.example dist/scr.ini.exemple
           Copy-Item stunt_car_racer/native/README.txt dist/
           New-Item -ItemType Directory dist/DISK, dist/hd | Out-Null
           Copy-Item stunt_car_racer/native/README_DISK.txt dist/DISK/README.txt
@@ -51,9 +52,17 @@ jobs:
 
   linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - name: SDL2 (paquets Ubuntu, nouvel essai si les miroirs ne répondent pas)
+        timeout-minutes: 10
+        run: |
+          for i in 1 2 3; do
+            sudo apt-get update && sudo apt-get install -y libsdl2-dev && exit 0
+            echo "essai $i raté, nouvel essai dans 30 s"; sleep 30
+          done
+          exit 1
       - run: cmake -S stunt_car_racer/native -B build && cmake --build build --parallel
       - uses: actions/upload-artifact@v4
         with:
