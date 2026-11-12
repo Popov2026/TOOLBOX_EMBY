@@ -8,8 +8,12 @@
 namespace scr {
 
 Renderer3D::Renderer3D() {
+#ifdef __EMSCRIPTEN__
+  threads_ = 1;   // navigateur : pas de fils d'exécution (GitHub Pages ne permet pas la mémoire partagée)
+#else
   unsigned n = std::thread::hardware_concurrency();
   threads_ = int(std::clamp(n ? n : 1u, 1u, 16u));
+#endif
 }
 
 void Renderer3D::begin(int W, int H, const Camera &cam, uint32_t background) {

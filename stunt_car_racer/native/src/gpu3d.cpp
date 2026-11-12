@@ -413,6 +413,10 @@ Gpu3D::~Gpu3D() {
 }
 
 bool Gpu3D::init(std::string &err) {
+#ifdef __EMSCRIPTEN__
+  err = L("pas dans le navigateur", "not in the browser");   // version web : rendu sur le processeur
+  return false;
+#endif
   SDL_Window *prevWin = SDL_GL_GetCurrentWindow();
   SDL_GLContext prevCtx = SDL_GL_GetCurrentContext();
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stunt Car Racer – play in the browser</title>
+<meta name="description" content="Play Stunt Car Racer (Atari ST, 1989) in the browser with your own disk image: HD mode, online multiplayer.">
+<style>
+  /* page de lancement de la version WebAssembly : l'image disque du joueur reste dans son navigateur */
+  :root { --bg: #0f1317; --panel: #182028; --text: #e8ecef; --muted: #9aa6b2; --line: #2a343e; --accent: #e0483c; --link: #8cc0ff; }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) { --bg: #f5f6f8; --panel: #ffffff; --text: #1d232a; --muted: #5b6672; --line: #dde2e7; --accent: #c8281e; --link: #1f5fbf; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a { color: var(--link); }
+  main { max-width: 980px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 26px; margin: 8px 0 4px; }
+  .muted { color: var(--muted); }
+  #setup { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin: 14px 0; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0; }
+  button, label.btn { font: inherit; font-weight: 600; padding: 10px 18px; border-radius: 8px; border: 1px solid var(--line);
+                      background: var(--panel); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  input[type=file] { display: none; }
+  #game { display: none; }
+  #wrap { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
+  canvas#canvas { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; image-rendering: pixelated; outline: none; }
+  #status { min-height: 1.5em; }
+  .keys { font-size: 14px; }
+  kbd { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font: 13px ui-monospace, Consolas, monospace; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Stunt Car Racer</h1>
+  <div class="muted">Atari ST, Geoff Crammond / Micro Style, 1989 — native version running in your browser (WebAssembly).
+    <a href="../">Project page</a></div>
+
+  <section id="setup">
+    <p><strong>Your own disk image is needed.</strong> No game data is supplied: choose your Stunt Car Racer
+      Atari ST disk image (<code>.st</code> file). It stays in this browser (it is not uploaded anywhere) and is kept for your next visits.</p>
+    <div class="row">
+      <button id="play" class="primary" disabled>Play</button>
+      <label class="btn" for="file" id="pick">Choose disk image (.st)</label>
+      <input id="file" type="file" accept=".st,.ST">
+      <span id="disk" class="muted"></span>
+    </div>
+    <div id="status" class="muted">Loading the game…</div>
+    <p class="keys muted">Keys: <kbd>arrows</kbd> drive, <kbd>Space</kbd>/<kbd>Shift</kbd> boost, <kbd>F1</kbd> options (language, sound, HD…),
+      <kbd>F8</kbd> HD mode, <kbd>F9</kbd> chat, <kbd>K</kbd> horn, <kbd>F11</kbd> full screen. Gamepads work too.
+      Online multiplayer: menu “4. Online Multiplayer”.</p>
+  </section>
+
+  <section id="game">
+    <div id="wrap"><canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas></div>
+    <div class="row">
+      <button id="full">Full screen</button>
+      <span class="muted">Click the picture if the keys do not respond.</span>
+    </div>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const status = (t) => { $('status').textContent = t; };
+  const DISK = '/save/game.st', INI = '/save/scr.ini';
+  let ready = false, haveDisk = false, running = false;
+
+  // sauvegarde de /save (image disque, scr.ini) dans IndexedDB
+  function save() { if (ready) FS.syncfs(false, (e) => { if (e) console.warn('syncfs', e); }); }
+  function refresh() {
+    $('play').disabled = !(ready && haveDisk);
+    $('disk').textContent = haveDisk ? 'Disk image ready.' : '';
+    if (ready) status(haveDisk ? 'Press Play.' : 'Choose your disk image to start.');
+  }
+
+  var Module = {
+    canvas: $('canvas'),
+    websocket: { subprotocol: 'null' },      // pas de sous-protocole : le serveur relais n'en choisit pas
+    print: (t) => console.log(t),
+    printErr: (t) => console.warn(t),
+    setStatus: (t) => { if (t && !ready) status(t); },
+    onRuntimeInitialized: () => {
+      FS.mkdir('/save');
+      FS.mount(IDBFS, {}, '/save');
+      FS.syncfs(true, (err) => {
+        if (err) console.warn('syncfs', err);
+        ready = true;
+        haveDisk = FS.analyzePath(DISK).exists;
+        refresh();
+      });
+    },
+    onExit: () => { running = false; save(); status('The game has ended. Reload the page to play again.'); $('setup').style.display = ''; $('game').style.display = 'none'; }
+  };
+
+  $('file').addEventListener('change', async (ev) => {
+    const f = ev.target.files[0];
+    if (!f || !ready) return;
+    const data = new Uint8Array(await f.arrayBuffer());
+    if (data.length < 300000) { status('This file does not look like an Atari ST disk image (.st).'); return; }
+    FS.writeFile(DISK, data);
+    haveDisk = true; save(); refresh();
+  });
+
+  $('play').addEventListener('click', () => {
+    if (!ready || !haveDisk || running) return;
+    running = true;
+    $('setup').style.display = 'none';
+    $('game').style.display = 'block';
+    $('canvas').focus();
+    setInterval(save, 5000);                  // options changées dans le jeu (scr.ini)
+    window.addEventListener('beforeunload', save);
+    try { Module.callMain([DISK, '--ini', INI]); } catch (e) { if (e !== 'unwind' && !(e && e.name === 'ExitStatus')) console.error(e); }
+  });
+
+  $('full').addEventListener('click', () => { const w = $('wrap'); (w.requestFullscreen || w.webkitRequestFullscreen).call(w); $('canvas').focus(); });
+  $('canvas').addEventListener('click', () => $('canvas').focus());
+
+  // touches du jeu que le navigateur garderait pour lui (F5 recharge la page, F1 aide, F11...)
+  window.addEventListener('keydown', (e) => {
+    if (!running) return;
+    if (/^F\d+$/.test(e.key) || ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Backspace'].includes(e.key)) e.preventDefault();
+  }, true);
+</script>
+<script async src="scr.js"></script>
+</body>
+</html>

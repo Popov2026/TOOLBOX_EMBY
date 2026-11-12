@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v84"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v85"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -38,6 +38,9 @@
 #include "gpu3d.hpp"
 #include "machine.hpp"
 #include "lang.hpp"
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #include "net.hpp"
 #include "track.hpp"
 #include "tnt.hpp"
@@ -55,7 +58,11 @@ struct Options {
   int scale = 3;
   bool fullscreen = false, smooth = false, hd = false, sound = true;
   double volume = 0.8;
+#ifdef __EMSCRIPTEN__
+  int hdW = 1280, hdH = 720;   // navigateur : rendu sur le processeur, un seul fil d'exécution
+#else
   int hdW = 1920, hdH = 1080;
+#endif
   std::string hdDir;
   bool highDetail = false; // détails élevés au démarrage (touche F5)
   bool shadows = true, particles = true, antialias = true, sky = true, scenery = true;   // HD : ombres, étincelles et fumée, lissage, ciel, décor
@@ -67,7 +74,11 @@ struct Options {
   std::string keyNames[6] = {"Up", "Down", "Left", "Right", "Space", "K"};   // touches : accélérer, freiner, gauche, droite, boost, klaxon
   bool engineV8 = false;
   bool french = false;   // langue des textes ajoutés : français (sinon anglais)
-  bool openGl = true;   // rendu 3D HD sur la carte graphique (OpenGL) ; sinon sur le processeur   // son du moteur : V8 réaliste à la place du son d'origine
+#ifdef __EMSCRIPTEN__
+  bool openGl = false;   // navigateur : pas d'OpenGL de bureau
+#else
+  bool openGl = true;
+#endif   // rendu 3D HD sur la carte graphique (OpenGL) ; sinon sur le processeur   // son du moteur : V8 réaliste à la place du son d'origine
   // multijoueur (câble « Computer Link » par le réseau)
   std::string relay;       // serveur relais : adresse[:port]
   std::string tntPath;     // circuits TNT : fichier SCR-TNT ou archive .lha (sinon cherché à côté du jeu)
@@ -384,6 +395,15 @@ std::string cleanPseudo(const std::string &s) {
 
 }  // namespace
 
+// courte pause de la boucle du jeu (navigateur : la main est rendue à la page)
+static void scrDelay(uint32_t ms) {
+#ifdef __EMSCRIPTEN__
+  emscripten_sleep(ms);
+#else
+  SDL_Delay(ms);
+#endif
+}
+
 int main(int argc, char **argv) {
   Options o;
   // scr.ini : à côté de scr.exe (même si le jeu est lancé depuis un autre dossier), sinon dossier courant
@@ -517,6 +537,11 @@ int main(int argc, char **argv) {
   };
   try { newView(); } catch (std::exception &e) { fail(std::string(L("Erreur : ", "Error: ")) + e.what()); return 1; }
 
+#ifdef __EMSCRIPTEN__
+  // navigateur : SDL ne rend pas la main lui-même (affichage, SDL_Delay) : il le ferait par des appels
+  // indirects qu'Asyncify ne sait pas reprendre ; le jeu rend la main dans sa boucle (scrDelay)
+  SDL_SetHint(SDL_HINT_EMSCRIPTEN_ASYNCIFY, "0");
+#endif
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_AUDIO) != 0) {
     fail(std::string("SDL : ") + SDL_GetError());
     return 1;
@@ -2116,7 +2141,7 @@ int main(int argc, char **argv) {
     if (hd) {
       // une image par rafraîchissement de l'écran (la synchro verticale cadence la boucle ; sinon limiteur)
       uint64_t t = SDL_GetPerformanceCounter();
-      if (lastPresent && double(t - lastPresent) / double(freq) < 0.9 / refresh) { SDL_Delay(1); continue; }
+      if (lastPresent && double(t - lastPresent) / double(freq) < 0.9 / refresh) { scrDelay(1); continue; }
       lastPresent = t;
       auto fillGhosts = [&](HdView &hv) {   // autres joueurs : position interpolée 0,3 s en arrière
         hv.ghosts.clear();
@@ -2188,6 +2213,9 @@ int main(int argc, char **argv) {
           autoShots.erase(autoShots.begin() + long(k));
         } else k++;
       SDL_RenderPresent(ren);
+#ifdef __EMSCRIPTEN__
+      emscripten_sleep(0);   // navigateur : la page reste réactive (affichage, sons, touches)
+#endif
       // compteur d'images par seconde dans le titre
       fpsN++;
       double el = double(SDL_GetPerformanceCounter() - fpsT0) / double(freq);
@@ -2204,7 +2232,7 @@ int main(int argc, char **argv) {
       // sans synchro verticale (multijoueur) : une image par rafraîchissement de l'écran au plus
       static uint64_t lastLow = 0;
       uint64_t tl = SDL_GetPerformanceCounter();
-      if (parts && lastLow && double(tl - lastLow) / double(freq) < 0.9 / refresh) { SDL_Delay(1); continue; }
+      if (parts && lastLow && double(tl - lastLow) / double(freq) < 0.9 / refresh) { scrDelay(1); continue; }
       lastLow = tl;
       m->screenARGB(pixels);
       SDL_UpdateTexture(tex, nullptr, pixels, 320 * 4);
@@ -2228,7 +2256,10 @@ int main(int argc, char **argv) {
           autoShots.erase(autoShots.begin() + long(k));
         } else k++;
       SDL_RenderPresent(ren);
-      if (!n) SDL_Delay(1);
+#ifdef __EMSCRIPTEN__
+      emscripten_sleep(0);   // navigateur : la page reste réactive (affichage, sons, touches)
+#endif
+      if (!n) scrDelay(1);
     }
   }
   if (pad) SDL_GameControllerClose(pad);

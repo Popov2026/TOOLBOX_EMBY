@@ -2,6 +2,9 @@
 #include "net.hpp"
 #include "lang.hpp"
 #include "wstunnel.hpp"
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 #include <cctype>
 #include <cmath>
@@ -49,6 +52,30 @@ static bool nonBlock(intptr_t s) { int f = fcntl(int(s), F_GETFL, 0); return fcn
 #endif
 
 namespace scr {
+
+#ifdef __EMSCRIPTEN__
+// navigateur : Emscripten fait de chaque connexion TCP une WebSocket vers hôte:port ; wss:// pour une
+// adresse wss://hôte[:port] (port 443 par défaut), ws:// sinon ; aucun sous-protocole demandé (le
+// serveur relais n'en choisit pas)
+static void webScheme(bool secure) {
+  EM_ASM({
+    Module['websocket'] = Module['websocket'] || {};
+    Module['websocket']['url'] = $0 ? 'wss://' : 'ws://';
+    Module['websocket']['subprotocol'] = 'null';
+  }, secure ? 1 : 0);
+}
+static bool webHostPort(const std::string &a, std::string &host, int &port, bool &secure) {
+  std::string s = a;
+  secure = s.compare(0, 6, "wss://") == 0;
+  if (secure) s = s.substr(6); else if (s.compare(0, 5, "ws://") == 0) s = s.substr(5);
+  s = s.substr(0, s.find('/'));
+  port = secure ? 443 : isWsUrl(a) ? 80 : NET_PORT;
+  size_t c = s.rfind(':');
+  if (c != std::string::npos) { port = std::atoi(s.c_str() + c + 1); s.resize(c); }
+  host = s;
+  return !host.empty() && port > 0 && port < 65536;
+}
+#endif
 
 uint32_t fnv1a(const void *data, size_t n, uint32_t h) {
   const uint8_t *p = static_cast<const uint8_t *>(data);
@@ -304,6 +331,15 @@ bool NetLink::joinRelay(const std::string &server, const std::string &room, cons
   for (auto &ch : room_) ch = char(std::toupper(static_cast<unsigned char>(ch)));
   std::string host; int port = NET_PORT;
   if (server.empty()) { fail(L("aucun serveur relais configuré (scr.ini : relais = adresse:port)", "no relay server set (scr.ini: relais = address:port)")); return false; }
+#ifdef __EMSCRIPTEN__
+  {   // navigateur : la connexion est une WebSocket (wss:// pour une adresse wss://)
+    bool secure = false;
+    if (!webHostPort(server, host, port, secure)) { fail(L("adresse du relais invalide : ", "invalid relay address: ") + (shown_.empty() ? server : shown_)); return false; }
+    if (shown_.empty() && isWsUrl(server)) shown_ = server;
+    webScheme(secure);
+    return connectTo(host, port);
+  }
+#endif
   if (isWsUrl(server)) {   // par un reverse proxy web : tunnel local vers la WebSocket
     std::string err, local = openWsTunnel(server, err);
     if (local.empty()) { fail(err); return false; }
@@ -670,6 +706,25 @@ void RelayProbe::start(const std::string &server, bool status) {
   sh_ = sh;
   if (server.empty()) { sh->state = State::Failed; sh->error = L("aucun serveur dans scr.ini", "no server in scr.ini"); return; }
   sh->state = State::Probing;
+#ifdef __EMSCRIPTEN__
+  {   // navigateur : WebSocket ouverte maintenant, réponse lue par step()
+    std::string host; int port = NET_PORT; bool secure = false;
+    if (!webHostPort(server, host, port, secure)) { sh->state = State::Failed; sh->error = L("adresse du serveur introuvable", "server address not found"); return; }
+    webScheme(secure);
+    addrinfo hints{}, *res = nullptr;
+    hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &res) != 0 || !res) {
+      sh->state = State::Failed; sh->error = L("adresse du serveur introuvable", "server address not found"); return;
+    }
+    sh->fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (sh->fd < 0) { freeaddrinfo(res); sh->state = State::Failed; sh->error = L("réseau indisponible", "network unavailable"); return; }
+    nonBlock(sh->fd);
+    ::connect(sh->fd, res->ai_addr, socklen_t(res->ai_addrlen));
+    freeaddrinfo(res);
+    sh->t0 = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    sh->phase = 1;
+  }
+#else
   th_ = std::thread([sh] {
     auto fin = [&](State st, const std::string &err) { std::lock_guard<std::mutex> l(sh->mu); sh->state = st; sh->error = err; };
     std::string host = sh->server; int port = NET_PORT;
@@ -722,48 +777,103 @@ void RelayProbe::start(const std::string &server, bool status) {
     std::lock_guard<std::mutex> lk(sh->mu);
     // ping : temps de connexion ; par un tunnel, temps de la réponse (connexion chiffrée comprise)
     sh->pingMs = int(((tunnel ? t2 - t1 : t1 - t0)) * 1000 + 0.5);
-    std::string msg = got.substr(3);
-    if (uint8_t(got[0]) == NF_STATUS) sh->status = msg;
-    if (uint8_t(got[0]) == NF_INFO && msg.compare(0, 7, "SERVER ") == 0) {
-      std::sscanf(msg.c_str() + 7, "%d %d", &sh->players, &sh->games);
-      size_t sc = msg.find(';');
-      if (sc != std::string::npos) sh->params = msg.substr(sc + 1);
-      size_t v = sh->params.find(";version=");   // serveur v49 et suivants : sa version
-      if (v != std::string::npos) {
-        sh->version = cleanText(sh->params.substr(v + 9), 16);
-        sh->params.resize(v);
-      }
-    }
-    sh->state = State::Ok;   // un ancien relais répond aussi (message d'erreur) : il est en service
+    applyReply(*sh, got);
   });
+#endif
 }
+
+void RelayProbe::applyReply(Shared &sh, const std::string &got) {
+  std::string msg = got.substr(3);
+  if (uint8_t(got[0]) == NF_STATUS) sh.status = msg;
+  if (uint8_t(got[0]) == NF_INFO && msg.compare(0, 7, "SERVER ") == 0) {
+    std::sscanf(msg.c_str() + 7, "%d %d", &sh.players, &sh.games);
+    size_t sc = msg.find(';');
+    if (sc != std::string::npos) sh.params = msg.substr(sc + 1);
+    size_t v = sh.params.find(";version=");   // serveur v49 et suivants : sa version
+    if (v != std::string::npos) {
+      sh.version = cleanText(sh.params.substr(v + 9), 16);
+      sh.params.resize(v);
+    }
+  }
+  sh.state = State::Ok;   // un ancien relais répond aussi (message d'erreur) : il est en service
+}
+
+#ifdef __EMSCRIPTEN__
+// navigateur : connexion WebSocket (Emscripten) ouverte au départ, puis le test avance à chaque
+// consultation de son état : connexion établie -> demande envoyée -> réponse complète, ou délai dépassé
+void RelayProbe::step() const {
+  if (!sh_) return;
+  Shared &sh = *sh_;
+  std::lock_guard<std::mutex> l(sh.mu);
+  if (sh.state != State::Probing || sh.fd < 0) return;
+  const double t = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+  auto fail = [&](const char *fr, const char *en) {
+    ::close(sh.fd); sh.fd = -1; sh.state = State::Failed;
+    sh.error = sh.wantStatus && sh.phase == 2 ? L("pas de réponse (serveur v80 ou plus récent ?)", "no answer (server v80 or later?)") : L(fr, en);
+  };
+  if (sh.phase == 1) {   // connexion
+    fd_set w; FD_ZERO(&w); FD_SET(sh.fd, &w);
+    timeval tv{0, 0};
+    if (select(sh.fd + 1, nullptr, &w, nullptr, &tv) > 0 && FD_ISSET(sh.fd, &w)) {
+      int err = 0; socklen_t len = sizeof err;
+      getsockopt(sh.fd, SOL_SOCKET, SO_ERROR, &err, &len);
+      if (err) { fail("connexion refusée (serveur arrêté ?)", "connection refused (server stopped?)"); return; }
+      const char q[3] = {char(sh.wantStatus ? NF_STATUS : NF_PROBE), 0, 0};
+      ::send(sh.fd, q, 3, 0);
+      sh.t1 = t; sh.phase = 2;
+    } else if (t - sh.t0 > 8) { fail("le serveur ne répond pas", "the server does not answer"); return; }
+  }
+  if (sh.phase == 2) {   // réponse
+    char b[4096];
+    for (;;) {
+      int r = int(::recv(sh.fd, b, sizeof b, 0));
+      if (r > 0) { if (sh.got.empty()) sh.t2 = t; sh.got.append(b, size_t(r)); continue; }
+      if (r == 0 && sh.got.size() < 3) { fail("pas de réponse (est-ce bien le relais ?)", "no answer (is it really the relay?)"); return; }
+      break;
+    }
+    const std::string &g = sh.got;
+    if (g.size() >= 3 && g.size() >= 3 + ((size_t(uint8_t(g[1])) << 8) | uint8_t(g[2]))) {
+      ::close(sh.fd); sh.fd = -1;
+      sh.pingMs = int((sh.t2 - sh.t1) * 1000 + 0.5);
+      applyReply(sh, g);
+    } else if (t - sh.t1 > 12) fail("pas de réponse (est-ce bien le relais ?)", "no answer (is it really the relay?)");
+  }
+}
+#else
+void RelayProbe::step() const {}
+#endif
 
 std::string RelayProbe::status() const {
   if (!sh_) return "";
+  step();
   std::lock_guard<std::mutex> l(sh_->mu);
   return sh_->status;
 }
 
 std::string RelayProbe::version() const {
   if (!sh_) return "";
+  step();
   std::lock_guard<std::mutex> l(sh_->mu);
   return sh_->version;
 }
 
 std::string RelayProbe::params() const {
   if (!sh_) return "";
+  step();
   std::lock_guard<std::mutex> l(sh_->mu);
   return sh_->params;
 }
 
 RelayProbe::State RelayProbe::state() const {
   if (!sh_) return State::Off;
+  step();
   std::lock_guard<std::mutex> l(sh_->mu);
   return sh_->state;
 }
 
 std::string RelayProbe::text() const {
   if (!sh_) return "";
+  step();
   std::lock_guard<std::mutex> l(sh_->mu);
   switch (sh_->state) {
     case State::Off: return "";

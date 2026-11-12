@@ -192,10 +192,17 @@ class RelayProbe {
     State state = State::Off;
     std::string server, error, params, version, status;
     bool wantStatus = false;
+#ifdef __EMSCRIPTEN__
+    int fd = -1, phase = 0;              // navigateur : test pas à pas (connexion, attente de la réponse)
+    double t0 = 0, t1 = 0, t2 = 0;
+    std::string got;
+#endif
     int players = -1, games = -1, pingMs = -1;
   };
   std::shared_ptr<Shared> sh_;
   std::thread th_;
+  void step() const;   // navigateur : avance le test (sans fil d'exécution) ; rien ailleurs
+  static void applyReply(Shared &sh, const std::string &got);   // réponse complète reçue (verrou pris)
 };
 
 // empreinte FNV-1a (vérification que les deux joueurs ont le même jeu et les mêmes réglages)

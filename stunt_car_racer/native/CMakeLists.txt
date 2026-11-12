@@ -61,8 +61,10 @@ endif()
 
 # --- cœur du jeu (sans dépendance graphique)
 add_library(scrcore STATIC src/scrdata.cpp src/machine.cpp src/track.cpp src/tnt.cpp src/render3d.cpp src/scenery.cpp src/crowd.cpp src/sound.cpp src/hdview.cpp src/hdassets.cpp src/ym2149.cpp src/net.cpp src/wstunnel.cpp src/banner.cpp)
-find_package(Threads REQUIRED)
-target_link_libraries(scrcore PUBLIC Threads::Threads)
+if(NOT EMSCRIPTEN)   # navigateur : pas de fils d'exécution (sinon mémoire partagée exigée)
+  find_package(Threads REQUIRED)
+  target_link_libraries(scrcore PUBLIC Threads::Threads)
+endif()
 target_include_directories(scrcore PUBLIC src)
 target_link_libraries(scrcore PUBLIC musashi)
 if(WIN32)
@@ -70,6 +72,27 @@ if(WIN32)
 endif()
 
 # --- serveur relais (multijoueur en ligne), programme autonome pour Windows ou Linux
+# --- version navigateur (WebAssembly, Emscripten) : le jeu seul (scr.js + scr.wasm), page web/index.html ;
+# SDL2 d'Emscripten, boucle du jeu rendue au navigateur à chaque image (Asyncify), réglages et image
+# disque gardés dans le navigateur (IndexedDB) ; m68kmake vient d'une compilation pour la machine hôte
+if(EMSCRIPTEN)
+  if(NOT SCR_M68KMAKE)
+    message(FATAL_ERROR "version web : -DSCR_M68KMAKE=chemin/vers/m68kmake (compilé pour la machine hôte)")
+  endif()
+  target_compile_options(scrcore PRIVATE -fexceptions)
+  add_executable(scr src/main.cpp src/gpu3d.cpp)
+  # main.cpp sans exceptions : avec, presque chaque appel passe par un intermédiaire JavaScript
+  # (invoke_*) qu'Asyncify ne sait pas suspendre (« invalid state » au premier rendu de la main)
+  target_compile_options(scr PRIVATE -sUSE_SDL=2)
+  target_link_libraries(scr scrcore)
+  target_link_options(scr PRIVATE -sUSE_SDL=2 -fexceptions -O3
+    -sASYNCIFY -sASYNCIFY_IGNORE_INDIRECT=1 -sASYNCIFY_STACK_SIZE=1048576
+    -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=134217728 -sSTACK_SIZE=2097152
+    -sINVOKE_RUN=0 -sEXIT_RUNTIME=1 -sENVIRONMENT=web -sFORCE_FILESYSTEM=1
+    "-sEXPORTED_RUNTIME_METHODS=['callMain','FS']" -lidbfs.js --profiling-funcs)
+  return()
+endif()
+
 add_executable(scr_relay server/scr_relay.cpp)
 if(WIN32)
   target_link_libraries(scr_relay ws2_32)

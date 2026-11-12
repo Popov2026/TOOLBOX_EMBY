@@ -4,6 +4,9 @@ Stunt Car Racer (Atari ST, Geoff Crammond / Micro Style 1989) - version native P
 
 Aucune donnée du jeu n'est fournie : il faut votre propre image disque .st.
 
+Version navigateur (sans installation) : https://popov2026.github.io/stuntcar-racer/play/ - choisissez
+votre image .st dans la page (elle reste dans votre navigateur), puis Play.
+
 Lancement : placez votre image .st dans le dossier DISK et double-cliquez sur scr.exe
 (ou glissez l'image sur scr.exe, ou : scr.exe Stunt_Car_Racer.st --track 1).
 
@@ -109,6 +112,9 @@ ENGLISH
 Stunt Car Racer (Atari ST, Geoff Crammond / Micro Style 1989) - native PC version
 
 No game data is supplied: you need your own .st disk image.
+
+Browser version (nothing to install): https://popov2026.github.io/stuntcar-racer/play/ - choose your
+.st image in the page (it stays in your browser), then Play.
 
 Starting: put your .st image in the DISK folder and double-click scr.exe
 (or drag the image onto scr.exe, or: scr.exe Stunt_Car_Racer.st --track 1).
