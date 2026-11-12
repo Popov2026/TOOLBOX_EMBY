@@ -66,6 +66,9 @@
         border-radius: 6px; padding: 2px 7px; font: 700 14px ui-monospace, Consolas, monospace; color: var(--text); }
   .keys .big kbd { background: var(--accent); border-color: #8c1d14; font-size: 16px; }
   .keys div { font-size: 15px; }
+  .pad { display: flex; gap: 12px; align-items: center; margin-top: 16px; padding: 12px 14px; border-radius: 12px;
+         background: var(--panel2); border: 1px solid var(--line); font-size: 15px; }
+  .pad .icon { font-size: 30px; flex: none; }
   .feat { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 18px; }
   .feat .card { padding: 16px; }
   .feat h3 { margin: 0 0 6px; font-size: 16px; }
@@ -122,11 +125,13 @@
           <span class="big"><kbd>F1</kbd></span><div data-t="kF1"><b>Menu</b> – options: language, sound, HD, scenery, keys, online…</div>
           <span class="big"><kbd>F8</kbd></span><div data-t="kF8"><b>Old / new</b> – switch between the original 1989 game and the new HD version</div>
           <span><kbd>← → ↑ ↓</kbd></span><div data-t="kArrows">Steer, accelerate, brake</div>
-          <span><kbd>Space</kbd></span><div data-t="kBoost">Boost (Shift works too)</div>
+          <span><kbd>Shift</kbd></span><div data-t="kTurbo">Turbo (driving forwards)</div>
+          <span><kbd>Space</kbd></span><div data-t="kBoost">Turbo in reverse / super brake</div>
           <span><kbd>F9</kbd> <kbd>K</kbd></span><div data-t="kChat">Chat · horn (online)</div>
           <span><kbd>F11</kbd></span><div data-t="kFull">Full screen</div>
         </div>
-        <p class="note" data-t="pad">Gamepads work too: Start opens the menu.</p>
+        <div class="pad"><span class="icon">🎮</span><div data-t="pad"><b>Gamepad supported</b> – plug it in and play: stick or D-pad to steer,
+          RT accelerate, LT brake, A or X turbo, Y horn, Start menu.</div></div>
       </section>
     </div>
 
@@ -162,8 +167,8 @@
     privacy: "Vos fichiers restent dans ce navigateur : rien n'est envoyé, et ils sont gardés pour vos prochaines visites. Aucune donnée du jeu n'est fournie avec cette page.",
     keysTitle: 'Touches', kF1: '<b>Menu</b> – options : langue, son, HD, décor, touches, en ligne…',
     kF8: "<b>Ancien / nouveau</b> – bascule entre le jeu d'origine de 1989 et la nouvelle version HD",
-    kArrows: 'Diriger, accélérer, freiner', kBoost: 'Boost (Maj marche aussi)',
-    kChat: 'Discussion · klaxon (en ligne)', kFull: 'Plein écran', pad: 'Les manettes marchent aussi : Start ouvre le menu.',
+    kArrows: 'Diriger, accélérer, freiner', kTurbo: 'Turbo (en marche avant)', kBoost: 'Turbo en marche arrière / super frein',
+    kChat: 'Discussion · klaxon (en ligne)', kFull: 'Plein écran', pad: '<b>Manette reconnue</b> – branchez-la et jouez : stick ou croix pour diriger, RT accélérer, LT freiner, A ou X turbo, Y klaxon, Start menu.',
     f1t: "Le jeu d'origine", f1p: 'Le vrai programme de 1989 tourne sur un 68000 émulé : même physique, mêmes circuits, mêmes sensations.',
     f2t: 'Graphismes HD', f2p: 'Cockpit HD, voitures et routes texturées, tribunes, arbres, ciel, ombres, étincelles et son de moteur V8.',
     f3t: 'Courses en ligne', f3p: 'Menu « 3. Online Multiplayer » : premier joueur disponible, salle publique, salles privées, jusqu’à 6 voitures, spectateurs.',
