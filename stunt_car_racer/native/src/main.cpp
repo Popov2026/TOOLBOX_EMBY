@@ -406,6 +406,11 @@ static void scrDelay(uint32_t ms) {
 
 int main(int argc, char **argv) {
   Options o;
+#ifdef __EMSCRIPTEN__
+  // version navigateur : le jeu démarre directement en HD, détails élevés (textures), décor plus dense
+  // et moteur V8 ; le joueur peut tout changer dans le menu F1 (enregistré dans le navigateur)
+  o.hd = true; o.highDetail = true; o.hdTextures = true; o.density = 2; o.engineV8 = true;
+#endif
   // scr.ini : à côté de scr.exe (même si le jeu est lancé depuis un autre dossier), sinon dossier courant
   std::string ini = "scr.ini";
   if (char *bp = SDL_GetBasePath()) {

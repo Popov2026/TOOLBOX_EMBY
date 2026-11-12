@@ -24,6 +24,12 @@
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button:disabled { opacity: .5; cursor: default; }
   input[type=file] { display: none; }
+  #drop { border: 2px dashed var(--line); border-radius: 10px; padding: 26px 18px; text-align: center; font-size: 18px; cursor: pointer; }
+  body.dragging #drop { border-color: var(--accent); }
+  #clickmsg { display: none; }
+  body.ready-disk #dropmsg { display: none; }
+  body.ready-disk #clickmsg { display: block; }
+  label.link { color: var(--link); text-decoration: underline; cursor: pointer; }
   #game { display: none; }
   #wrap { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
   canvas#canvas { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; image-rendering: pixelated; outline: none; }
@@ -39,13 +45,14 @@
     <a href="../">Project page</a></div>
 
   <section id="setup">
-    <p><strong>Your own disk image is needed.</strong> No game data is supplied: choose your Stunt Car Racer
-      Atari ST disk image (<code>.st</code> file). It stays in this browser (it is not uploaded anywhere) and is kept for your next visits.</p>
-    <div class="row">
-      <button id="play" class="primary" disabled>Play</button>
-      <label class="btn" for="file" id="pick">Choose disk image (.st)</label>
+    <div id="drop">
+      <div id="dropmsg"><strong>Drop your Stunt Car Racer disk image (<code>.st</code>) anywhere on this page</strong><br>
+        <span class="muted">or <label class="link" for="file">choose it</label> — only once: it stays in this browser (nothing is uploaded)
+        and the game starts straight away on your next visits. No game data is supplied with this page.</span></div>
+      <div id="clickmsg"><strong>Click anywhere (or press a key) to play</strong><br>
+        <span class="muted">HD, high detail, scenery density 2 and V8 engine are on; F1 changes them.
+        <label class="link" for="file">Use another disk image</label></span></div>
       <input id="file" type="file" accept=".st,.ST">
-      <span id="disk" class="muted"></span>
     </div>
     <div id="status" class="muted">Loading the game…</div>
     <p class="keys muted">Keys: <kbd>arrows</kbd> drive, <kbd>Space</kbd>/<kbd>Shift</kbd> boost, <kbd>F1</kbd> options (language, sound, HD…),
@@ -71,9 +78,8 @@
   // sauvegarde de /save (image disque, scr.ini) dans IndexedDB
   function save() { if (ready) FS.syncfs(false, (e) => { if (e) console.warn('syncfs', e); }); }
   function refresh() {
-    $('play').disabled = !(ready && haveDisk);
-    $('disk').textContent = haveDisk ? 'Disk image ready.' : '';
-    if (ready) status(haveDisk ? 'Press Play.' : 'Choose your disk image to start.');
+    document.body.classList.toggle('ready-disk', ready && haveDisk);
+    if (ready) status(haveDisk ? '' : 'Waiting for your disk image.');
   }
 
   var Module = {
@@ -95,16 +101,25 @@
     onExit: () => { running = false; save(); status('The game has ended. Reload the page to play again.'); $('setup').style.display = ''; $('game').style.display = 'none'; }
   };
 
-  $('file').addEventListener('change', async (ev) => {
-    const f = ev.target.files[0];
-    if (!f || !ready) return;
+  // image disque : choisie ou glissée sur la page, gardée dans le navigateur, puis le jeu démarre
+  async function useFile(f) {
+    if (!f || !ready || running) return;
     const data = new Uint8Array(await f.arrayBuffer());
     if (data.length < 300000) { status('This file does not look like an Atari ST disk image (.st).'); return; }
     FS.writeFile(DISK, data);
     haveDisk = true; save(); refresh();
-  });
+    start();
+  }
+  $('file').addEventListener('change', (ev) => useFile(ev.target.files[0]));
+  window.addEventListener('dragover', (e) => { e.preventDefault(); document.body.classList.add('dragging'); });
+  window.addEventListener('dragleave', () => document.body.classList.remove('dragging'));
+  window.addEventListener('drop', (e) => { e.preventDefault(); document.body.classList.remove('dragging'); useFile(e.dataTransfer.files[0]); });
+  // image déjà gardée : un clic ou une touche n'importe où lance le jeu (le navigateur exige un geste pour le son)
+  const go = (e) => { if (ready && haveDisk && !running && !(e.target && e.target.closest && e.target.closest('label'))) start(); };
+  window.addEventListener('click', go);
+  window.addEventListener('keydown', go);
 
-  $('play').addEventListener('click', () => {
+  function start() {
     if (!ready || !haveDisk || running) return;
     running = true;
     $('setup').style.display = 'none';
@@ -113,7 +128,7 @@
     setInterval(save, 5000);                  // options changées dans le jeu (scr.ini)
     window.addEventListener('beforeunload', save);
     try { Module.callMain([DISK, '--ini', INI]); } catch (e) { if (e !== 'unwind' && !(e && e.name === 'ExitStatus')) console.error(e); }
-  });
+  }
 
   $('full').addEventListener('click', () => { const w = $('wrap'); (w.requestFullscreen || w.webkitRequestFullscreen).call(w); $('canvas').focus(); });
   $('canvas').addEventListener('click', () => $('canvas').focus());
