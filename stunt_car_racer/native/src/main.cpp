@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v88"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v89"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -564,8 +564,32 @@ int main(int argc, char **argv) {
     fail(std::string("SDL : ") + SDL_GetError());
     return 1;
   }
+#ifdef __EMSCRIPTEN__
+  o.fullscreen = false;   // navigateur : plein écran seulement sur un geste du joueur (F11, menu, bouton de la page)
+#endif
   SDL_Window *win = SDL_CreateWindow("Stunt Car Racer " SCR_VERSION, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 320 * o.scale,
                                      200 * o.scale, SDL_WINDOW_RESIZABLE | (o.fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0));
+  // plein écran. Navigateur : celui de la page (cadre du jeu), la taille de l'image ne change pas et
+  // Échap (rendu au navigateur) revient proprement à la page ; le plein écran de SDL y laissait le
+  // canevas à la taille de l'écran, coupé en deux
+  auto isFullscreen = [&]() -> bool {
+#ifdef __EMSCRIPTEN__
+    return EM_ASM_INT({ return (document.fullscreenElement || document.webkitFullscreenElement) ? 1 : 0; }) != 0;
+#else
+    return SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP;
+#endif
+  };
+  auto setFullscreen = [&](bool fs) {
+#ifdef __EMSCRIPTEN__
+    EM_ASM({
+      if ($0) { var e = document.getElementById('screen') || Module.canvas; var f = e.requestFullscreen || e.webkitRequestFullscreen; if (f) { var r = f.call(e); if (r && r.catch) r.catch(function () {}); } }
+      else if (document.fullscreenElement) document.exitFullscreen();
+      else if (document.webkitFullscreenElement) document.webkitExitFullscreen();
+    }, fs ? 1 : 0);
+#else
+    SDL_SetWindowFullscreen(win, fs ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+#endif
+  };
   SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, o.smooth ? "1" : "0");
   // rendu 3D sur la carte graphique (OpenGL 3.3, contexte dans une fenêtre cachée) ; en cas d'échec,
   // rendu sur le processeur comme avant
@@ -593,7 +617,7 @@ int main(int argc, char **argv) {
     } else {
       SDL_RenderSetLogicalSize(ren, 320, 200);
     }
-    if (resizeWindow && !(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP)) {
+    if (resizeWindow && !isFullscreen()) {
       SDL_Rect ub;
       int w = hd ? o.hdW : 320 * o.scale, h = hd ? o.hdH : 200 * o.scale;
       if (SDL_GetDisplayUsableBounds(SDL_GetWindowDisplayIndex(win), &ub) == 0) {
@@ -993,7 +1017,7 @@ int main(int argc, char **argv) {
     it.push_back({L("Encouragements de la foule : ", "Crowd cheering: ") + yn(o.crowd), 20});
     it.push_back({L("Volume de la foule : ", "Crowd volume: ") + std::to_string(int(std::lround(o.crowdVolume * 100))) + " %  < >", 22});
     it.push_back({std::string(L("Son du moteur : ", "Engine sound: ")) + (o.engineV8 ? L("V8 réaliste", "realistic V8") : L("d'origine", "original")), 24});
-    it.push_back({L("Plein écran : ", "Full screen: ") + yn(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP) + "  (F11)", 7});
+    it.push_back({L("Plein écran : ", "Full screen: ") + yn(isFullscreen()) + "  (F11)", 7});
     it.push_back({haveTnt ? std::string(L("Circuits : ", "Tracks: ")) + (soloSet ? "TNT" : L("d'origine", "original")) + "  (F7)" : L("Circuits TNT : fichier SCR-TNT absent", "TNT tracks: SCR-TNT file missing"), 8});
     it.push_back({L("Manette : ", "Gamepad: ") + yn(o.usePad) + (pad ? L("  (branchée)", "  (connected)") : L("  (aucune)", "  (none)")), 9});
     it.push_back({L("Vibrations aux chocs : ", "Rumble on impacts: ") + yn(o.rumble), 10});
@@ -1026,8 +1050,8 @@ int main(int argc, char **argv) {
       case 5: o.particles = !o.particles; view->params.particles = o.particles; saveFlag({"particules", "particles"}, o.particles, "étincelles et fumée lors des chocs (HD)"); break;
       case 6: o.antialias = !o.antialias; view->params.antialias = o.antialias; saveFlag({"lissage", "antialias"}, o.antialias, "lissage des bords (HD)"); break;
       case 7: {
-        bool fs = !(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP);
-        SDL_SetWindowFullscreen(win, fs ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+        bool fs = !isFullscreen();
+        setFullscreen(fs);
         saveFlag({"fullscreen"}, fs, "plein écran (touche F11)");
         break;
       }
@@ -1225,8 +1249,7 @@ int main(int argc, char **argv) {
           { if (NetLink::clock() - menuOpenedAt > 0.8) chooseItem(items[size_t(std::min(menuSel, n - 1))]); }
         else if (sc == SDL_SCANCODE_F12) running = false;
         else if (sc == SDL_SCANCODE_F11 || sc == SDL_SCANCODE_F4) {
-          bool fs = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP;
-          SDL_SetWindowFullscreen(win, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+          setFullscreen(!isFullscreen());
         }
       }
       else if (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP) {
@@ -1255,8 +1278,7 @@ int main(int argc, char **argv) {
           }
           else if (sc == SDL_SCANCODE_F11 || sc == SDL_SCANCODE_F4 ||
                    ((sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_KP_ENTER) && (ev.key.keysym.mod & KMOD_ALT))) {   // plein écran
-            bool fs = SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP;
-            SDL_SetWindowFullscreen(win, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+            setFullscreen(!isFullscreen());
           } else if (sc == SDL_SCANCODE_F5) {   // détails élevés (textures, roues rondes) ; passe en HD si besoin
             highDetail = !highDetail;
             view->params.highDetail = highDetail;

@@ -76,6 +76,11 @@
   #game { display: none; padding: 12px 0 30px; }
   #screen { position: relative; background: #000; border-radius: 10px; overflow: hidden; }
   canvas#canvas { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; outline: none; }
+  /* plein écran (F11, menu F1 ou bouton) : image entière, centrée, sur fond noir ; Échap revient à la page */
+  #screen:fullscreen { display: flex; align-items: center; justify-content: center; width: 100vw; height: 100vh; border-radius: 0; }
+  #screen:fullscreen canvas#canvas { width: min(100vw, 160vh); }
+  #screen:-webkit-full-screen { display: flex; align-items: center; justify-content: center; width: 100vw; height: 100vh; border-radius: 0; }
+  #screen:-webkit-full-screen canvas#canvas { width: min(100vw, 160vh); }
   .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 10px; color: var(--muted); font-size: 14px; }
   .bar button { font: inherit; font-weight: 600; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
   body.playing header.hero, body.playing main, body.playing footer { display: none; }
@@ -320,6 +325,8 @@
   }, true);
   $('full').addEventListener('click', () => { const w = $('screen'); (w.requestFullscreen || w.webkitRequestFullscreen).call(w); $('canvas').focus(); });
   $('canvas').addEventListener('click', () => $('canvas').focus());
+  // retour du plein écran (Échap) : le jeu garde le clavier
+  document.addEventListener('fullscreenchange', () => { if (running) $('canvas').focus(); });
   applyLang();
 </script>
 <script async src="scr.js"></script>
