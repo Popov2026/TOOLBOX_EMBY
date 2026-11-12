@@ -4,6 +4,7 @@
 # Linux). C'est la compilation des releases GitHub (workflow) ; elle marche aussi sur un PC Linux.
 #   WORK : dossier de travail (outils téléchargés, compilations) ; OUT : dossier des zips
 # Aucune donnée du jeu d'origine n'est incluse : chaque joueur fournit son image disque .st.
+# Images HD : celles de assets/hd (dépôt stuntcar-racer) si ce dossier existe.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")" && pwd)   # dossier native
 WORK=$(mkdir -p "${WORK:-$PWD/build-release}" && cd "${WORK:-$PWD/build-release}" && pwd)
@@ -58,6 +59,9 @@ G=$P/StuntCarRacer
 cp "$B/scr.exe" "$B/scr_headless.exe" "$ROOT/README.txt" "$ROOT/README_MULTIPLAYER.txt" "$G/"
 cp "$ROOT/scr.ini.example" "$G/scr.ini.exemple"
 cp "$ROOT/README_HD.txt" "$G/hd/"; cp "$ROOT/README_DISK.txt" "$G/DISK/README.txt"; cp "$ROOT/README_TNT.txt" "$G/TNT/"
+# images HD (dépôt stuntcar-racer : assets/hd, ou HD_ASSETS=dossier) livrées dans le dossier hd du jeu
+HD_ASSETS=${HD_ASSETS:-$ROOT/../assets/hd}
+if [ -d "$HD_ASSETS" ]; then cp "$HD_ASSETS"/*.png "$HD_ASSETS"/hd.ini "$G/hd/"; echo "images HD : $(ls "$HD_ASSETS"/*.png | wc -l)"; fi
 for d in "$G/serveur" "$P/ServeurRelaisStuntCar"; do
   cp "$ROOT/server/README_SERVER.txt" "$ROOT/server/scr-relay.service" "$ROOT/server/scr_relay.cpp" "$ROOT/server/scr_relay.ini" "$B/scr_relay.exe" "$WORK/scr_relay" "$d/"
 done

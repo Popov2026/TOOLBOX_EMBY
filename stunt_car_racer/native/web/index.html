@@ -55,6 +55,7 @@
       <input id="file" type="file" accept=".st,.ST">
     </div>
     <div id="status" class="muted">Loading the game…</div>
+    <div id="hdload" class="muted"></div>
     <p class="keys muted">Keys: <kbd>arrows</kbd> drive, <kbd>Space</kbd>/<kbd>Shift</kbd> boost, <kbd>F1</kbd> options (language, sound, HD…),
       <kbd>F8</kbd> HD mode, <kbd>F9</kbd> chat, <kbd>K</kbd> horn, <kbd>F11</kbd> full screen. Gamepads work too.
       Online multiplayer: menu “4. Online Multiplayer”.</p>
@@ -75,6 +76,28 @@
   const DISK = '/save/game.st', INI = '/save/scr.ini';
   let ready = false, haveDisk = false, running = false;
 
+  // images HD (cockpit, flammes...) : chargées en arrière-plan dès l'ouverture de la page, dans /hd
+  let hdReady = null;
+  function loadHd() {
+    hdReady = (async () => {
+      try {
+        const r = await fetch('hd/files.txt');
+        if (!r.ok) return false;
+        const names = (await r.text()).split('\n').map((n) => n.trim()).filter((n) => /^[\w.-]+$/.test(n));
+        FS.mkdir('/hd');
+        let done = 0;
+        await Promise.all(names.map(async (n) => {
+          const d = new Uint8Array(await (await fetch('hd/' + n)).arrayBuffer());
+          FS.writeFile('/hd/' + n, d);
+          done++;
+          if (!running) $('hdload').textContent = 'HD images: ' + done + ' / ' + names.length;
+        }));
+        $('hdload').textContent = '';
+        return true;
+      } catch (e) { console.warn('images HD', e); $('hdload').textContent = ''; return false; }
+    })();
+  }
+
   // sauvegarde de /save (image disque, scr.ini) dans IndexedDB
   function save() { if (ready) FS.syncfs(false, (e) => { if (e) console.warn('syncfs', e); }); }
   function refresh() {
@@ -91,6 +114,7 @@
     onRuntimeInitialized: () => {
       FS.mkdir('/save');
       FS.mount(IDBFS, {}, '/save');
+      loadHd();
       FS.syncfs(true, (err) => {
         if (err) console.warn('syncfs', err);
         ready = true;
@@ -119,7 +143,7 @@
   window.addEventListener('click', go);
   window.addEventListener('keydown', go);
 
-  function start() {
+  async function start() {
     if (!ready || !haveDisk || running) return;
     running = true;
     $('setup').style.display = 'none';
@@ -127,7 +151,9 @@
     $('canvas').focus();
     setInterval(save, 5000);                  // options changées dans le jeu (scr.ini)
     window.addEventListener('beforeunload', save);
-    try { Module.callMain([DISK, '--ini', INI]); } catch (e) { if (e !== 'unwind' && !(e && e.name === 'ExitStatus')) console.error(e); }
+    const hd = hdReady ? await hdReady : false;   // le jeu démarre avec les images HD
+    const args = [DISK, '--ini', INI].concat(hd ? ['--hddir', '/hd'] : []);
+    try { Module.callMain(args); } catch (e) { if (e !== 'unwind' && !(e && e.name === 'ExitStatus')) console.error(e); }
   }
 
   $('full').addEventListener('click', () => { const w = $('wrap'); (w.requestFullscreen || w.webkitRequestFullscreen).call(w); $('canvas').focus(); });
