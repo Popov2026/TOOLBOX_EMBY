@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v85"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v86"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -59,7 +59,7 @@ struct Options {
   bool fullscreen = false, smooth = false, hd = false, sound = true;
   double volume = 0.8;
 #ifdef __EMSCRIPTEN__
-  int hdW = 1280, hdH = 720;   // navigateur : rendu sur le processeur, un seul fil d'exécution
+  int hdW = 960, hdH = 540;   // navigateur : rendu sur le processeur, un seul fil d'exécution (détails élevés fluides)
 #else
   int hdW = 1920, hdH = 1080;
 #endif
