@@ -4,80 +4,239 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Stunt Car Racer – play in the browser</title>
-<meta name="description" content="Play Stunt Car Racer (Atari ST, 1989) in the browser with your own disk image: HD mode, online multiplayer.">
+<meta name="description" content="Stunt Car Racer (Atari ST, 1989) in your browser: HD graphics, The New Tracks, online multiplayer. Bring your own disk image.">
 <style>
-  /* page de lancement de la version WebAssembly : l'image disque du joueur reste dans son navigateur */
-  :root { --bg: #0f1317; --panel: #182028; --text: #e8ecef; --muted: #9aa6b2; --line: #2a343e; --accent: #e0483c; --link: #8cc0ff; }
-  @media (prefers-color-scheme: light) {
-    :root:not([data-theme="dark"]) { --bg: #f5f6f8; --panel: #ffffff; --text: #1d232a; --muted: #5b6672; --line: #dde2e7; --accent: #c8281e; --link: #1f5fbf; }
+  /* page d'accueil de la version WebAssembly : présentation, joueurs en ligne, fichiers du joueur */
+  :root {
+    --bg: #0b0e12; --panel: #141a21; --panel2: #1b232c; --text: #eef1f4; --muted: #9aa6b2; --line: #2a3540;
+    --accent: #e3392b; --accent2: #ffb020; --ok: #48d17a; --link: #8cc0ff;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
   a { color: var(--link); }
-  main { max-width: 980px; margin: 0 auto; padding: 16px; }
-  h1 { font-size: 26px; margin: 8px 0 4px; }
-  .muted { color: var(--muted); }
-  #setup { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin: 14px 0; }
-  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0; }
-  button, label.btn { font: inherit; font-weight: 600; padding: 10px 18px; border-radius: 8px; border: 1px solid var(--line);
-                      background: var(--panel); color: var(--text); cursor: pointer; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button:disabled { opacity: .5; cursor: default; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+
+  header.hero { position: relative; overflow: hidden; border-bottom: 1px solid var(--line); }
+  header.hero::before { content: ""; position: absolute; inset: 0; background: url(hero.jpg) center 40% / cover no-repeat; }
+  header.hero::after { content: ""; position: absolute; inset: 0;
+    background: linear-gradient(180deg, rgba(11,14,18,.45) 0%, rgba(11,14,18,.7) 60%, var(--bg) 100%); }
+  .hero .wrap { position: relative; z-index: 1; padding-top: 18px; padding-bottom: 34px; }
+  .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  .top a { color: var(--text); opacity: .85; text-decoration: none; margin-right: 14px; }
+  .top a:hover { opacity: 1; text-decoration: underline; }
+  #lang { background: rgba(0,0,0,.4); color: var(--text); border: 1px solid rgba(255,255,255,.3); border-radius: 999px; padding: 4px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+  h1 { font-size: clamp(40px, 7.5vw, 78px); line-height: 1; margin: 70px 0 12px; font-style: italic; font-weight: 900; letter-spacing: -1px;
+       text-transform: uppercase; text-shadow: 0 4px 24px rgba(0,0,0,.7); }
+  h1 span { color: var(--accent); }
+  .tagline { font-size: clamp(17px, 2.4vw, 21px); max-width: 640px; margin: 0 0 22px; text-shadow: 0 2px 12px rgba(0,0,0,.9); }
+  .online { display: inline-flex; align-items: center; gap: 10px; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.2);
+            border-radius: 999px; padding: 8px 16px; font-weight: 600; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+  .online.on .dot { background: var(--ok); animation: pulse 2s infinite; }
+  .online.off .dot { background: #d05050; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(72,209,122,.7); } 70% { box-shadow: 0 0 0 10px rgba(72,209,122,0); } 100% { box-shadow: 0 0 0 0 rgba(72,209,122,0); } }
+
+  main { padding: 26px 0 40px; }
+  .grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 18px; }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } h1 { margin-top: 44px; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+  .card h2 { font-size: 19px; margin: 0 0 14px; }
+  .slot { display: flex; gap: 14px; align-items: center; border: 2px dashed var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px;
+          background: var(--panel2); cursor: pointer; transition: border-color .15s; }
+  .slot:hover, body.dragging .slot { border-color: var(--accent2); }
+  .slot.ready { border-style: solid; border-color: rgba(72,209,122,.55); }
+  .slot .icon { font-size: 30px; width: 44px; text-align: center; flex: none; }
+  .slot .txt { flex: 1; min-width: 0; }
+  .slot .name { font-weight: 700; }
+  .slot .sub { color: var(--muted); font-size: 14px; }
+  .slot .state { font-size: 14px; font-weight: 600; color: var(--muted); text-align: right; }
+  .slot.ready .state { color: var(--ok); }
+  .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; margin-left: 6px; vertical-align: 2px; }
+  .tag.req { background: rgba(227,57,43,.18); color: #ff8a80; }
+  .tag.opt { background: rgba(255,176,32,.15); color: var(--accent2); }
+  .remove { display: block; color: var(--muted); font-size: 13px; font-weight: 400; text-decoration: underline; cursor: pointer; }
   input[type=file] { display: none; }
-  #drop { border: 2px dashed var(--line); border-radius: 10px; padding: 26px 18px; text-align: center; font-size: 18px; cursor: pointer; }
-  body.dragging #drop { border-color: var(--accent); }
-  #clickmsg { display: none; }
-  body.ready-disk #dropmsg { display: none; }
-  body.ready-disk #clickmsg { display: block; }
-  label.link { color: var(--link); text-decoration: underline; cursor: pointer; }
-  #game { display: none; }
-  #wrap { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
-  canvas#canvas { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; image-rendering: pixelated; outline: none; }
-  #status { min-height: 1.5em; }
-  .keys { font-size: 14px; }
-  kbd { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font: 13px ui-monospace, Consolas, monospace; }
+  #play { width: 100%; font: inherit; font-size: 22px; font-weight: 900; font-style: italic; letter-spacing: .5px; text-transform: uppercase;
+          padding: 16px; border: 0; border-radius: 12px; color: #fff; cursor: pointer; margin-top: 6px;
+          background: linear-gradient(180deg, #f04a3a, #b8241a); box-shadow: 0 8px 24px rgba(227,57,43,.35); }
+  #play:disabled { background: #39424c; box-shadow: none; cursor: default; color: #9aa6b2; }
+  .note { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
+  #status { color: var(--accent2); font-size: 14px; min-height: 1.3em; margin-top: 8px; }
+
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 10px 12px; align-items: center; }
+  kbd { display: inline-block; min-width: 36px; text-align: center; background: #232c36; border: 1px solid #3a4652; border-bottom-width: 3px;
+        border-radius: 6px; padding: 2px 7px; font: 700 14px ui-monospace, Consolas, monospace; color: var(--text); }
+  .keys .big kbd { background: var(--accent); border-color: #8c1d14; font-size: 16px; }
+  .keys div { font-size: 15px; }
+  .feat { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 18px; }
+  .feat .card { padding: 16px; }
+  .feat h3 { margin: 0 0 6px; font-size: 16px; }
+  .feat p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  #game { display: none; padding: 12px 0 30px; }
+  #screen { position: relative; background: #000; border-radius: 10px; overflow: hidden; }
+  canvas#canvas { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; outline: none; }
+  .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 10px; color: var(--muted); font-size: 14px; }
+  .bar button { font: inherit; font-weight: 600; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+  body.playing header.hero, body.playing main, body.playing footer { display: none; }
+  body.playing #game { display: block; }
+  footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding: 18px 0 30px; }
 </style>
 </head>
 <body>
+<header class="hero">
+  <div class="wrap">
+    <div class="top">
+      <div><a href="../" data-t="project">Project</a><a href="https://github.com/Popov2026/stuntcar-racer/releases/latest" data-t="win">Windows version</a></div>
+      <button id="lang" type="button">FR</button>
+    </div>
+    <h1>Stunt <span>Car</span> Racer</h1>
+    <p class="tagline" data-t="tagline">The 1989 Atari ST classic by Geoff Crammond, in your browser — in HD, with The New Tracks and online races.</p>
+    <div id="online" class="online"><span class="dot"></span><span id="onlinetxt">…</span></div>
+  </div>
+</header>
+
 <main>
-  <h1>Stunt Car Racer</h1>
-  <div class="muted">Atari ST, Geoff Crammond / Micro Style, 1989 — native version running in your browser (WebAssembly).
-    <a href="../">Project page</a></div>
+  <div class="wrap">
+    <div class="grid">
+      <section class="card">
+        <h2 data-t="ready">Get ready</h2>
+        <label class="slot" id="slotDisk" for="fileDisk">
+          <span class="icon">💾</span>
+          <span class="txt"><span class="name"><span data-t="disk">Atari ST floppy disk</span> (.st)<span class="tag req" data-t="required">required</span></span><br>
+            <span class="sub" data-t="diskSub">Your own Stunt Car Racer disk image. Drop it here or click.</span></span>
+          <span class="state" id="stDisk"></span>
+        </label>
+        <input id="fileDisk" type="file" accept=".st,.ST">
+        <label class="slot" id="slotTnt" for="fileTnt">
+          <span class="icon">🏁</span>
+          <span class="txt"><span class="name">The New Tracks (TNT)<span class="tag opt" data-t="optional">optional</span></span><br>
+            <span class="sub" data-t="tntSub">8 extra tracks: your SCR-TNT file or the StuntCarRacerTNT_v1.4.lha archive. Only needed for the new tracks (F7).</span></span>
+          <span class="state" id="stTnt"></span>
+        </label>
+        <input id="fileTnt" type="file">
+        <button id="play" disabled data-t="play">Play</button>
+        <div id="status"></div>
+        <p class="note" data-t="privacy">Your files stay in this browser: nothing is uploaded, and they are kept for your next visits. No game data is supplied with this page.</p>
+      </section>
 
-  <section id="setup">
-    <div id="drop">
-      <div id="dropmsg"><strong>Drop your Stunt Car Racer disk image (<code>.st</code>) anywhere on this page</strong><br>
-        <span class="muted">or <label class="link" for="file">choose it</label> — only once: it stays in this browser (nothing is uploaded)
-        and the game starts straight away on your next visits. No game data is supplied with this page.</span></div>
-      <div id="clickmsg"><strong>Click anywhere (or press a key) to play</strong><br>
-        <span class="muted">HD, high detail, scenery density 2 and V8 engine are on; F1 changes them.
-        <label class="link" for="file">Use another disk image</label></span></div>
-      <input id="file" type="file" accept=".st,.ST">
+      <section class="card">
+        <h2 data-t="keysTitle">Keys</h2>
+        <div class="keys">
+          <span class="big"><kbd>F1</kbd></span><div data-t="kF1"><b>Menu</b> – options: language, sound, HD, scenery, keys, online…</div>
+          <span class="big"><kbd>F8</kbd></span><div data-t="kF8"><b>Old / new</b> – switch between the original 1989 game and the new HD version</div>
+          <span><kbd>F7</kbd></span><div data-t="kF7">Original tracks / The New Tracks (with the TNT file)</div>
+          <span><kbd>← → ↑ ↓</kbd></span><div data-t="kArrows">Steer, accelerate, brake</div>
+          <span><kbd>Space</kbd></span><div data-t="kBoost">Boost (Shift works too)</div>
+          <span><kbd>F9</kbd> <kbd>K</kbd></span><div data-t="kChat">Chat · horn (online)</div>
+          <span><kbd>F11</kbd></span><div data-t="kFull">Full screen</div>
+        </div>
+        <p class="note" data-t="pad">Gamepads work too: Start opens the menu.</p>
+      </section>
     </div>
-    <div id="status" class="muted">Loading the game…</div>
-    <div id="hdload" class="muted"></div>
-    <p class="keys muted">Keys: <kbd>arrows</kbd> drive, <kbd>Space</kbd>/<kbd>Shift</kbd> boost, <kbd>F1</kbd> options (language, sound, HD…),
-      <kbd>F8</kbd> HD mode, <kbd>F9</kbd> chat, <kbd>K</kbd> horn, <kbd>F11</kbd> full screen. Gamepads work too.
-      Online multiplayer: menu “4. Online Multiplayer”.</p>
-  </section>
 
-  <section id="game">
-    <div id="wrap"><canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas></div>
-    <div class="row">
-      <button id="full">Full screen</button>
-      <span class="muted">Click the picture if the keys do not respond.</span>
+    <div class="feat">
+      <div class="card"><h3 data-t="f1t">The original game</h3><p data-t="f1p">The real 1989 program runs on an emulated 68000: same physics, same tracks, same thrills.</p></div>
+      <div class="card"><h3 data-t="f2t">HD graphics</h3><p data-t="f2p">HD cockpit, textured cars and roads, grandstands, trees, sky, shadows, sparks and a V8 engine sound.</p></div>
+      <div class="card"><h3 data-t="f3t">Online races</h3><p data-t="f3p">Menu “4. Online Multiplayer”: first available player, public room, private rooms, up to 6 cars, spectators.</p></div>
     </div>
-  </section>
+  </div>
 </main>
+
+<section id="game">
+  <div class="wrap">
+    <div id="screen"><canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas></div>
+    <div class="bar">
+      <button id="full" type="button" data-t="fullBtn">Full screen</button>
+      <span data-t="gameHint">F1 menu · F8 old / new · click the picture if the keys do not respond</span>
+    </div>
+  </div>
+</section>
+
+<footer><div class="wrap" data-t="foot">Stunt Car Racer © Geoff Crammond / Micro Style 1989 — game data not included. Native version and HD images by Popov2026.</div></footer>
 
 <script>
   const $ = (id) => document.getElementById(id);
-  const status = (t) => { $('status').textContent = t; };
-  const DISK = '/save/game.st', INI = '/save/scr.ini';
-  let ready = false, haveDisk = false, running = false;
+  // ---------------------------------------------------------------- textes : anglais dans la page, français ici
+  const FR = {
+    project: 'Projet', win: 'Version Windows',
+    tagline: "Le classique Atari ST de Geoff Crammond (1989) dans votre navigateur — en HD, avec The New Tracks et des courses en ligne.",
+    ready: 'Préparez-vous', disk: 'Disquette Atari ST', required: 'obligatoire', optional: 'facultatif',
+    diskSub: 'Votre propre image de la disquette Stunt Car Racer. Déposez-la ici ou cliquez.',
+    tntSub: "8 circuits en plus : votre fichier SCR-TNT ou l'archive StuntCarRacerTNT_v1.4.lha. Seulement pour les nouveaux circuits (F7).",
+    play: 'Jouer',
+    privacy: "Vos fichiers restent dans ce navigateur : rien n'est envoyé, et ils sont gardés pour vos prochaines visites. Aucune donnée du jeu n'est fournie avec cette page.",
+    keysTitle: 'Touches', kF1: '<b>Menu</b> – options : langue, son, HD, décor, touches, en ligne…',
+    kF8: "<b>Ancien / nouveau</b> – bascule entre le jeu d'origine de 1989 et la nouvelle version HD",
+    kF7: "Circuits d'origine / The New Tracks (avec le fichier TNT)", kArrows: 'Diriger, accélérer, freiner', kBoost: 'Boost (Maj marche aussi)',
+    kChat: 'Discussion · klaxon (en ligne)', kFull: 'Plein écran', pad: 'Les manettes marchent aussi : Start ouvre le menu.',
+    f1t: "Le jeu d'origine", f1p: 'Le vrai programme de 1989 tourne sur un 68000 émulé : même physique, mêmes circuits, mêmes sensations.',
+    f2t: 'Graphismes HD', f2p: 'Cockpit HD, voitures et routes texturées, tribunes, arbres, ciel, ombres, étincelles et son de moteur V8.',
+    f3t: 'Courses en ligne', f3p: 'Menu « 4. Online Multiplayer » : premier joueur disponible, salle publique, salles privées, jusqu’à 6 voitures, spectateurs.',
+    fullBtn: 'Plein écran', gameHint: "F1 menu · F8 ancien / nouveau · cliquez sur l'image si les touches ne répondent pas",
+    foot: 'Stunt Car Racer © Geoff Crammond / Micro Style 1989 — données du jeu non fournies. Version native et images HD par Popov2026.',
+    ok: 'Prête', missing: 'Manquante', none: 'Aucun', remove: 'retirer', checking: 'Test du serveur en ligne…',
+    online: (p, g) => p + (p > 1 ? ' joueurs' : ' joueur') + ' en ligne' + (g > 0 ? ' · ' + g + (g > 1 ? ' courses' : ' course') + ' en cours' : ''),
+    offline: 'Serveur en ligne injoignable pour le moment',
+    badDisk: "Ce fichier n'est pas une image de disquette Atari ST (.st).", badTnt: "Ce fichier n'est ni SCR-TNT ni l'archive .lha de Stunt Car Racer TNT.",
+    loadingGame: 'Chargement du jeu…', ended: 'Partie terminée. Rechargez la page pour rejouer.'
+  };
+  const EN = {
+    ok: 'Ready', missing: 'Missing', none: 'None', remove: 'remove', checking: 'Checking the online server…',
+    online: (p, g) => p + (p === 1 ? ' player' : ' players') + ' online' + (g > 0 ? ' · ' + g + (g === 1 ? ' race' : ' races') + ' in progress' : ''),
+    offline: 'Online server unreachable right now',
+    badDisk: 'This file is not an Atari ST disk image (.st).', badTnt: 'This file is neither SCR-TNT nor the Stunt Car Racer TNT .lha archive.',
+    loadingGame: 'Loading the game…', ended: 'The game has ended. Reload the page to play again.'
+  };
+  const base = {};
+  document.querySelectorAll('[data-t]').forEach((e) => { base[e.dataset.t] = e.innerHTML; });
+  let fr = (navigator.language || '').toLowerCase().startsWith('fr');
+  try { const l = localStorage.getItem('scr-lang'); if (l) fr = l === 'fr'; } catch (e) {}
+  const T = (k, ...a) => { const v = (fr ? FR : EN)[k]; return typeof v === 'function' ? v(...a) : v; };
+
+  // ---------------------------------------------------------------- état
+  const DISK = '/save/game.st', INI = '/save/scr.ini', TNTDIR = '/save/tnt';
+  let ready = false, haveDisk = false, tntPath = '', running = false, hdReady = null, online = null, statusKey = 'loadingGame';
+  function status(k) { statusKey = k; $('status').textContent = k ? T(k) : ''; }
+  function applyLang() {
+    document.documentElement.lang = fr ? 'fr' : 'en';
+    document.querySelectorAll('[data-t]').forEach((e) => { e.innerHTML = fr ? FR[e.dataset.t] : base[e.dataset.t]; });
+    $('lang').textContent = fr ? 'English' : 'Français';
+    status(statusKey); refresh(); showOnline();
+  }
+  $('lang').addEventListener('click', () => { fr = !fr; try { localStorage.setItem('scr-lang', fr ? 'fr' : 'en'); } catch (e) {} applyLang(); });
+
+  function save() { if (ready) FS.syncfs(false, (e) => { if (e) console.warn('syncfs', e); }); }
+  function refresh() {
+    $('slotDisk').classList.toggle('ready', haveDisk);
+    $('stDisk').textContent = haveDisk ? '✓ ' + T('ok') : T('missing');
+    $('slotTnt').classList.toggle('ready', !!tntPath);
+    $('stTnt').innerHTML = tntPath ? '✓ ' + T('ok') + '<span class="remove" id="rmTnt">' + T('remove') + '</span>' : T('none');
+    const rm = $('rmTnt');
+    if (rm) rm.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); try { FS.unlink(tntPath); } catch (x) {} tntPath = ''; save(); refresh(); });
+    $('play').disabled = !(ready && haveDisk);
+  }
+
+  // joueurs en ligne : demandé au serveur relais par le jeu lui-même
+  function showOnline() {
+    const el = $('online');
+    el.classList.toggle('on', !!online && online.p >= 0); el.classList.toggle('off', !!online && online.p < 0);
+    $('onlinetxt').textContent = !online ? T('checking') : online.p >= 0 ? T('online', online.p, online.g) : T('offline');
+  }
+  function probeOnline() {
+    if (running) return;
+    Module.ccall('scr_web_probe', null, [], []);
+    const t0 = Date.now();
+    const poll = setInterval(() => {
+      const p = Module.ccall('scr_web_players', 'number', [], []);
+      if (p === -2 && Date.now() - t0 < 15000) return;
+      clearInterval(poll);
+      online = { p: p === -2 ? -1 : p, g: Module.ccall('scr_web_games', 'number', [], []) };
+      showOnline();
+    }, 250);
+  }
 
   // images HD (cockpit, flammes...) : chargées en arrière-plan dès l'ouverture de la page, dans /hd
-  let hdReady = null;
   function loadHd() {
     hdReady = (async () => {
       try {
@@ -85,24 +244,10 @@
         if (!r.ok) return false;
         const names = (await r.text()).split('\n').map((n) => n.trim()).filter((n) => /^[\w.-]+$/.test(n));
         FS.mkdir('/hd');
-        let done = 0;
-        await Promise.all(names.map(async (n) => {
-          const d = new Uint8Array(await (await fetch('hd/' + n)).arrayBuffer());
-          FS.writeFile('/hd/' + n, d);
-          done++;
-          if (!running) $('hdload').textContent = 'HD images: ' + done + ' / ' + names.length;
-        }));
-        $('hdload').textContent = '';
+        await Promise.all(names.map(async (n) => FS.writeFile('/hd/' + n, new Uint8Array(await (await fetch('hd/' + n)).arrayBuffer()))));
         return true;
-      } catch (e) { console.warn('images HD', e); $('hdload').textContent = ''; return false; }
+      } catch (e) { console.warn('images HD', e); return false; }
     })();
-  }
-
-  // sauvegarde de /save (image disque, scr.ini) dans IndexedDB
-  function save() { if (ready) FS.syncfs(false, (e) => { if (e) console.warn('syncfs', e); }); }
-  function refresh() {
-    document.body.classList.toggle('ready-disk', ready && haveDisk);
-    if (ready) status(haveDisk ? '' : 'Waiting for your disk image.');
   }
 
   var Module = {
@@ -110,60 +255,72 @@
     websocket: { subprotocol: 'null' },      // pas de sous-protocole : le serveur relais n'en choisit pas
     print: (t) => console.log(t),
     printErr: (t) => console.warn(t),
-    setStatus: (t) => { if (t && !ready) status(t); },
     onRuntimeInitialized: () => {
+      loadHd();
+      probeOnline(); setInterval(probeOnline, 20000);
       FS.mkdir('/save');
       FS.mount(IDBFS, {}, '/save');
-      loadHd();
       FS.syncfs(true, (err) => {
         if (err) console.warn('syncfs', err);
-        ready = true;
+        ready = true; status('');
         haveDisk = FS.analyzePath(DISK).exists;
+        try { const l = FS.readdir(TNTDIR).filter((n) => n !== '.' && n !== '..'); if (l.length) tntPath = TNTDIR + '/' + l[0]; } catch (e) {}
         refresh();
       });
     },
-    onExit: () => { running = false; save(); status('The game has ended. Reload the page to play again.'); $('setup').style.display = ''; $('game').style.display = 'none'; }
+    onExit: () => { running = false; save(); document.body.classList.remove('playing'); status('ended'); }
   };
 
-  // image disque : choisie ou glissée sur la page, gardée dans le navigateur, puis le jeu démarre
-  async function useFile(f) {
+  // ---------------------------------------------------------------- fichiers du joueur (reconnus par leur contenu)
+  const isTnt = (d) => (d.length > 7 && d[2] === 45 && d[3] === 108 && d[4] === 104) ||          // archive LHA « -lh »
+                       (d.length > 0x1000 && d[0] === 0 && d[1] === 0 && d[2] === 3 && d[3] === 0xf3); // exécutable Amiga
+  const isDisk = (d) => d.length >= 300000 && !isTnt(d);
+  async function useFile(f, kind) {
     if (!f || !ready || running) return;
-    const data = new Uint8Array(await f.arrayBuffer());
-    if (data.length < 300000) { status('This file does not look like an Atari ST disk image (.st).'); return; }
-    FS.writeFile(DISK, data);
-    haveDisk = true; save(); refresh();
-    start();
+    const d = new Uint8Array(await f.arrayBuffer());
+    if (!kind) kind = isTnt(d) ? 'tnt' : 'disk';
+    if (kind === 'tnt') {
+      if (!isTnt(d)) { status('badTnt'); return; }
+      try { FS.mkdir(TNTDIR); } catch (e) {}
+      if (tntPath) try { FS.unlink(tntPath); } catch (e) {}
+      tntPath = TNTDIR + '/' + (d[2] === 45 ? 'StuntCarRacerTNT.lha' : 'SCR-TNT');
+      FS.writeFile(tntPath, d);
+    } else {
+      if (!isDisk(d)) { status('badDisk'); return; }
+      FS.writeFile(DISK, d); haveDisk = true;
+    }
+    status(''); save(); refresh();
   }
-  $('file').addEventListener('change', (ev) => useFile(ev.target.files[0]));
+  $('fileDisk').addEventListener('change', (e) => useFile(e.target.files[0], 'disk'));
+  $('fileTnt').addEventListener('change', (e) => useFile(e.target.files[0], 'tnt'));
   window.addEventListener('dragover', (e) => { e.preventDefault(); document.body.classList.add('dragging'); });
-  window.addEventListener('dragleave', () => document.body.classList.remove('dragging'));
-  window.addEventListener('drop', (e) => { e.preventDefault(); document.body.classList.remove('dragging'); useFile(e.dataTransfer.files[0]); });
-  // image déjà gardée : un clic ou une touche n'importe où lance le jeu (le navigateur exige un geste pour le son)
-  const go = (e) => { if (ready && haveDisk && !running && !(e.target && e.target.closest && e.target.closest('label'))) start(); };
-  window.addEventListener('click', go);
-  window.addEventListener('keydown', go);
+  window.addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
+  window.addEventListener('drop', async (e) => {
+    e.preventDefault(); document.body.classList.remove('dragging');
+    for (const f of e.dataTransfer.files) await useFile(f);
+  });
 
+  // ---------------------------------------------------------------- lancement
   async function start() {
     if (!ready || !haveDisk || running) return;
     running = true;
-    $('setup').style.display = 'none';
-    $('game').style.display = 'block';
+    document.body.classList.add('playing');
     $('canvas').focus();
     setInterval(save, 5000);                  // options changées dans le jeu (scr.ini)
     window.addEventListener('beforeunload', save);
-    const hd = hdReady ? await hdReady : false;   // le jeu démarre avec les images HD
-    const args = [DISK, '--ini', INI].concat(hd ? ['--hddir', '/hd'] : []);
+    const hd = hdReady ? await hdReady : false;
+    const args = [DISK, '--ini', INI].concat(hd ? ['--hddir', '/hd'] : [], tntPath ? ['--tnt', tntPath] : []);
     try { Module.callMain(args); } catch (e) { if (e !== 'unwind' && !(e && e.name === 'ExitStatus')) console.error(e); }
   }
-
-  $('full').addEventListener('click', () => { const w = $('wrap'); (w.requestFullscreen || w.webkitRequestFullscreen).call(w); $('canvas').focus(); });
-  $('canvas').addEventListener('click', () => $('canvas').focus());
-
-  // touches du jeu que le navigateur garderait pour lui (F5 recharge la page, F1 aide, F11...)
+  $('play').addEventListener('click', start);
   window.addEventListener('keydown', (e) => {
-    if (!running) return;
+    if (!running) { if (e.key === 'Enter') start(); return; }
+    // touches du jeu que le navigateur garderait pour lui (F5 recharge la page, F1 aide, F11...)
     if (/^F\d+$/.test(e.key) || ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Backspace'].includes(e.key)) e.preventDefault();
   }, true);
+  $('full').addEventListener('click', () => { const w = $('screen'); (w.requestFullscreen || w.webkitRequestFullscreen).call(w); $('canvas').focus(); });
+  $('canvas').addEventListener('click', () => $('canvas').focus());
+  applyLang();
 </script>
 <script async src="scr.js"></script>
 </body>

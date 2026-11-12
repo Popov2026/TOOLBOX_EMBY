@@ -89,7 +89,7 @@ if(EMSCRIPTEN)
     -sASYNCIFY -sASYNCIFY_IGNORE_INDIRECT=1 -sASYNCIFY_STACK_SIZE=1048576
     -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=134217728 -sSTACK_SIZE=2097152
     -sINVOKE_RUN=0 -sEXIT_RUNTIME=1 -sENVIRONMENT=web -sFORCE_FILESYSTEM=1
-    "-sEXPORTED_RUNTIME_METHODS=['callMain','FS']" -lidbfs.js --profiling-funcs)
+    "-sEXPORTED_RUNTIME_METHODS=['callMain','FS','ccall']" -lidbfs.js --profiling-funcs)
   return()
 endif()
 

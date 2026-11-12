@@ -843,6 +843,20 @@ void RelayProbe::step() const {
 void RelayProbe::step() const {}
 #endif
 
+int RelayProbe::players() const {
+  if (!sh_) return -1;
+  step();
+  std::lock_guard<std::mutex> l(sh_->mu);
+  return sh_->players;
+}
+
+int RelayProbe::games() const {
+  if (!sh_) return -1;
+  step();
+  std::lock_guard<std::mutex> l(sh_->mu);
+  return sh_->games;
+}
+
 std::string RelayProbe::status() const {
   if (!sh_) return "";
   step();

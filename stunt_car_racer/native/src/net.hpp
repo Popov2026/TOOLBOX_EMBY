@@ -185,6 +185,8 @@ class RelayProbe {
   bool ok() const { return state() == State::Ok; }
   std::string params() const;              // réglages imposés par le serveur (vide si inconnus)
   std::string version() const;             // version du serveur (= version du jeu à jour), vide si ancien serveur
+  int players() const;                     // joueurs en ligne (réponse du serveur), -1 si inconnu
+  int games() const;                       // parties en cours, -1 si inconnu
 
  private:
   struct Shared {

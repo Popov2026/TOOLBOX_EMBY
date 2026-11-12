@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v87"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v88"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -394,6 +394,19 @@ std::string cleanPseudo(const std::string &s) {
 }
 
 }  // namespace
+
+#ifdef __EMSCRIPTEN__
+// page web : nombre de joueurs du serveur officiel, affiché avant même le lancement du jeu (l'adresse
+// du serveur reste chiffrée dans le programme) ; scr_web_players : -2 test en cours, -1 hors ligne
+static RelayProbe webProbe;
+extern "C" EMSCRIPTEN_KEEPALIVE void scr_web_probe() { webProbe.start(defaultRelay()); }
+extern "C" EMSCRIPTEN_KEEPALIVE int scr_web_players() {
+  const RelayProbe::State st = webProbe.state();
+  if (st == RelayProbe::State::Probing) return -2;
+  return st == RelayProbe::State::Ok ? std::max(0, webProbe.players()) : -1;
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int scr_web_games() { return std::max(0, webProbe.games()); }
+#endif
 
 // courte pause de la boucle du jeu (navigateur : la main est rendue à la page)
 static void scrDelay(uint32_t ms) {
