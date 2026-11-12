@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Stunt Car Racer – play in the browser</title>
-<meta name="description" content="Stunt Car Racer (Atari ST, 1989) in your browser: HD graphics, The New Tracks, online multiplayer. Bring your own disk image.">
+<meta name="description" content="Stunt Car Racer (Atari ST, 1989) in your browser: HD graphics and online multiplayer. Bring your own disk image.">
 <style>
   /* page d'accueil de la version WebAssembly : présentation, joueurs en ligne, fichiers du joueur */
   :root {
@@ -53,8 +53,6 @@
   .slot.ready .state { color: var(--ok); }
   .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; margin-left: 6px; vertical-align: 2px; }
   .tag.req { background: rgba(227,57,43,.18); color: #ff8a80; }
-  .tag.opt { background: rgba(255,176,32,.15); color: var(--accent2); }
-  .remove { display: block; color: var(--muted); font-size: 13px; font-weight: 400; text-decoration: underline; cursor: pointer; }
   input[type=file] { display: none; }
   #play { width: 100%; font: inherit; font-size: 22px; font-weight: 900; font-style: italic; letter-spacing: .5px; text-transform: uppercase;
           padding: 16px; border: 0; border-radius: 12px; color: #fff; cursor: pointer; margin-top: 6px;
@@ -96,7 +94,7 @@
       <button id="lang" type="button">FR</button>
     </div>
     <h1>Stunt <span>Car</span> Racer</h1>
-    <p class="tagline" data-t="tagline">The 1989 Atari ST classic by Geoff Crammond, in your browser — in HD, with The New Tracks and online races.</p>
+    <p class="tagline" data-t="tagline">The 1989 Atari ST classic by Geoff Crammond, in your browser — in HD, with online races.</p>
     <div id="online" class="online"><span class="dot"></span><span id="onlinetxt">…</span></div>
   </div>
 </header>
@@ -113,13 +111,6 @@
           <span class="state" id="stDisk"></span>
         </label>
         <input id="fileDisk" type="file" accept=".st,.ST">
-        <label class="slot" id="slotTnt" for="fileTnt">
-          <span class="icon">🏁</span>
-          <span class="txt"><span class="name">The New Tracks (TNT)<span class="tag opt" data-t="optional">optional</span></span><br>
-            <span class="sub" data-t="tntSub">8 extra tracks: your SCR-TNT file or the StuntCarRacerTNT_v1.4.lha archive. Only needed for the new tracks (F7).</span></span>
-          <span class="state" id="stTnt"></span>
-        </label>
-        <input id="fileTnt" type="file">
         <button id="play" disabled data-t="play">Play</button>
         <div id="status"></div>
         <p class="note" data-t="privacy">Your files stay in this browser: nothing is uploaded, and they are kept for your next visits. No game data is supplied with this page.</p>
@@ -130,7 +121,6 @@
         <div class="keys">
           <span class="big"><kbd>F1</kbd></span><div data-t="kF1"><b>Menu</b> – options: language, sound, HD, scenery, keys, online…</div>
           <span class="big"><kbd>F8</kbd></span><div data-t="kF8"><b>Old / new</b> – switch between the original 1989 game and the new HD version</div>
-          <span><kbd>F7</kbd></span><div data-t="kF7">Original tracks / The New Tracks (with the TNT file)</div>
           <span><kbd>← → ↑ ↓</kbd></span><div data-t="kArrows">Steer, accelerate, brake</div>
           <span><kbd>Space</kbd></span><div data-t="kBoost">Boost (Shift works too)</div>
           <span><kbd>F9</kbd> <kbd>K</kbd></span><div data-t="kChat">Chat · horn (online)</div>
@@ -143,7 +133,7 @@
     <div class="feat">
       <div class="card"><h3 data-t="f1t">The original game</h3><p data-t="f1p">The real 1989 program runs on an emulated 68000: same physics, same tracks, same thrills.</p></div>
       <div class="card"><h3 data-t="f2t">HD graphics</h3><p data-t="f2p">HD cockpit, textured cars and roads, grandstands, trees, sky, shadows, sparks and a V8 engine sound.</p></div>
-      <div class="card"><h3 data-t="f3t">Online races</h3><p data-t="f3p">Menu “4. Online Multiplayer”: first available player, public room, private rooms, up to 6 cars, spectators.</p></div>
+      <div class="card"><h3 data-t="f3t">Online races</h3><p data-t="f3p">Menu “3. Online Multiplayer”: first available player, public room, private rooms, up to 6 cars, spectators.</p></div>
     </div>
   </div>
 </main>
@@ -165,32 +155,31 @@
   // ---------------------------------------------------------------- textes : anglais dans la page, français ici
   const FR = {
     project: 'Projet', win: 'Version Windows',
-    tagline: "Le classique Atari ST de Geoff Crammond (1989) dans votre navigateur — en HD, avec The New Tracks et des courses en ligne.",
-    ready: 'Préparez-vous', disk: 'Disquette Atari ST', required: 'obligatoire', optional: 'facultatif',
+    tagline: "Le classique Atari ST de Geoff Crammond (1989) dans votre navigateur — en HD, avec des courses en ligne.",
+    ready: 'Préparez-vous', disk: 'Disquette Atari ST', required: 'obligatoire', 
     diskSub: 'Votre propre image de la disquette Stunt Car Racer. Déposez-la ici ou cliquez.',
-    tntSub: "8 circuits en plus : votre fichier SCR-TNT ou l'archive StuntCarRacerTNT_v1.4.lha. Seulement pour les nouveaux circuits (F7).",
     play: 'Jouer',
     privacy: "Vos fichiers restent dans ce navigateur : rien n'est envoyé, et ils sont gardés pour vos prochaines visites. Aucune donnée du jeu n'est fournie avec cette page.",
     keysTitle: 'Touches', kF1: '<b>Menu</b> – options : langue, son, HD, décor, touches, en ligne…',
     kF8: "<b>Ancien / nouveau</b> – bascule entre le jeu d'origine de 1989 et la nouvelle version HD",
-    kF7: "Circuits d'origine / The New Tracks (avec le fichier TNT)", kArrows: 'Diriger, accélérer, freiner', kBoost: 'Boost (Maj marche aussi)',
+    kArrows: 'Diriger, accélérer, freiner', kBoost: 'Boost (Maj marche aussi)',
     kChat: 'Discussion · klaxon (en ligne)', kFull: 'Plein écran', pad: 'Les manettes marchent aussi : Start ouvre le menu.',
     f1t: "Le jeu d'origine", f1p: 'Le vrai programme de 1989 tourne sur un 68000 émulé : même physique, mêmes circuits, mêmes sensations.',
     f2t: 'Graphismes HD', f2p: 'Cockpit HD, voitures et routes texturées, tribunes, arbres, ciel, ombres, étincelles et son de moteur V8.',
-    f3t: 'Courses en ligne', f3p: 'Menu « 4. Online Multiplayer » : premier joueur disponible, salle publique, salles privées, jusqu’à 6 voitures, spectateurs.',
+    f3t: 'Courses en ligne', f3p: 'Menu « 3. Online Multiplayer » : premier joueur disponible, salle publique, salles privées, jusqu’à 6 voitures, spectateurs.',
     fullBtn: 'Plein écran', gameHint: "F1 menu · F8 ancien / nouveau · cliquez sur l'image si les touches ne répondent pas",
     foot: 'Stunt Car Racer © Geoff Crammond / Micro Style 1989 — données du jeu non fournies. Version native et images HD par Popov2026.',
-    ok: 'Prête', missing: 'Manquante', none: 'Aucun', remove: 'retirer', checking: 'Test du serveur en ligne…',
+    ok: 'Prête', missing: 'Manquante', checking: 'Test du serveur en ligne…',
     online: (p, g) => p + (p > 1 ? ' joueurs' : ' joueur') + ' en ligne' + (g > 0 ? ' · ' + g + (g > 1 ? ' courses' : ' course') + ' en cours' : ''),
     offline: 'Serveur en ligne injoignable pour le moment',
-    badDisk: "Ce fichier n'est pas une image de disquette Atari ST (.st).", badTnt: "Ce fichier n'est ni SCR-TNT ni l'archive .lha de Stunt Car Racer TNT.",
+    badDisk: "Ce fichier n'est pas une image de disquette Atari ST (.st).",
     loadingGame: 'Chargement du jeu…', ended: 'Partie terminée. Rechargez la page pour rejouer.'
   };
   const EN = {
-    ok: 'Ready', missing: 'Missing', none: 'None', remove: 'remove', checking: 'Checking the online server…',
+    ok: 'Ready', missing: 'Missing', checking: 'Checking the online server…',
     online: (p, g) => p + (p === 1 ? ' player' : ' players') + ' online' + (g > 0 ? ' · ' + g + (g === 1 ? ' race' : ' races') + ' in progress' : ''),
     offline: 'Online server unreachable right now',
-    badDisk: 'This file is not an Atari ST disk image (.st).', badTnt: 'This file is neither SCR-TNT nor the Stunt Car Racer TNT .lha archive.',
+    badDisk: 'This file is not an Atari ST disk image (.st).',
     loadingGame: 'Loading the game…', ended: 'The game has ended. Reload the page to play again.'
   };
   const base = {};
@@ -200,8 +189,8 @@
   const T = (k, ...a) => { const v = (fr ? FR : EN)[k]; return typeof v === 'function' ? v(...a) : v; };
 
   // ---------------------------------------------------------------- état
-  const DISK = '/save/game.st', INI = '/save/scr.ini', TNTDIR = '/save/tnt';
-  let ready = false, haveDisk = false, tntPath = '', running = false, hdReady = null, online = null, statusKey = 'loadingGame';
+  const DISK = '/save/game.st', INI = '/save/scr.ini';
+  let ready = false, haveDisk = false, running = false, hdReady = null, online = null, statusKey = 'loadingGame';
   function status(k) { statusKey = k; $('status').textContent = k ? T(k) : ''; }
   function applyLang() {
     document.documentElement.lang = fr ? 'fr' : 'en';
@@ -215,10 +204,6 @@
   function refresh() {
     $('slotDisk').classList.toggle('ready', haveDisk);
     $('stDisk').textContent = haveDisk ? '✓ ' + T('ok') : T('missing');
-    $('slotTnt').classList.toggle('ready', !!tntPath);
-    $('stTnt').innerHTML = tntPath ? '✓ ' + T('ok') + '<span class="remove" id="rmTnt">' + T('remove') + '</span>' : T('none');
-    const rm = $('rmTnt');
-    if (rm) rm.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); try { FS.unlink(tntPath); } catch (x) {} tntPath = ''; save(); refresh(); });
     $('play').disabled = !(ready && haveDisk);
   }
 
@@ -269,40 +254,26 @@
         if (err) console.warn('syncfs', err);
         ready = true; status('');
         haveDisk = FS.analyzePath(DISK).exists;
-        try { const l = FS.readdir(TNTDIR).filter((n) => n !== '.' && n !== '..'); if (l.length) tntPath = TNTDIR + '/' + l[0]; } catch (e) {}
         refresh();
       });
     },
     onExit: () => { running = false; save(); document.body.classList.remove('playing'); status('ended'); }
   };
 
-  // ---------------------------------------------------------------- fichiers du joueur (reconnus par leur contenu)
-  const isTnt = (d) => (d.length > 7 && d[2] === 45 && d[3] === 108 && d[4] === 104) ||          // archive LHA « -lh »
-                       (d.length > 0x1000 && d[0] === 0 && d[1] === 0 && d[2] === 3 && d[3] === 0xf3); // exécutable Amiga
-  const isDisk = (d) => d.length >= 300000 && !isTnt(d);
-  async function useFile(f, kind) {
+  // ---------------------------------------------------------------- image disque du joueur
+  async function useFile(f) {
     if (!f || !ready || running) return;
     const d = new Uint8Array(await f.arrayBuffer());
-    if (!kind) kind = isTnt(d) ? 'tnt' : 'disk';
-    if (kind === 'tnt') {
-      if (!isTnt(d)) { status('badTnt'); return; }
-      try { FS.mkdir(TNTDIR); } catch (e) {}
-      if (tntPath) try { FS.unlink(tntPath); } catch (e) {}
-      tntPath = TNTDIR + '/' + (d[2] === 45 ? 'StuntCarRacerTNT.lha' : 'SCR-TNT');
-      FS.writeFile(tntPath, d);
-    } else {
-      if (!isDisk(d)) { status('badDisk'); return; }
-      FS.writeFile(DISK, d); haveDisk = true;
-    }
+    if (d.length < 300000) { status('badDisk'); return; }
+    FS.writeFile(DISK, d); haveDisk = true;
     status(''); save(); refresh();
   }
-  $('fileDisk').addEventListener('change', (e) => useFile(e.target.files[0], 'disk'));
-  $('fileTnt').addEventListener('change', (e) => useFile(e.target.files[0], 'tnt'));
+  $('fileDisk').addEventListener('change', (e) => useFile(e.target.files[0]));
   window.addEventListener('dragover', (e) => { e.preventDefault(); document.body.classList.add('dragging'); });
   window.addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
   window.addEventListener('drop', async (e) => {
     e.preventDefault(); document.body.classList.remove('dragging');
-    for (const f of e.dataTransfer.files) await useFile(f);
+    useFile(e.dataTransfer.files[0]);
   });
 
   // ---------------------------------------------------------------- lancement
@@ -314,7 +285,7 @@
     setInterval(save, 5000);                  // options changées dans le jeu (scr.ini)
     window.addEventListener('beforeunload', save);
     const hd = hdReady ? await hdReady : false;
-    const args = [DISK, '--ini', INI].concat(hd ? ['--hddir', '/hd'] : [], tntPath ? ['--tnt', tntPath] : []);
+    const args = [DISK, '--ini', INI].concat(hd ? ['--hddir', '/hd'] : []);
     try { Module.callMain(args); } catch (e) { if (e !== 'unwind' && !(e && e.name === 'ExitStatus')) console.error(e); }
   }
   $('play').addEventListener('click', start);

@@ -70,6 +70,12 @@ constexpr uint32_t A_PRINT = 0x47ba0, A_PRINT_LOOP = 0x47bc6, A_PRINT_READ = 0x4
 constexpr uint32_t TEXT_BUF = HLE + 0x100;   // texte de remplacement (RAM libre en fin de mémoire)
 constexpr uint8_t TXT_MULTI = 0x1f, TXT_LINK = 0x71, TXT_ONLINE = 0xf0;   // 0xF0 : 4e entrée ajoutée
 constexpr int MENU_SELECT = 0x10;
+// version navigateur : pas de réseau local ; le 3e choix « Computer Link » devient « Online Multiplayer »
+#ifdef __EMSCRIPTEN__
+constexpr bool ONLINE_ONLY = true;
+#else
+constexpr bool ONLINE_ONLY = false;
+#endif
 constexpr int MENU_TRACKS = 0x18, MENU_PRACTISE = 0x1c;   // « Tracks in DIVISION n » puis « Practise The ... / Cancel »
 constexpr uint32_t SCREEN = 0xf8000;
 constexpr uint32_t CYCLES_PER_FRAME = 160256;     // 8 MHz, 50 Hz PAL
@@ -504,20 +510,28 @@ void Machine::hook(uint32_t pc) {
       uint32_t ret = (uint32_t(ram[sp]) << 24 | ram[sp + 1] << 16 | ram[sp + 2] << 8 | ram[sp + 3]) & 0xffffff;
       if (ret == RET_SELECT_MENU) {
         selectMenu_ = true;
-        ram[MENU_TABLE_SELECT + 3] = TXT_ONLINE;
-        m68k_set_reg(M68K_REG_D2, (m68k_get_reg(nullptr, M68K_REG_D2) & ~0xffu) | 3u);
+        if (ONLINE_ONLY) {
+          if (ram[M_SEL] > 2) ram[M_SEL] = 2;
+        } else {
+          ram[MENU_TABLE_SELECT + 3] = TXT_ONLINE;
+          m68k_set_reg(M68K_REG_D2, (m68k_get_reg(nullptr, M68K_REG_D2) & ~0xffu) | 3u);
+        }
       }
     }
     menuBack_ = autoCancel_ == menuId_;
     autoCancel_ = -1;
   } else if (pc == A_MENU_END) {
-    if (selectMenu_) { selectChoice_ = int(m68k_get_reg(nullptr, M68K_REG_D0) & 0xff); selectMenu_ = false; }
+    if (selectMenu_) {
+      selectChoice_ = int(m68k_get_reg(nullptr, M68K_REG_D0) & 0xff);
+      if (ONLINE_ONLY && selectChoice_ == 2) selectChoice_ = 3;   // « Online Multiplayer » à la place du réseau local
+      selectMenu_ = false;
+    }
     menuId_ = -1;
   }
   // textes du menu de départ remplacés : la boucle d'affichage lit notre tampon
   if (pc == A_PRINT && selectMenu_ && (ram[0x4c0f1] & 0x80)) {
     uint8_t id = uint8_t(m68k_get_reg(nullptr, M68K_REG_D1));
-    const char *t = id == TXT_MULTI ? "Multiplayer - Local" : id == TXT_LINK ? "Computer Link - Local LAN"
+    const char *t = id == TXT_MULTI ? "Multiplayer - Local" : id == TXT_LINK ? (ONLINE_ONLY ? "Online Multiplayer" : "Computer Link - Local LAN")
                     : id == TXT_ONLINE ? "Online Multiplayer" : nullptr;
     if (t) {
       size_t n = std::strlen(t);

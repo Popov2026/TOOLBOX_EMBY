@@ -61,7 +61,7 @@ cp "$ROOT/scr.ini.example" "$G/scr.ini.exemple"
 cp "$ROOT/README_HD.txt" "$G/hd/"; cp "$ROOT/README_DISK.txt" "$G/DISK/README.txt"; cp "$ROOT/README_TNT.txt" "$G/TNT/"
 # images HD (dépôt stuntcar-racer : assets/hd, ou HD_ASSETS=dossier) livrées dans le dossier hd du jeu
 HD_ASSETS=${HD_ASSETS:-$ROOT/../assets/hd}
-if [ -d "$HD_ASSETS" ]; then cp "$HD_ASSETS"/*.png "$HD_ASSETS"/hd.ini "$G/hd/"; echo "images HD : $(ls "$HD_ASSETS"/*.png | wc -l)"; fi
+if [ -d "$HD_ASSETS" ]; then cp "$HD_ASSETS"/*.png "$HD_ASSETS"/hd.ini "$G/hd/"; cp "$HD_ASSETS"/*.wav "$G/hd/" 2>/dev/null || true; echo "images HD : $(ls "$HD_ASSETS"/*.png | wc -l)"; fi
 for d in "$G/serveur" "$P/ServeurRelaisStuntCar"; do
   cp "$ROOT/server/README_SERVER.txt" "$ROOT/server/scr-relay.service" "$ROOT/server/scr_relay.cpp" "$ROOT/server/scr_relay.ini" "$B/scr_relay.exe" "$WORK/scr_relay" "$d/"
 done

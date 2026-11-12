@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v89"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v90"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -473,6 +473,14 @@ int main(int argc, char **argv) {
   int track = o.track;
   static TrackSet tntSet;   // circuits TNT (si le fichier de l'utilisateur est trouvé)
   bool haveTnt = false;
+#ifdef __EMSCRIPTEN__
+  // version navigateur : sans les circuits TNT (ni le réseau local, voir Machine::setOnlineOnly)
+  constexpr bool kWeb = true;
+  o.tntPath.clear(); o.tnt = false;
+  if (false)
+#else
+  constexpr bool kWeb = false;
+#endif
   {
     std::string tp = findTnt(o.tntPath), err;
     if (!tp.empty()) {
@@ -1018,7 +1026,7 @@ int main(int argc, char **argv) {
     it.push_back({L("Volume de la foule : ", "Crowd volume: ") + std::to_string(int(std::lround(o.crowdVolume * 100))) + " %  < >", 22});
     it.push_back({std::string(L("Son du moteur : ", "Engine sound: ")) + (o.engineV8 ? L("V8 réaliste", "realistic V8") : L("d'origine", "original")), 24});
     it.push_back({L("Plein écran : ", "Full screen: ") + yn(isFullscreen()) + "  (F11)", 7});
-    it.push_back({haveTnt ? std::string(L("Circuits : ", "Tracks: ")) + (soloSet ? "TNT" : L("d'origine", "original")) + "  (F7)" : L("Circuits TNT : fichier SCR-TNT absent", "TNT tracks: SCR-TNT file missing"), 8});
+    if (!kWeb) it.push_back({haveTnt ? std::string(L("Circuits : ", "Tracks: ")) + (soloSet ? "TNT" : L("d'origine", "original")) + "  (F7)" : L("Circuits TNT : fichier SCR-TNT absent", "TNT tracks: SCR-TNT file missing"), 8});
     it.push_back({L("Manette : ", "Gamepad: ") + yn(o.usePad) + (pad ? L("  (branchée)", "  (connected)") : L("  (aucune)", "  (none)")), 9});
     it.push_back({L("Vibrations aux chocs : ", "Rumble on impacts: ") + yn(o.rumble), 10});
     for (int k = 0; k < 6; k++)
@@ -1284,6 +1292,7 @@ int main(int argc, char **argv) {
             view->params.highDetail = highDetail;
             if (highDetail && !hd) { hd = true; applyMode(true); }
           } else if (sc == SDL_SCANCODE_F7 && !haveTnt) {
+            if (!kWeb)
             note = L("Circuits TNT : fichier SCR-TNT introuvable (dossier TNT à côté de scr.exe)", "TNT tracks: SCR-TNT file not found (TNT folder next to scr.exe)"); noteUntil = NetLink::clock() + 5;
           } else if (sc == SDL_SCANCODE_F6 || (sc == SDL_SCANCODE_F7 && !net.inGroup() && !gr.active) ||
                      ((sc == SDL_SCANCODE_PAGEUP || sc == SDL_SCANCODE_PAGEDOWN) && track >= 0)) {
