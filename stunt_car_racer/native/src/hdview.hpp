@@ -165,6 +165,10 @@ class HdView {
   void drawParticles(const Camera &c);
   uint32_t flameTick_ = 0;
   std::vector<Track> tracks_;
+  // tracé en mémoire (le jeu le modifie : pont-levis de DRAW BRIDGE) : copie de la zone, image redécodée
+  std::vector<uint8_t> liveTrack_;
+  Bytes liveImage_;
+  void followLiveTrack(const Machine &m);
   std::deque<Snap> snaps_;
   uint32_t lastTicks_ = 0, lastTickFrame_ = 0, frame_ = 0;
   bool pendingSnap_ = false;

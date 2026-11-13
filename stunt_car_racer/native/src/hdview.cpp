@@ -156,8 +156,26 @@ void HdView::drawFlame(int id, double x0, double y0, double s, const Machine &m,
   }
 }
 
+// le jeu réécrit une partie des données des circuits pendant la course (pont-levis de DRAW BRIDGE :
+// hauteurs des pièces du pont, $13E75-$13EB8 et quelques autres) ; la géométrie HD suit la mémoire
+void HdView::followLiveTrack(const Machine &m) {
+  constexpr uint32_t BASE = 0x10100, LO = 0x13670, HI = 0x16000;
+  const Bytes &img = m.image();
+  if (img.size() < HI - BASE) return;
+  bool changed = liveTrack_.size() != HI - LO;
+  for (uint32_t a = LO; !changed && a < HI; a++) changed = liveTrack_[a - LO] != m.b(a);
+  if (!changed) return;
+  liveTrack_.resize(HI - LO);
+  for (uint32_t a = LO; a < HI; a++) liveTrack_[a - LO] = m.b(a);
+  if (liveImage_.size() != img.size()) liveImage_ = img;
+  std::copy(liveTrack_.begin(), liveTrack_.end(), liveImage_.begin() + (LO - BASE));
+  try { tracks_ = decodeTracks(liveImage_, m.trackSet()); }
+  catch (std::exception &) { tracks_ = decodeTracks(img, m.trackSet()); }   // données en cours d'écriture : celles du disque
+}
+
 void HdView::afterFrame(const Machine &m) {
   frame_++;
+  followLiveTrack(m);
   {   // dégâts de la voiture du joueur : une hausse = choc ou réception brutale (étincelles, fumée)
     int d = m.b(0x10939) + m.b(0x1093a) + m.b(0x1093b);
     if (ownDamage_ >= 0 && d > ownDamage_) ownImpact_ = std::min(63, ownImpact_ + (d - ownDamage_) * 4);
@@ -241,6 +259,7 @@ const HdSprite *HdView::spriteFor(int id, const Machine &) { return assets.sprit
 
 void HdView::setTracks(const Machine &m) {
   tracks_ = decodeTracks(m.image(), m.trackSet());
+  liveTrack_.clear();   // relu depuis la mémoire à la prochaine trame
   scenery_.clear(); crowdTrack_ = -1; hint_ = -1;
 }
 
