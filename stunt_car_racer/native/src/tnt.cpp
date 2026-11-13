@@ -98,17 +98,20 @@ Bytes lh5(const uint8_t *data, size_t n, size_t size) {
 Bytes fromLha(const Bytes &d) {
   for (size_t p = 0; p + 24 < d.size() && d[p];) {
     size_t hs = d[p], lvl = d[p + 20], nl = d[p + 21];
+    if (p + 22 + nl + 5 > d.size()) break;   // en-tête coupé (archive abîmée ou piégée)
     uint32_t comp = d[p + 7] | (d[p + 8] << 8) | (d[p + 9] << 16) | (uint32_t(d[p + 10]) << 24);
     uint32_t orig = d[p + 11] | (d[p + 12] << 8) | (d[p + 13] << 16) | (uint32_t(d[p + 14]) << 24);
     std::string name(reinterpret_cast<const char *>(&d[p + 22]), nl);
     size_t ext = 0;
     if (lvl == 1) {   // en-têtes étendus comptés dans la taille compressée
       size_t q = p + 22 + nl + 3, e = size_t(d[q] | (d[q + 1] << 8)); q += 2;
-      while (e && q + e <= d.size()) { ext += e; q += e; e = size_t(d[q - 2] | (d[q - 1] << 8)); }
+      while (e >= 2 && q + e <= d.size()) { ext += e; q += e; e = size_t(d[q - 2] | (d[q - 1] << 8)); }
+      if (ext > comp) break;
     } else if (lvl != 0) break;
     size_t data = p + 2 + hs + ext, clen = comp - ext;
     if (data + clen > d.size()) break;
     if (name == "SCR-TNT") {
+      if (orig > 4 * 1024 * 1024) break;   // SCR-TNT fait quelques dizaines de Ko
       if (!std::memcmp(&d[p + 2], "-lh5-", 5)) return lh5(&d[data], clen, orig);
       if (!std::memcmp(&d[p + 2], "-lh0-", 5)) return Bytes(d.begin() + long(data), d.begin() + long(data + clen));
     }

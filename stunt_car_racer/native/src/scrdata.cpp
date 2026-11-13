@@ -7,8 +7,15 @@
 
 namespace scr {
 
-static uint16_t le16(const Bytes &b, size_t o) { return b[o] | (b[o + 1] << 8); }
+// lectures bornées : un fichier mal formé (ou piégé) donne une erreur, jamais une lecture ou une
+// écriture hors du tampon
+static void need(const Bytes &b, size_t o, size_t n) {
+  if (o > b.size() || n > b.size() - o) throw std::runtime_error("fichier du jeu invalide");
+}
+static uint8_t at(const Bytes &b, size_t o) { need(b, o, 1); return b[o]; }
+static uint16_t le16(const Bytes &b, size_t o) { need(b, o, 2); return b[o] | (b[o + 1] << 8); }
 static uint32_t be32(const Bytes &b, size_t o) {
+  need(b, o, 4);
   return (uint32_t(b[o]) << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3];
 }
 
@@ -20,7 +27,7 @@ std::map<std::string, Bytes> fatList(const Bytes &img) {
   size_t csize = size_t(spc) * bps;
   auto next = [&](unsigned n) {
     size_t o = fat + n * 3 / 2;
-    unsigned v = img[o] | (img[o + 1] << 8);
+    unsigned v = le16(img, o);
     return (n & 1) ? v >> 4 : v & 0xfff;
   };
   auto chain = [&](unsigned cl) {
@@ -34,8 +41,9 @@ std::map<std::string, Bytes> fatList(const Bytes &img) {
     return out;
   };
   std::map<std::string, Bytes> files;
-  std::function<void(const Bytes &, const std::string &)> walk;
-  walk = [&](const Bytes &buf, const std::string &path) {
+  std::function<void(const Bytes &, const std::string &, int)> walk;
+  walk = [&](const Bytes &buf, const std::string &path, int depth) {
+    if (depth > 8) return;   // dossiers qui se contiennent eux-mêmes
     for (size_t i = 0; i + 32 <= buf.size(); i += 32) {
       if (buf[i] == 0) break;
       if (buf[i] == 0xe5 || buf[i] == 0x2e) continue;
@@ -46,7 +54,7 @@ std::map<std::string, Bytes> fatList(const Bytes &img) {
       unsigned attr = buf[i + 11], cl = le16(buf, i + 26);
       uint32_t size = buf[i + 28] | (buf[i + 29] << 8) | (buf[i + 30] << 16) | (uint32_t(buf[i + 31]) << 24);
       if (attr & 0x08) continue;
-      if (attr & 0x10) walk(chain(cl), path + name + "/");
+      if (attr & 0x10) walk(chain(cl), path + name + "/", depth + 1);
       else {
         Bytes d = chain(cl);
         if (d.size() > size) d.resize(size);
@@ -54,12 +62,14 @@ std::map<std::string, Bytes> fatList(const Bytes &img) {
       }
     }
   };
-  walk(Bytes(img.begin() + root, img.begin() + data), "");
+  need(img, root, data - root);
+  walk(Bytes(img.begin() + root, img.begin() + data), "", 0);
   return files;
 }
 
 Bytes byteKiller(const Bytes &buf, size_t end, bool &ok) {
   size_t p = end;
+  if (end > buf.size()) throw std::runtime_error("flux compressé invalide");
   auto rl = [&]() { if (p < 4) throw std::runtime_error("flux compressé invalide"); p -= 4; return be32(buf, p); };
   uint32_t length = rl(), crc = rl(), d0 = rl();
   crc ^= d0;
@@ -130,20 +140,21 @@ Bytes innerProgram(const Bytes &file) {
 }
 
 Bytes relocate(const Bytes &prg, uint32_t base, uint32_t &bss) {
-  uint32_t tlen = be32(prg, 2), dlen = be32(prg, 6), slen = be32(prg, 14);
+  const size_t tlen = be32(prg, 2), dlen = be32(prg, 6), slen = be32(prg, 14);
   bss = be32(prg, 10);
+  need(prg, 0x1c, tlen + dlen);
   Bytes img(prg.begin() + 0x1c, prg.begin() + 0x1c + tlen + dlen);
   size_t r = 0x1c + tlen + dlen + slen;
   uint32_t off = be32(prg, r);
   r += 4;
   if (off) {
-    uint32_t a = off;
+    size_t a = off;
     for (;;) {
-      uint32_t v = be32(img, a) + base;
+      uint32_t v = be32(img, a) + base;   // be32 vérifie que a + 4 tient dans le programme
       img[a] = v >> 24; img[a + 1] = v >> 16; img[a + 2] = v >> 8; img[a + 3] = v;
-      uint8_t c = prg[r++];
+      uint8_t c = at(prg, r++);
       if (c == 0) break;
-      while (c == 1) { a += 254; c = prg[r++]; }
+      while (c == 1) { a += 254; c = at(prg, r++); }
       a += c;
     }
   }

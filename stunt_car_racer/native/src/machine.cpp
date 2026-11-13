@@ -272,6 +272,15 @@ void Machine::overlayARGB(uint32_t *out, std::vector<SpriteDraw> *visible) const
 }
 
 
+// programme du jeu reconnu (CRC-32 du code et des données relogés) : une disquette modifiée ou
+// piégée est refusée avant de lancer quoi que ce soit
+static uint32_t crc32(const Bytes &d) {
+  uint32_t c = 0xffffffffu;
+  for (uint8_t b : d) { c ^= b; for (int k = 0; k < 8; k++) c = (c >> 1) ^ (0xedb88320u & (0u - (c & 1))); }
+  return ~c;
+}
+static const uint32_t KNOWN_GAME_CRC[] = {0xfe43374bu};   // Stunt Car Racer, Micro Style 1989 (Atari ST)
+
 Machine::Machine(const Bytes &file) {
   ram = new uint8_t[RAMSIZE]();
   if (!(file.size() > 2 && file[0] == 0x60 && file[1] == 0x1a)) disk_ = file;
@@ -279,7 +288,17 @@ Machine::Machine(const Bytes &file) {
   uint32_t bss = 0;
   Bytes img = relocate(prg, BASE, bss);
   image_ = img;
-  if (BASE + img.size() + bss > HLE) throw std::runtime_error("programme trop grand");
+  if (img.size() > HLE - BASE || bss > HLE - BASE - img.size()) throw std::runtime_error("programme trop grand");
+  {   // contrôle avant de copier quoi que ce soit en mémoire
+    const uint32_t c = crc32(img);
+    bool known = false;
+    for (uint32_t k : KNOWN_GAME_CRC) known |= k == c;
+    if (!known) {
+      char msg[96];
+      std::snprintf(msg, sizeof msg, "disquette modifiée ou version inconnue du jeu (CRC %08X)", c);
+      throw std::runtime_error(msg);
+    }
+  }
   std::memcpy(ram + BASE, img.data(), img.size());
   // contrôle : noms des circuits à l'adresse attendue
   if (std::memcmp(ram + 0x13498, "LITTLE RAMP", 11) != 0) throw std::runtime_error("version du jeu non reconnue");
