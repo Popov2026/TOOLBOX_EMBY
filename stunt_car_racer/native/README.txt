@@ -2,6 +2,9 @@
 
 Stunt Car Racer (Atari ST, Geoff Crammond / Micro Style 1989) - version native PC
 
+Merci à Geoff Crammond (programme et conception) et à John Cumming (graphismes additionnels de
+la version Atari ST) pour ce jeu et tous ces souvenirs.
+
 Aucune donnée du jeu n'est fournie : il faut votre propre image disque .st.
 
 Version navigateur (sans installation) : https://popov2026.github.io/stuntcar-racer/play/ - choisissez
@@ -115,6 +118,9 @@ ENGLISH
 ==============================================================================
 
 Stunt Car Racer (Atari ST, Geoff Crammond / Micro Style 1989) - native PC version
+
+Thanks to Geoff Crammond (program and design) and John Cumming (additional graphics of the Atari
+ST version) for this game and all those memories.
 
 No game data is supplied: you need your own .st disk image.
 
