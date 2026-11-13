@@ -95,6 +95,12 @@
   .btn2 { display: block; text-align: center; margin-top: auto; padding: 13px; border-radius: 12px; font-weight: 800; color: #fff; text-decoration: none;
           background: linear-gradient(180deg, #2f6fd6, #1f4fa0); box-shadow: 0 8px 24px rgba(47,111,214,.3); }
   .btn2:hover { filter: brightness(1.1); }
+  /* remerciement à l'auteur du jeu */
+  .thanks { margin-top: 18px; display: flex; gap: 16px; align-items: center; padding: 18px 20px; border-radius: 14px;
+            background: linear-gradient(135deg, rgba(227,57,43,.14), rgba(255,176,32,.08)); border: 1px solid rgba(255,176,32,.3); }
+  .thanks .icon { font-size: 36px; flex: none; }
+  .thanks h2 { margin: 0 0 4px; font-size: 18px; }
+  .thanks p { margin: 0; color: var(--text); opacity: .9; font-size: 15px; }
   .feat { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 18px; }
   .feat .card { padding: 16px; }
   .feat h3 { margin: 0 0 6px; font-size: 16px; }
@@ -193,6 +199,13 @@
       </section>
     </div>
 
+    <section class="thanks">
+      <span class="icon">🏆</span>
+      <div><h2 data-t="thxTitle">Thank you, Geoff Crammond</h2>
+        <p data-t="thxText">For Stunt Car Racer, the Grand Prix series and all the unforgettable memories you gave to generations of players.
+          Elevated tracks, impossible jumps, a cracked chassis on the last lap… This project is a heartfelt tribute to your work.</p></div>
+    </section>
+
     <div class="feat">
       <div class="card"><h3 data-t="f1t">The original game</h3><p data-t="f1p">The real 1989 program runs on an emulated 68000: same physics, same tracks, same thrills.</p></div>
       <div class="card"><h3 data-t="f2t">HD graphics</h3><p data-t="f2p">HD cockpit, textured cars and roads, grandstands, trees, sky, shadows, sparks and a V8 engine sound.</p></div>
@@ -234,6 +247,8 @@
     videoTitle: 'Le jeu en vidéo', winTitle: 'Version Windows', winP: 'Le jeu complet pour PC, plus fluide et avec encore plus :',
     winList: '<li>Full HD 1920×1080 avec rendu OpenGL</li><li>The New Tracks (TNT) : 8 circuits en plus</li><li>Courses en réseau local</li><li>Votre propre serveur relais</li>',
     winBtn: 'Télécharger pour Windows',
+    thxTitle: 'Merci, Geoff Crammond',
+    thxText: "Pour Stunt Car Racer, la série Grand Prix et tous les souvenirs inoubliables que vous avez offerts à des générations de joueurs. Les circuits suspendus, les sauts impossibles, le châssis fissuré dans le dernier tour… Ce projet est un hommage sincère à votre travail.",
     foot: 'Stunt Car Racer © Geoff Crammond / Micro Style 1989 — données du jeu non fournies. Version native et images HD par Popov2026.',
     ok: 'Prête', missing: 'Manquante', checking: 'Test du serveur en ligne…',
     online: (p, g) => p + (p > 1 ? ' joueurs' : ' joueur') + ' en ligne' + (g > 0 ? ' · ' + g + (g > 1 ? ' courses' : ' course') + ' en cours' : ''),
