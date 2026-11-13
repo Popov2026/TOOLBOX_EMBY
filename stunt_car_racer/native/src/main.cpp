@@ -31,7 +31,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v92"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v93"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -471,11 +471,13 @@ int main(int argc, char **argv) {
     std::string a = argv[i];
     if (a == "--ini") { i++; continue; }
     if (a == "--fullscreen" || a == "--smooth" || a == "--hd" || a == "--host" || a == "--joinlan") { setOption(o, a.substr(2), "1"); continue; }
-    // lancement « Classique » : le jeu de 1989 tel quel (affichage d'origine, sans images HD, son
-    // d'origine) ; « HD » : version modernisée (décor, textures, détails élevés, V8, foule).
+    // lancement « Classique » : le look de 1989 en haute résolution fluide (mode HD, sans textures,
+    // sans images HD, sans décor ajouté ni ciel, son d'origine) ; « HD » : version modernisée
+    // (décor, textures, détails élevés, V8, foule).
     // Pour cette partie seulement : scr.ini n'est pas modifié (F8, F5 et F1 changent toujours tout)
     if (a == "--classic") {
-      o.hd = false; o.highDetail = false; o.hdTextures = false; o.engineV8 = false; o.crowd = false;
+      o.hd = true; o.highDetail = false; o.hdTextures = false; o.scenery = false; o.sky = false;
+      o.engineV8 = false; o.crowd = false;
       continue;
     }
     if (a == "--modern") {
