@@ -425,11 +425,21 @@
       setTimeout(() => ac.close(), (d + 1) * 1000);
     } catch (e) { console.warn('son du lecteur', e); }
   }
+  // vrai bruit de lecteur de disquette (floppy.mp3, 6 s), chargé d'avance ; à défaut, le bruit synthétisé
+  const floppyAudio = new Audio('floppy.mp3');
+  floppyAudio.preload = 'auto';
+  function playFloppy(d) {
+    try {
+      floppyAudio.currentTime = 0; floppyAudio.volume = 0.9;
+      const r = floppyAudio.play();
+      if (r && r.catch) r.catch(() => floppySound(d));
+    } catch (e) { floppySound(d); }
+  }
   // chargement : 6 s, barre et pourcentage par-dessus le jeu qui démarre derrière
   function bootScreen(d) {
     const b = $('boot'); b.classList.add('on');
     $('bootLbl').textContent = fr ? 'CHARGEMENT DE LA DISQUETTE…' : 'LOADING DISK…';
-    floppySound(d);
+    playFloppy(d);
     const t0 = performance.now();
     let shown = 0;
     const step = () => {
