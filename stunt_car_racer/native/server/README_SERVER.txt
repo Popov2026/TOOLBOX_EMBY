@@ -188,6 +188,17 @@ données. Façons de se trouver (menu « 4. Online Multiplayer » du jeu) :
   adresse IP n'y figure (attention : les codes des salles privées y sont visibles).
 
 
+7. Page d'administration (mot de passe)
+  Ajoutez dans scr_relay.ini une ligne « admin = votre-mot-de-passe », puis relancez le serveur :
+  https://votre.domaine/admin (ou http://adresse:27420/admin) demande ce mot de passe (le nom
+  d'utilisateur n'a pas d'importance) et montre, actualisé toutes les 5 s :
+  - les codes de licence de la version navigateur (lignes « licence = NOM EMPREINTE ») : utilisé
+    ou pas encore, combien de fois, quand et depuis quelle adresse ;
+  - les joueurs connectés avec leur adresse, leur version, leur salle ou course et ce qu'ils font ;
+  - les robots refusés et les adresses bloquées ;
+  - les 200 dernières lignes du journal.
+  3 mots de passe faux bloquent l'adresse pendant 1 h. Sans ligne « admin », la page n'existe pas.
+
 ==============================================================================
 ENGLISH
 ==============================================================================
@@ -380,3 +391,14 @@ data along. Ways to find each other (the game's "4. Online Multiplayer" menu):
   state), the connected players (mode, room, state, time) and the open private rooms with their
   players; the same information as JSON: /status.json. No IP address is shown (note: private room
   codes are visible there).
+
+7. Administration page (password)
+  Add a line "admin = your-password" to scr_relay.ini and restart the server:
+  https://your.domain/admin (or http://address:27420/admin) asks for this password (the user name
+  does not matter) and shows, refreshed every 5 s:
+  - the browser version's licence codes ("licence = NAME FINGERPRINT" lines): used or not yet,
+    how many times, when and from which address;
+  - the connected players with their address, version, room or race and what they are doing;
+  - the refused bots and the blocked addresses;
+  - the last 200 log lines.
+  3 wrong passwords block the address for 1 h. Without an "admin" line, the page does not exist.

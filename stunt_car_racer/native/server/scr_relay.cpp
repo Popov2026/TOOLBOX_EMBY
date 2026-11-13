@@ -123,7 +123,7 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v96"
+#define SCR_RELAY_VERSION "v97"
 
 namespace {
 
@@ -145,6 +145,7 @@ FILE *logFile = nullptr;      // --log : copie du journal dans un fichier (Windo
 bool live = false;            // affichage en direct des joueurs (console)
 bool dirty = true;            // à redessiner
 std::vector<std::string> events;   // derniers événements (affichage en direct)
+std::vector<std::string> journal;  // derniers messages du journal (page d'administration)
 
 std::string stamp(const char *fmt) {
   char ts[32]; time_t t = time(nullptr); strftime(ts, sizeof ts, fmt, localtime(&t));
@@ -156,6 +157,8 @@ void logf(const char *fmt, ...) {
   va_list ap; va_start(ap, fmt); std::vsnprintf(msg, sizeof msg, fmt, ap); va_end(ap);
   std::string ts = stamp("%Y-%m-%d %H:%M:%S");
   if (logFile) { std::fprintf(logFile, "%s  %s\n", ts.c_str(), msg); std::fflush(logFile); }
+  journal.push_back(ts + "  " + msg);
+  if (journal.size() > 400) journal.erase(journal.begin(), journal.begin() + 100);
   if (live) {
     events.push_back(stamp("%H:%M:%S") + "  " + msg);
     if (events.size() > 12) events.erase(events.begin());
@@ -218,6 +221,16 @@ uint32_t nextId = 1;
 uint64_t totalConnections = 0, totalGames = 0, totalBots = 0, totalWeb = 0;
 struct Strike { int n = 0; double until = 0, last = 0; };
 std::map<std::string, Strike> strikes;   // adresses des robots
+struct BotSeen { std::string when, ip, why; };
+std::vector<BotSeen> recentBots;          // derniers robots (page d'administration)
+void noteBot(const std::string &ip, const std::string &why) {
+  recentBots.push_back({stamp("%Y-%m-%d %H:%M:%S"), ip, why});
+  if (recentBots.size() > 200) recentBots.erase(recentBots.begin(), recentBots.begin() + 50);
+}
+// page d'administration (/admin) : mot de passe de scr_relay.ini (« admin = ... »), vide = page désactivée
+std::string adminPassword;
+struct LicUse { int count = 0; std::string first, last, ip; };
+std::map<std::string, LicUse> licenceUses;   // nom du code -> utilisations
 double startedAt = 0;
 int listenPort = 27420;
 std::string machineAddresses;
@@ -266,6 +279,7 @@ bool readConfig(const std::string &path, int &port) {
     else if (k == "damping") params.damping = d;
     else if (k == "boostuse") params.boostuse = d;
     else if (k == "shock") params.shock = std::atoi(v.c_str());
+    else if (k == "admin" || k == "admin_password") adminPassword = v;
     else if (k == "licence" || k == "license") {
       size_t sp = v.find_last_of(" \t");
       if (sp != std::string::npos) licences[trim(v.substr(sp + 1))] = trim(v.substr(0, sp));
@@ -387,6 +401,17 @@ void wsDecode(Client &c) {
 }
 
 std::string webPage(const std::string &path, std::string &type, int &status);
+std::string adminPage(const std::string &ip);
+std::string b64decode(const std::string &s) {
+  std::string r; uint32_t v = 0; int n = 0;
+  for (char ch : s) {
+    int d = ch >= 'A' && ch <= 'Z' ? ch - 'A' : ch >= 'a' && ch <= 'z' ? ch - 'a' + 26 : ch >= '0' && ch <= '9' ? ch - '0' + 52 : ch == '+' ? 62 : ch == '/' ? 63 : -1;
+    if (d < 0) continue;
+    v = (v << 6) | uint32_t(d); n += 6;
+    if (n >= 8) { n -= 8; r += char((v >> n) & 255); }
+  }
+  return r;
+}
 std::string statusText();
 
 // requête HTTP en tête de connexion : mise à niveau WebSocket (le jeu, par le reverse proxy), sinon
@@ -428,9 +453,28 @@ bool httpUpgrade(Client &c) {
   if (first.compare(0, 4, "GET ") == 0 && up != "websocket") {   // navigateur : page d'état (parties, joueurs, salles)
     std::string path = first.substr(4, first.find(' ', 4) - 4), type;
     int status = 200;
-    std::string body = webPage(path, type, status);
+    std::string body, extra;
+    if ((path == "/admin" || path.rfind("/admin?", 0) == 0) && !adminPassword.empty()) {
+      // page d'administration : mot de passe (authentification HTTP Basic, par le HTTPS du reverse proxy)
+      auto st = strikes.find(c.ip);
+      std::string auth = hd.count("authorization") ? hd["authorization"] : "", given;
+      if (auth.size() > 6 && auth.compare(0, 6, "Basic ") == 0) { given = b64decode(auth.substr(6)); given = given.substr(given.find(':') + 1); }
+      if (st != strikes.end() && st->second.until > now()) { status = 403; type = "text/plain; charset=utf-8"; body = "Adresse bloquée pendant 1 h.\n"; }
+      else if (given != adminPassword) {
+        status = 401; type = "text/plain; charset=utf-8"; body = "Mot de passe requis.\n";
+        extra = "WWW-Authenticate: Basic realm=\"Stunt Car Racer relay admin\", charset=\"UTF-8\"\r\n";
+        if (!auth.empty()) {   // mauvais mot de passe : compté comme un robot (3 essais, puis adresse bloquée 1 h)
+          Strike &s2 = strikes[c.ip];
+          if (now() - s2.last > BOT_BAN) s2.n = 0;
+          s2.last = now();
+          if (++s2.n >= BOT_STRIKES) { s2.until = now() + BOT_BAN; logf("%s : mots de passe d'administration faux, adresse bloquée 1 h", c.ip.c_str()); }
+          noteBot(c.ip, "mot de passe d'administration faux");
+        }
+      } else { type = "text/html; charset=utf-8"; body = adminPage(c.ip); }
+    } else body = webPage(path, type, status);
     if (status != 404) {
-      std::string resp = "HTTP/1.1 " + std::string(status == 200 ? "200 OK" : "204 No Content") + "\r\nContent-Type: " + type +
+      const char *line = status == 200 ? "200 OK" : status == 401 ? "401 Unauthorized" : status == 403 ? "403 Forbidden" : "204 No Content";
+      std::string resp = "HTTP/1.1 " + std::string(line) + "\r\n" + extra + "Content-Type: " + type +
                          "\r\nContent-Length: " + std::to_string(body.size()) +
                          "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n" + body;
       c.out.insert(c.out.end(), resp.begin(), resp.end());
@@ -785,9 +829,10 @@ void drop(Sock fd, const char *why) {
     if (p != clients.end()) { frame(p->second, NF_INFO, "GONE"); p->second.peer = NONE; p->second.closing = true; }
   }
   if (c.web) totalWeb++;   // page d'état servie à un navigateur
-  else if (!c.joined && !c.probe && isPrivate(c.ip)) totalBots++;   // réseau local (proxy compris) : jamais surveillé
+  else if (!c.joined && !c.probe && isPrivate(c.ip)) { totalBots++; noteBot(c.ip, why); }   // réseau local (proxy compris) : jamais surveillé
   else if (!c.joined && !c.probe) {   // jamais inscrit : robot (ou jeu coupé avant l'inscription), pas de journal
     totalBots++;
+    noteBot(c.ip, why);
     Strike &s = strikes[c.ip];
     if (now() - s.last > BOT_BAN) s.n = 0;
     s.last = now();
@@ -939,7 +984,13 @@ void process(Client &c) {
       else if (type == NF_PROBE) {   // le jeu vérifie que le serveur répond
         if (n > 4 && n <= 40 && std::memcmp(p, "LIC ", 4) == 0) {   // version navigateur : code de licence utilisé
           auto it = licences.find(std::string(reinterpret_cast<const char *>(p) + 4, n - 4));
-          if (it != licences.end()) logf("CODE DE LICENCE UTILISÉ : « %s » (disquette chargée dans la version navigateur)", it->second.c_str());
+          if (it != licences.end()) {
+            logf("CODE DE LICENCE UTILISÉ : « %s » (disquette chargée dans la version navigateur, %s)", it->second.c_str(), c.ip.c_str());
+            LicUse &u = licenceUses[it->second];
+            u.last = stamp("%Y-%m-%d %H:%M:%S");
+            if (!u.count++) u.first = u.last;
+            u.ip = c.ip;
+          }
         }
         size_t players = 0, games = 0;
         for (auto &kv : clients) { players += kv.second.joined; games += kv.second.peer != NONE; }
@@ -1220,6 +1271,126 @@ std::string webPage(const std::string &path, std::string &type, int &status) {
   return h;
 }
 
+// page d'administration (/admin, mot de passe « admin » de scr_relay.ini) : codes de licence utilisés,
+// joueurs avec leur adresse et ce qu'ils font, robots, journal. Jamais visible sans le mot de passe.
+std::string modeFr(const Client &c) {
+  return c.mode == Mode::Auto ? "premier joueur dispo" : c.mode == Mode::Room ? (c.room == "PUBLIC" ? "salle publique" : "salle privée") : c.mode == Mode::Code ? "code (ancien jeu)" : "-";
+}
+std::string stateFr(const Client &c, double t) {   // ce que fait un joueur (page d'administration)
+  if (c.peer != NONE) {
+    auto p = clients.find(c.peer);
+    return "course à deux contre " + (p == clients.end() ? std::string("?") : playerName(p->second)) + " (" + duration(t - c.pairedAt) + ")";
+  }
+  if (c.inGroup) {
+    const std::string &g = c.gstate;
+    if (g.rfind("finished:", 0) == 0) { long ms = std::atol(g.c_str() + 9); char b[64]; std::snprintf(b, sizeof b, "arrivé en %ld,%ld s", ms / 1000, ms % 1000 / 100); return b; }
+    if (g == "out") return "éliminé (voiture détruite)";
+    if (g == "vote") return "choisit le circuit";
+    if (g == "accept") return "circuit accepté";
+    if (g == "racing") return "en course";
+    if (g == "lobby") return "attend le départ";
+    return "charge le circuit";
+  }
+  if (!c.watchKey.empty()) return "regarde la course (spectateur)";
+  return c.mode == Mode::Room ? "dans la salle, libre" : "attend un adversaire";
+}
+
+std::string adminPage(const std::string &viewer) {
+  const double t = now();
+  std::string h =
+      "<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+      "<meta name=\"robots\" content=\"noindex\"><meta http-equiv=\"refresh\" content=\"5\"><title>Relais SCR - administration</title><style>"
+      "body{margin:0;background:#0d1115;color:#e8e8e8;font:14px/1.45 system-ui,sans-serif}main{max-width:1200px;margin:0 auto;padding:16px}"
+      "h1{font-size:22px;margin:4px 0 2px;color:#ffd84a}h2{font-size:16px;margin:24px 0 8px;color:#ffb347}"
+      ".sub{color:#9aa4ae;font-size:13px}.stats{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}"
+      ".stat{background:#1c232b;border-radius:8px;padding:10px 14px;min-width:110px}.stat b{display:block;font-size:22px;color:#fff}"
+      ".stat.hot{background:#3a2a10;outline:1px solid #ffb347}"
+      "table{width:100%;border-collapse:collapse;background:#151b21;border-radius:8px;overflow:hidden}"
+      "th,td{text-align:left;padding:6px 9px;border-bottom:1px solid #25303a;vertical-align:top}th{background:#1e2730;color:#b8c2cc;font-weight:600}"
+      ".none{color:#7c8792;font-style:italic;padding:8px}.ok{color:#5fd38a;font-weight:700}.no{color:#7c8792}.bad{color:#ff7b6b}"
+      ".mono{font-family:ui-monospace,Consolas,monospace;font-size:12.5px}.log{background:#151b21;border-radius:8px;padding:8px 10px;max-height:420px;overflow:auto}"
+      ".log div{white-space:pre-wrap;border-bottom:1px solid #1f2830;padding:2px 0}.lic{color:#ffd84a;font-weight:700}"
+      ".wrap{overflow-x:auto}</style></head><body><main>"
+      "<h1>Relais Stunt Car Racer &middot; administration</h1><div class=\"sub\">Version " SCR_RELAY_VERSION " &middot; en service depuis " +
+      duration(t - startedAt) + " &middot; actualisé toutes les 5 s &middot; vous : " + esc(viewer) + "</div><div class=\"stats\">";
+  size_t players = 0, pending = 0, blocked = 0, used = 0;
+  for (auto &kv : clients) { if (kv.second.joined && !kv.second.closing) players++; else if (!kv.second.closing) pending++; }
+  for (auto &kv : strikes) blocked += kv.second.until > t;
+  for (auto &kv : licenceUses) used += kv.second.count > 0;
+  auto stat = [&](const std::string &n, const std::string &v, bool hot = false) {
+    h += "<div class=\"stat" + std::string(hot ? " hot" : "") + "\"><b>" + v + "</b>" + n + "</div>";
+  };
+  stat("joueurs en ligne", std::to_string(players));
+  stat("connexions en attente", std::to_string(pending));
+  stat("parties depuis le lancement", std::to_string(totalGames));
+  stat("codes de licence utilisés", std::to_string(used) + " / " + std::to_string(licences.size()), used > 0);
+  stat("robots refusés", std::to_string(totalBots));
+  stat("adresses bloquées", std::to_string(blocked), blocked > 0);
+  stat("pages d'état vues", std::to_string(totalWeb));
+
+  h += "</div><h2>Codes de licence (version navigateur)</h2>";
+  if (licences.empty()) h += "<div class=\"none\">Aucun code dans scr_relay.ini (lignes « licence = NOM EMPREINTE »).</div>";
+  else {
+    h += "<div class=\"wrap\"><table><tr><th>Code</th><th>Utilisé</th><th>Fois</th><th>Première fois</th><th>Dernière fois</th><th>Adresse</th></tr>";
+    std::vector<std::string> names;
+    for (auto &kv : licences) names.push_back(kv.second);
+    std::sort(names.begin(), names.end());
+    names.erase(std::unique(names.begin(), names.end()), names.end());
+    for (auto &n : names) {
+      auto u = licenceUses.find(n);
+      bool yes = u != licenceUses.end() && u->second.count > 0;
+      h += "<tr><td class=\"lic\">" + esc(n) + "</td><td>" + std::string(yes ? "<span class=\"ok\">OUI</span>" : "<span class=\"no\">pas encore</span>") +
+           "</td><td>" + (yes ? std::to_string(u->second.count) : "-") + "</td><td>" + (yes ? esc(u->second.first) : "-") + "</td><td>" +
+           (yes ? esc(u->second.last) : "-") + "</td><td class=\"mono\">" + (yes ? esc(u->second.ip) : "-") + "</td></tr>";
+    }
+    h += "</table></div><p class=\"sub\">Compté depuis le lancement du serveur ; le journal scr_relay.log garde tout.</p>";
+  }
+
+  h += "<h2>Joueurs connectés</h2>";
+  std::vector<const Client *> list;
+  for (auto &kv : clients) if (kv.second.joined && !kv.second.closing) list.push_back(&kv.second);
+  std::sort(list.begin(), list.end(), [](const Client *a, const Client *b) { return a->id < b->id; });
+  if (list.empty()) h += "<div class=\"none\">Personne n'est connecté.</div>";
+  else {
+    h += "<div class=\"wrap\"><table><tr><th>N°</th><th>Pseudo</th><th>Adresse</th><th>Version</th><th>Mode</th><th>Salle / course</th>"
+         "<th>Ce qu'il fait</th><th>Connecté depuis</th><th>Débit</th></tr>";
+    for (const Client *c : list) {
+      std::string where = c->inGroup ? c->gkey : c->mode == Mode::Room ? c->room : "-";
+      if (!c->watchKey.empty()) where += " (regarde " + c->watchKey + ")";
+      h += "<tr><td>" + std::to_string(c->id) + "</td><td>" + esc(playerName(*c)) + "</td><td class=\"mono\">" + esc(c->ip) +
+           (c->ws ? " <span class=\"sub\">WS</span>" : "") + "</td><td>" + esc(c->version) + (c->tnt ? " <span class=\"sub\">TNT</span>" : "") +
+           "</td><td>" + modeFr(*c) + "</td><td>" + esc(where) + "</td><td>" + esc(stateFr(*c, t)) +
+           (c->inGroup ? " <span class=\"sub\">(" + esc(c->gstate) + ")</span>" : "") + "</td><td>" + duration(t - c->since) +
+           "</td><td>" + std::to_string(int(c->rate / 1024)) + " Ko/s</td></tr>";
+    }
+    h += "</table></div>";
+  }
+
+  h += "<h2>Robots et adresses bloquées</h2>";
+  std::string bl;
+  for (auto &kv : strikes)
+    if (kv.second.until > t) bl += "<tr><td class=\"mono\">" + esc(kv.first) + "</td><td>" + std::to_string(kv.second.n) + "</td><td>encore " + duration(kv.second.until - t) + "</td></tr>";
+  if (bl.empty()) h += "<div class=\"none\">Aucune adresse bloquée.</div>";
+  else h += "<div class=\"wrap\"><table><tr><th>Adresse bloquée</th><th>Tentatives</th><th>Blocage</th></tr>" + bl + "</table></div>";
+  h += "<p class=\"sub\">Derniers robots (connexions qui ne sont pas le jeu) :</p>";
+  if (recentBots.empty()) h += "<div class=\"none\">Aucun robot depuis le lancement.</div>";
+  else {
+    h += "<div class=\"wrap\"><table><tr><th>Quand</th><th>Adresse</th><th>Raison</th></tr>";
+    for (size_t i = recentBots.size(), k = 0; i-- > 0 && k < 40; k++)
+      h += "<tr><td>" + esc(recentBots[i].when) + "</td><td class=\"mono\">" + esc(recentBots[i].ip) + "</td><td>" + esc(recentBots[i].why) + "</td></tr>";
+    h += "</table></div>";
+  }
+
+  h += "<h2>Journal (le plus récent en haut)</h2><div class=\"log mono\">";
+  for (size_t i = journal.size(), k = 0; i-- > 0 && k < 200; k++) {
+    bool lic = journal[i].find("CODE DE LICENCE") != std::string::npos;
+    h += "<div" + std::string(lic ? " class=\"lic\"" : "") + ">" + esc(journal[i]) + "</div>";
+  }
+  if (journal.empty()) h += "<div class=\"none\">Journal vide.</div>";
+  h += "</div><p class=\"sub\">Page publique (sans mot de passe) : <a style=\"color:#8cc8ff\" href=\"/\">/</a></p></main></body></html>";
+  return h;
+}
+
 // état pour le menu du jeu (STATUS) : une ligne par élément, champs séparés par des tabulations ;
 // le jeu traduit les codes d'état dans sa langue
 //   S  joueurs  parties  salles  parties depuis le lancement  secondes de service
@@ -1380,7 +1551,7 @@ int main(int argc, char **argv) {
         size_t same = 0;
         for (auto &kv : clients) same += kv.second.ip == ip;
         auto st = strikes.find(ip);
-        if (clients.size() >= MAX_CLIENTS || (same >= MAX_PER_IP && !isPrivate(ip))) { closeSock(fd); totalBots++; continue; }
+        if (clients.size() >= MAX_CLIENTS || (same >= MAX_PER_IP && !isPrivate(ip))) { closeSock(fd); totalBots++; noteBot(ip, "trop de connexions"); continue; }
         nonBlock(fd);
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char *>(&on), sizeof on);
         setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, reinterpret_cast<const char *>(&on), sizeof on);
