@@ -56,7 +56,9 @@
   input[type=file] { display: none; }
   /* deux lancements : HD modernisée (rouge) ou Classique 1989 */
   .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 6px; }
-  .mode { font: inherit; border: 0; border-radius: 12px; color: #fff; cursor: pointer; padding: 14px 12px; text-align: center; }
+  .mode { font: inherit; border: 0; border-radius: 12px; color: #fff; cursor: pointer; padding: 10px 10px 14px; text-align: center; }
+  .mode img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; margin-bottom: 10px; }
+  .mode:disabled img { opacity: .55; }
   .mode b { display: block; font-size: 20px; font-weight: 900; font-style: italic; letter-spacing: .5px; text-transform: uppercase; }
   .mode span { display: block; font-size: 13px; opacity: .9; margin-top: 2px; }
   #playHd { background: linear-gradient(180deg, #f04a3a, #b8241a); box-shadow: 0 8px 24px rgba(227,57,43,.35); }
@@ -100,6 +102,17 @@
 
   #game { display: none; padding: 12px 0 30px; }
   #screen { position: relative; background: #000; border-radius: 10px; overflow: hidden; }
+  /* chargement de la disquette : 6 s, pourcentage et bruit du lecteur */
+  #boot { position: absolute; inset: 0; z-index: 2; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+          background: #000; color: var(--text); transition: opacity .4s; }
+  #boot.on { display: flex; }
+  #boot.done { opacity: 0; pointer-events: none; }
+  #boot .floppy { font-size: 54px; animation: spin 1.2s steps(8) infinite; }
+  @keyframes spin { 50% { transform: translateY(-3px); } }
+  #boot .lbl { font: 700 18px ui-monospace, Consolas, monospace; letter-spacing: 1px; }
+  #boot .track { width: min(70%, 480px); height: 22px; border: 2px solid #8a96a3; border-radius: 4px; padding: 3px; }
+  #boot .fill { height: 100%; width: 0; background: repeating-linear-gradient(90deg, var(--accent) 0 12px, #b8241a 12px 16px); }
+  #boot .pct { font: 900 34px ui-monospace, Consolas, monospace; color: var(--accent2); }
   canvas#canvas { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; outline: none; }
   /* plein écran (F11, menu F1 ou bouton) : image entière, centrée, sur fond noir ; Échap revient à la page */
   #screen:fullscreen { display: flex; align-items: center; justify-content: center; width: 100vw; height: 100vh; border-radius: 0; }
@@ -139,8 +152,8 @@
         </label>
         <input id="fileDisk" type="file" accept=".st,.ST">
         <div class="modes">
-          <button class="mode" id="playHd" disabled><b data-t="playHd">Play HD</b><span data-t="playHdSub">Modernised: scenery, textures, V8</span></button>
-          <button class="mode" id="playClassic" disabled><b data-t="playClassic">Classic</b><span data-t="playClassicSub">1989 look, high resolution, no extras</span></button>
+          <button class="mode" id="playHd" disabled><img src="mode_hd.jpg" alt="" width="480" height="270"><b data-t="playHd">Play HD</b><span data-t="playHdSub">Modernised: scenery, textures, V8</span></button>
+          <button class="mode" id="playClassic" disabled><img src="mode_classic.jpg" alt="" width="480" height="270"><b data-t="playClassic">Classic</b><span data-t="playClassicSub">1989 look, high resolution, no extras</span></button>
         </div>
         <div id="status"></div>
         <p class="note" data-t="privacy">Your files stay in this browser: nothing is uploaded, and they are kept for your next visits. No game data is supplied with this page.</p>
@@ -190,7 +203,7 @@
 
 <section id="game">
   <div class="wrap">
-    <div id="screen"><canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas></div>
+    <div id="screen"><div id="boot"><div class="floppy">💾</div><div class="lbl" id="bootLbl">LOADING…</div><div class="track"><div class="fill" id="bootFill"></div></div><div class="pct" id="bootPct">0%</div></div><canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas></div>
     <div class="bar">
       <button id="full" type="button" data-t="fullBtn">Full screen</button>
       <span data-t="gameHint">F1 menu · F8 old / new · click the picture if the keys do not respond</span>
@@ -330,11 +343,72 @@
   });
 
   // ---------------------------------------------------------------- lancement
+  // bruit d'un lecteur de disquette (synthétisé) : moteur, pas de la tête et lecture, pendant d time
+  function floppySound(d) {
+    try {
+      const ac = new (window.AudioContext || window.webkitAudioContext)();
+      const t0 = ac.currentTime + 0.05, end = t0 + d;
+      const out = ac.createGain(); out.gain.value = 0.5; out.connect(ac.destination);
+      const noise = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+      const nd = noise.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+      // moteur : ronronnement grave
+      const mot = ac.createOscillator(); mot.type = 'sawtooth'; mot.frequency.value = 52;
+      const motF = ac.createBiquadFilter(); motF.type = 'lowpass'; motF.frequency.value = 220;
+      const motG = ac.createGain(); motG.gain.setValueAtTime(0, t0); motG.gain.linearRampToValueAtTime(0.12, t0 + 0.3);
+      motG.gain.setValueAtTime(0.12, end - 0.3); motG.gain.linearRampToValueAtTime(0, end);
+      mot.connect(motF).connect(motG).connect(out); mot.start(t0); mot.stop(end);
+      // pas de la tête de lecture : clics secs
+      const click = (t, v) => {
+        const src = ac.createBufferSource(); src.buffer = noise;
+        const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1800 + Math.random() * 900; f.Q.value = 3;
+        const g = ac.createGain(); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.025);
+        src.connect(f).connect(g).connect(out); src.start(t, Math.random() * 0.5, 0.03);
+      };
+      // lecture : grésillement de la tête sur la piste
+      const grind = (t, len) => {
+        const src = ac.createBufferSource(); src.buffer = noise; src.loop = true;
+        const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 1.5;
+        const g = ac.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.05, t + 0.03);
+        g.gain.setValueAtTime(0.05, t + len - 0.03); g.gain.linearRampToValueAtTime(0, t + len);
+        src.connect(f).connect(g).connect(out); src.start(t); src.stop(t + len);
+      };
+      let t = t0 + 0.25;
+      for (let k = 0; k < 8; k++) click(t + k * 0.012, 0.9);   // recalibrage en début de lecture
+      t += 0.35;
+      while (t < end - 0.4) {
+        const steps = 1 + Math.floor(Math.random() * 3);
+        for (let k = 0; k < steps; k++) click(t + k * 0.016, 0.7);
+        t += steps * 0.016 + 0.02;
+        const len = 0.18 + Math.random() * 0.25; grind(t, len); t += len + 0.03;
+        if (Math.random() < 0.15) { for (let k = 0; k < 6; k++) click(t + k * 0.011, 0.8); t += 0.12; }
+      }
+      setTimeout(() => ac.close(), (d + 1) * 1000);
+    } catch (e) { console.warn('son du lecteur', e); }
+  }
+  // chargement : 6 s, barre et pourcentage par-dessus le jeu qui démarre derrière
+  function bootScreen(d) {
+    const b = $('boot'); b.classList.add('on');
+    $('bootLbl').textContent = fr ? 'CHARGEMENT DE LA DISQUETTE…' : 'LOADING DISK…';
+    floppySound(d);
+    const t0 = performance.now();
+    let shown = 0;
+    const step = () => {
+      const k = Math.min(1, (performance.now() - t0) / (d * 1000));
+      // progression un peu irrégulière, comme une vraie lecture, mais qui ne recule jamais
+      shown = Math.max(shown, Math.min(100, Math.floor(100 * (k < 1 ? k * (0.85 + 0.15 * Math.sin(k * 9)) : 1))));
+      $('bootFill').style.width = shown + '%'; $('bootPct').textContent = shown + '%';
+      if (k < 1) requestAnimationFrame(step);
+      else { b.classList.add('done'); setTimeout(() => { b.classList.remove('on', 'done'); $('canvas').focus(); }, 450); }
+    };
+    requestAnimationFrame(step);
+  }
+
   async function start(mode) {
     if (!ready || !haveDisk || running) return;
     running = true;
     document.body.classList.add('playing');
     $('canvas').focus();
+    bootScreen(6);
     setInterval(save, 5000);                  // options changées dans le jeu (scr.ini)
     window.addEventListener('beforeunload', save);
     const hd = hdReady ? await hdReady : false;
