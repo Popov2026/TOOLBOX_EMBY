@@ -101,6 +101,13 @@
   .thanks .icon { font-size: 36px; flex: none; }
   .thanks h2 { margin: 0 0 4px; font-size: 18px; }
   .thanks p { margin: 0; color: var(--text); opacity: .9; font-size: 15px; }
+  .thanks .news { margin-top: 10px; font-size: 14px; opacity: 1; }
+  .thanks .news b { color: var(--accent2); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .chips a { font-size: 13px; font-weight: 600; text-decoration: none; color: var(--text); padding: 4px 11px; border-radius: 999px;
+             background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.18); }
+  .chips a:hover { border-color: var(--accent2); color: #fff; }
+  .chips a.steam { border-color: rgba(102,192,244,.5); }
   .feat { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 18px; }
   .feat .card { padding: 16px; }
   .feat h3 { margin: 0 0 6px; font-size: 16px; }
@@ -203,7 +210,23 @@
       <span class="icon">🏆</span>
       <div><h2 data-t="thxTitle">Thank you, Geoff Crammond</h2>
         <p data-t="thxText">For Stunt Car Racer, the Grand Prix series and all the unforgettable memories you gave to generations of players.
-          Elevated tracks, impossible jumps, a cracked chassis on the last lap… This project is a heartfelt tribute to your work.</p></div>
+          Elevated tracks, impossible jumps, a cracked chassis on the last lap… This project is a heartfelt tribute to your work.</p>
+        <div class="chips">
+          <a href="https://fr.wikipedia.org/wiki/Geoff_Crammond" target="_blank" rel="noopener">Wikipédia (FR)</a>
+          <a href="https://en.wikipedia.org/wiki/Geoff_Crammond" target="_blank" rel="noopener">Wikipedia (EN)</a>
+          <a href="https://en.wikipedia.org/wiki/Stunt_Car_Racer" target="_blank" rel="noopener">Stunt Car Racer (Wikipedia)</a>
+          <a href="https://fr.wikipedia.org/wiki/Grand_Prix_(s%C3%A9rie_de_jeux_vid%C3%A9o)" target="_blank" rel="noopener" data-t="gpWiki">Grand Prix series (Wikipédia FR)</a>
+        </div>
+        <p class="news" data-t="gcrNews"><b>News:</b> MicroProse and Geoff Crammond are bringing the Grand Prix games back on Steam as
+          <i>Geoff Crammond Racing</i> (GCR1 to GCR4), with Steam Workshop support. Announced in December 2025, for 2026.</p>
+        <div class="chips">
+          <a class="steam" href="https://store.steampowered.com/app/3603710/" target="_blank" rel="noopener">GCR1 – Steam</a>
+          <a class="steam" href="https://store.steampowered.com/app/3603720/" target="_blank" rel="noopener">GCR2 – Steam</a>
+          <a class="steam" href="https://store.steampowered.com/app/3603730/" target="_blank" rel="noopener">GCR3 – Steam</a>
+          <a class="steam" href="https://store.steampowered.com/app/3603740/" target="_blank" rel="noopener">GCR4 – Steam</a>
+          <a href="https://www.gtplanet.net/geoff-crammond-return-steam-2026-20251217/" target="_blank" rel="noopener" data-t="gcrArticle">The announcement (GTPlanet)</a>
+          <a href="https://www.overtake.gg/news/geoff-crammond-racing-dev-log-1-gives-first-details-community-contest-for-team-names.4869/" target="_blank" rel="noopener" data-t="gcrDevlog">Dev log #1 (OverTake)</a>
+        </div></div>
     </section>
 
     <div class="feat">
@@ -248,6 +271,8 @@
     winList: '<li>Full HD 1920×1080 avec rendu OpenGL</li><li>The New Tracks (TNT) : 8 circuits en plus</li><li>Courses en réseau local</li><li>Votre propre serveur relais</li>',
     winBtn: 'Télécharger pour Windows',
     thxTitle: 'Merci, Geoff Crammond',
+    gpWiki: 'Série Grand Prix (Wikipédia)', gcrArticle: "L'annonce (GTPlanet, en anglais)", gcrDevlog: 'Journal de développement n° 1 (OverTake, en anglais)',
+    gcrNews: "<b>Actualité :</b> MicroProse et Geoff Crammond font revenir les jeux Grand Prix sur Steam sous le nom <i>Geoff Crammond Racing</i> (GCR1 à GCR4), avec le Steam Workshop. Annoncé en décembre 2025, pour 2026.",
     thxText: "Pour Stunt Car Racer, la série Grand Prix et tous les souvenirs inoubliables que vous avez offerts à des générations de joueurs. Les circuits suspendus, les sauts impossibles, le châssis fissuré dans le dernier tour… Ce projet est un hommage sincère à votre travail.",
     foot: 'Stunt Car Racer © Geoff Crammond / Micro Style 1989 — données du jeu non fournies. Version native et images HD par Popov2026.',
     ok: 'Prête', missing: 'Manquante', checking: 'Test du serveur en ligne…',
