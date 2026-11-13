@@ -83,7 +83,9 @@
   .video .playbtn { position: absolute; z-index: 1; left: 50%; top: 50%; width: 76px; height: 54px; margin: -27px 0 0 -38px; border-radius: 14px; background: var(--accent);
                     box-shadow: 0 6px 20px rgba(0,0,0,.5); }
   .video .playbtn::before { content: ""; position: absolute; left: 31px; top: 16px; border-style: solid; border-width: 11px 0 11px 19px; border-color: transparent transparent transparent #fff; }
-  .video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  /* vidéo zoomée ×2 : le jeu occupe le centre de l'enregistrement */
+  .video { background-size: 200% !important; }
+  .video iframe { position: absolute; left: -50%; top: -50%; width: 200%; height: 200%; border: 0; }
   .win { display: flex; flex-direction: column; }
   .win p { color: var(--muted); font-size: 15px; margin: 0 0 12px; }
   .win ul { margin: 0 0 16px; padding-left: 20px; font-size: 15px; }
@@ -352,7 +354,7 @@
   $('video').addEventListener('click', function () {
     if (this.querySelector('iframe')) return;
     const f = document.createElement('iframe');
-    f.src = 'https://www.youtube-nocookie.com/embed/sL0vGRPCEpc?autoplay=1&rel=0';
+    f.src = 'https://www.youtube-nocookie.com/embed/sL0vGRPCEpc?autoplay=1&rel=0&controls=0&modestbranding=1&playsinline=1';
     f.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen'; f.allowFullscreen = true; f.title = 'Stunt Car Racer';
     this.innerHTML = ''; this.appendChild(f);
   });
