@@ -70,6 +70,9 @@ constexpr uint32_t A_PRINT = 0x47ba0, A_PRINT_LOOP = 0x47bc6, A_PRINT_READ = 0x4
 constexpr uint32_t TEXT_BUF = HLE + 0x100;   // texte de remplacement (RAM libre en fin de mémoire)
 constexpr uint8_t TXT_MULTI = 0x1f, TXT_LINK = 0x71, TXT_ONLINE = 0xf0;   // 0xF0 : 4e entrée ajoutée
 constexpr int MENU_SELECT = 0x10;
+// Load/Save/Replay : accès à la disquette de sauvegarde (Floprd / Flopwr, retour du trap en $501C4)
+constexpr uint32_t A_SAVE_IO = 0x501c4;
+constexpr size_t SAVE_DISK_SIZE = 737280;   // disquette 720 Ko formatée (vierge : que des zéros)
 // version navigateur : pas de réseau local ; le 3e choix « Computer Link » devient « Online Multiplayer »
 #ifdef __EMSCRIPTEN__
 constexpr bool ONLINE_ONLY = true;
@@ -464,10 +467,22 @@ void Machine::hleXbios(uint32_t sr, uint32_t pc, uint32_t args) {
   switch (fn) {
     case 2: case 3: d0 = SCREEN; break;
     case 6: { uint32_t p = rl(args + 2); for (int i = 0; i < 16; i++) palette_[i] = uint16_t(rw(p + 2 * i)); break; }
-    case 8: {  // Floprd : secteur 5 piste 0 (clé inutilisée du jeu)
+    case 8: case 9: {  // Floprd / Flopwr
+      // disquette du jeu : secteur 5 piste 0 (clé inutilisée du jeu) ; menu Load/Save/Replay : disquette
+      // de sauvegarde, une image à part (saveDisk_) que le jeu lit et écrit secteur par secteur
       uint32_t buf = rl(args + 2), sec = rw(args + 12), trk = rw(args + 14), side = rw(args + 16), cnt = rw(args + 18);
       size_t off = (size_t(trk * 2 + side) * 9 + (sec - 1)) * 512;
-      for (uint32_t i = 0; i < cnt * 512; i++) write8(buf + i, off + i < disk_.size() ? disk_[off + i] : 0);
+      const bool save = saveDisk_ && pc == A_SAVE_IO;
+      if (fn == 9) {
+        if (save) {
+          if (saveDisk_->size() < SAVE_DISK_SIZE) saveDisk_->resize(SAVE_DISK_SIZE, 0);
+          for (uint32_t i = 0; i < cnt * 512 && off + i < saveDisk_->size(); i++) (*saveDisk_)[off + i] = uint8_t(read8(buf + i));
+          if (saveWritten_) saveWritten_();
+        }
+        break;
+      }
+      const Bytes &d = save ? *saveDisk_ : disk_;
+      for (uint32_t i = 0; i < cnt * 512; i++) write8(buf + i, off + i < d.size() ? d[off + i] : 0);
       break;
     }
     case 16: {  // Keytbl

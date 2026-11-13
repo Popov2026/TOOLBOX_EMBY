@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v90"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v91"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -273,8 +273,24 @@ std::string findHdDir(const std::string &opt) {
   return {};
 }
 
+// disquette de sauvegarde du menu Load/Save/Replay : fichier scr_saves.dat à côté de scr.ini
+// (navigateur : /save, gardé par la page), réécrit à chaque sauvegarde du jeu
+static Bytes g_saveDisk;
+static std::string g_savePath;
+static void loadSaveDisk(const std::string &path) {
+  g_savePath = path;
+  try { g_saveDisk = readFile(path); } catch (std::exception &) { g_saveDisk.clear(); }
+}
+static void writeSaveDisk() {
+  if (g_savePath.empty()) return;
+  std::ofstream f(std::filesystem::u8path(g_savePath), std::ios::binary | std::ios::trunc);
+  f.write(reinterpret_cast<const char *>(g_saveDisk.data()), std::streamsize(g_saveDisk.size()));
+  if (!f) std::fprintf(stderr, "sauvegarde impossible : %s\n", g_savePath.c_str());
+}
+
 std::unique_ptr<Machine> start(const Bytes &disk, const Options &o, int track, const TrackSet *ts = nullptr) {
   auto m = std::make_unique<Machine>(disk);
+  m->setSaveDisk(&g_saveDisk, writeSaveDisk);
   m->useTrackSet(ts);
   m->setTuning(o.tuning);
   if (track < 0) m->coldStart();
@@ -442,6 +458,11 @@ int main(int argc, char **argv) {
   for (int i = 1; i < argc; i++)
     if (!std::strcmp(argv[i], "--ini") && i + 1 < argc) ini = argv[i + 1];
   readIni(o, ini);
+  {
+    namespace fs = std::filesystem;
+    fs::path dir = !ini.empty() ? fs::u8path(ini).parent_path() : baseDirs().empty() ? fs::path() : baseDirs()[0];
+    loadSaveDisk((dir / "scr_saves.dat").u8string());
+  }
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     if (a == "--ini") { i++; continue; }

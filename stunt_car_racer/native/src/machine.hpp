@@ -62,6 +62,9 @@ class Machine {
   // menu de départ : dernier choix (0 Single Player League, 1 Multiplayer - Local,
   // 2 Computer Link - Local LAN, 3 Online Multiplayer ; -1 aucun). 2 et 3 mènent au « Computer Link ».
   int selectChoice() const { return selectChoice_; }
+  // disquette de sauvegarde du menu Load/Save/Replay (image 720 Ko, vide = disquette vierge) ;
+  // written est appelé après chaque écriture du jeu (pour l'enregistrer dans un fichier)
+  void setSaveDisk(Bytes *disk, std::function<void()> written) { saveDisk_ = disk; saveWritten_ = std::move(written); }
   void serialPush(uint8_t v) { serialIn_.push_back(v); }
   size_t serialPending() const { return serialIn_.size(); }
   uint64_t serialSent() const { return serialSent_; }
@@ -179,6 +182,8 @@ class Machine {
   uint8_t renderSnap_[18] = {}, dispSnap_[18] = {};
   uint32_t ticks_ = 0;
   Bytes disk_;                  // image .st (pour Floprd), vide si GAME.PUT
+  Bytes *saveDisk_ = nullptr;   // disquette de sauvegarde (Load/Save), à part de celle du jeu
+  std::function<void()> saveWritten_;
   uint16_t palette_[16] = {};
   uint32_t vbase_ = 0xf8000;
   uint8_t ymSel_ = 0, ym_[16] = {}, mfp_[64] = {};

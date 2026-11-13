@@ -93,6 +93,11 @@ scr.exe (ou indiquez-le dans scr.ini : tnt = chemin). Ensuite :
   - en course à plusieurs, l'organisateur choisit parmi 16 circuits : les 8 d'origine puis les
     8 TNT (marqués « (TNT) »). Un joueur qui n'a pas le fichier est prévenu et ne court pas.
 
+Sauvegardes (menu de la saison, « 4. Load/Save/Replay ») : la disquette de sauvegarde du jeu
+est le fichier scr_saves.dat, créé à côté de scr.ini à la première sauvegarde. Quand le jeu demande
+d'insérer la disquette de sauvegarde, appuyez simplement sur une touche. Gardez ce fichier pour
+conserver vos saisons (copiez-le dans le dossier d'une nouvelle version).
+
 Son : puce sonore YM2149 de l'Atari ST émulée (moteur, chocs...).
 
 Réglages : scr.ini (gravité, poussée, freinage, pas de temps, amortissement,
@@ -201,6 +206,10 @@ in scr.ini: tnt = path). Then:
   - in practice, Page Up/Down go through the 16 tracks (8 original then 8 TNT);
   - in a multi-car race the organiser chooses among 16 tracks: the 8 original then the 8 TNT
     (marked "(TNT)"). A player who does not have the file is told and does not race.
+
+Saving (season menu, "4. Load/Save/Replay"): the game's save disk is the file scr_saves.dat,
+created next to scr.ini on the first save. When the game asks you to insert the save disk, just
+press a key. Keep this file to keep your seasons (copy it into the folder of a new version).
 
 Sound: the Atari ST's YM2149 sound chip is emulated (engine, impacts...).
 
