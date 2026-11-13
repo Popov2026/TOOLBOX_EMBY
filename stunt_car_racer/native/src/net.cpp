@@ -702,7 +702,7 @@ RelayProbe::~RelayProbe() {
 void RelayProbe::start(const std::string &server, bool status) {
   if (th_.joinable()) th_.detach();
   auto sh = std::make_shared<Shared>();
-  sh->server = server; sh->wantStatus = status;
+  sh->server = server; sh->wantStatus = status; sh->note = note_.substr(0, 64);
   sh_ = sh;
   if (server.empty()) { sh->state = State::Failed; sh->error = L("aucun serveur dans scr.ini", "no server in scr.ini"); return; }
   sh->state = State::Probing;
@@ -818,8 +818,9 @@ void RelayProbe::step() const {
       int err = 0; socklen_t len = sizeof err;
       getsockopt(sh.fd, SOL_SOCKET, SO_ERROR, &err, &len);
       if (err) { fail("connexion refusée (serveur arrêté ?)", "connection refused (server stopped?)"); return; }
-      const char q[3] = {char(sh.wantStatus ? NF_STATUS : NF_PROBE), 0, 0};
-      ::send(sh.fd, q, 3, 0);
+      std::string q = {char(sh.wantStatus ? NF_STATUS : NF_PROBE), char(sh.note.size() >> 8), char(sh.note.size() & 255)};
+      q += sh.note;
+      ::send(sh.fd, q.data(), q.size(), 0);
       sh.t1 = t; sh.phase = 2;
     } else if (t - sh.t0 > 8) { fail("le serveur ne répond pas", "the server does not answer"); return; }
   }

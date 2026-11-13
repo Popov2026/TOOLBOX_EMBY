@@ -179,6 +179,8 @@ class RelayProbe {
   enum class State { Off, Probing, Ok, Failed };
   ~RelayProbe();
   void start(const std::string &server, bool status = false);   // serveur[:port] ; status : état complet (STATUS)
+  // version navigateur : texte joint à la question PROBE (« LIC nom » : code de licence utilisé, noté par le relais)
+  void setNote(const std::string &note) { note_ = note; }
   std::string status() const;              // réponse STATUS du serveur (lignes S/P/G/R), vide sinon
   State state() const;
   std::string text() const;                // texte pour le menu
@@ -192,7 +194,7 @@ class RelayProbe {
   struct Shared {
     std::mutex mu;
     State state = State::Off;
-    std::string server, error, params, version, status;
+    std::string server, error, params, version, status, note;
     bool wantStatus = false;
 #ifdef __EMSCRIPTEN__
     int fd = -1, phase = 0;              // navigateur : test pas à pas (connexion, attente de la réponse)
@@ -203,6 +205,7 @@ class RelayProbe {
   };
   std::shared_ptr<Shared> sh_;
   std::thread th_;
+  std::string note_;
   void step() const;   // navigateur : avance le test (sans fil d'exécution) ; rien ailleurs
   static void applyReply(Shared &sh, const std::string &got);   // réponse complète reçue (verrou pris)
 };

@@ -123,7 +123,7 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v95"
+#define SCR_RELAY_VERSION "v96"
 
 namespace {
 
@@ -236,6 +236,10 @@ std::string paramsText() {
   return b;
 }
 
+// codes de licence de la version navigateur (scr_relay.ini : « licence = NOM EMPREINTE ») : quand un
+// code sert, la page envoie son empreinte et le relais note le nom dans son journal
+std::map<std::string, std::string> licences;   // empreinte -> nom
+
 // lecture de scr_relay.ini : « clé = valeur », # commentaire
 bool readConfig(const std::string &path, int &port) {
   FILE *f = std::fopen(path.c_str(), "r");
@@ -262,6 +266,10 @@ bool readConfig(const std::string &path, int &port) {
     else if (k == "damping") params.damping = d;
     else if (k == "boostuse") params.boostuse = d;
     else if (k == "shock") params.shock = std::atoi(v.c_str());
+    else if (k == "licence" || k == "license") {
+      size_t sp = v.find_last_of(" \t");
+      if (sp != std::string::npos) licences[trim(v.substr(sp + 1))] = trim(v.substr(0, sp));
+    }
     else if (k == "reseau_cadence" || k == "cadence") params.cadence = std::max(50, std::min(2000, std::atoi(v.c_str())));
   }
   std::fclose(f);
@@ -929,6 +937,10 @@ void process(Client &c) {
       }
       else if (type == NF_JOIN) onJoin(c, Mode::Code, f[0], f.size() > 1 ? f[1] : "", "");
       else if (type == NF_PROBE) {   // le jeu vérifie que le serveur répond
+        if (n > 4 && n <= 40 && std::memcmp(p, "LIC ", 4) == 0) {   // version navigateur : code de licence utilisé
+          auto it = licences.find(std::string(reinterpret_cast<const char *>(p) + 4, n - 4));
+          if (it != licences.end()) logf("CODE DE LICENCE UTILISÉ : « %s » (disquette chargée dans la version navigateur)", it->second.c_str());
+        }
         size_t players = 0, games = 0;
         for (auto &kv : clients) { players += kv.second.joined; games += kv.second.peer != NONE; }
         // version du serveur (= version du jeu) : le jeu prévient le joueur quand une nouvelle version est sortie

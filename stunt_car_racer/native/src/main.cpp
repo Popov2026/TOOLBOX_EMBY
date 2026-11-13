@@ -31,7 +31,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v95"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v96"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -426,6 +426,15 @@ extern "C" EMSCRIPTEN_KEEPALIVE int scr_web_players() {
   return st == RelayProbe::State::Ok ? std::max(0, webProbe.players()) : -1;
 }
 extern "C" EMSCRIPTEN_KEEPALIVE int scr_web_games() { return std::max(0, webProbe.games()); }
+// code de licence utilisé (« auteur », « test »...) : signalé au serveur relais, qui le note
+static RelayProbe licProbe;
+extern "C" EMSCRIPTEN_KEEPALIVE void scr_web_licence(const char *who) {
+  std::string w;
+  for (const char *c = who; c && *c && w.size() < 24; c++) if (std::isalnum(static_cast<unsigned char>(*c)) || *c == '-' || *c == '_') w += *c;
+  licProbe.setNote("LIC " + w);
+  licProbe.start(defaultRelay());
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int scr_web_licence_sent() { return licProbe.state() == RelayProbe::State::Ok ? 1 : licProbe.state() == RelayProbe::State::Failed ? -1 : 0; }
 #endif
 
 // courte pause de la boucle du jeu (navigateur : la main est rendue à la page)
