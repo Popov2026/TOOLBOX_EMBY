@@ -123,7 +123,7 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v94"
+#define SCR_RELAY_VERSION "v95"
 
 namespace {
 
@@ -205,6 +205,7 @@ struct Client {
   bool inGroup = false;          // course à plusieurs
   bool tnt = false;              // le jeu a les circuits TNT (tirage des courses à deux parmi 16)
   double lastHorn = 0;
+  double gposTokens = 100, gposAt = 0;   // positions de course : 100 par seconde au plus (le jeu en envoie 50)
   std::string gkey;              // groupe : code de la salle, ou « DUEL n » (course à deux par appariement)
   std::string gstate = "lobby";  // lobby, loading, loaded, racing, finished:ms, out (voiture détruite)
   uint64_t rxBytes = 0, rxMark = 0;
@@ -891,6 +892,17 @@ void onPick(Client &c, const std::string &s) {
   frame(c, NF_INFO, "BUSY");   // déjà parti ou en partie : la liste se met à jour
 }
 
+// positions de course : relayées à tous les membres et spectateurs, donc limitées par joueur (un jeu
+// trafiqué qui en enverrait des milliers par seconde saturerait la connexion des autres)
+bool gposAllowed(Client &c) {
+  const double t = now();
+  c.gposTokens = std::min(100.0, c.gposTokens + (t - c.gposAt) * 100.0);
+  c.gposAt = t;
+  if (c.gposTokens < 1) return false;
+  c.gposTokens -= 1;
+  return true;
+}
+
 // trames complètes reçues : inscription avant l'appariement, retransmission ensuite
 void process(Client &c) {
   size_t pos = 0;
@@ -935,7 +947,7 @@ void process(Client &c) {
       else o.overflow = true;
     } else if (type == NF_PICK) onPick(c, std::string(reinterpret_cast<const char *>(p), n));
     else if (type == NF_GCMD) groupCmd(c, std::string(reinterpret_cast<const char *>(p), std::min<size_t>(n, 64)));
-    else if (type == NF_GPOS && c.inGroup && n <= 64) {   // position : aux autres membres, avec le numéro
+    else if (type == NF_GPOS && c.inGroup && n <= 64 && gposAllowed(c)) {   // position : aux autres membres, avec le numéro
       std::string m(4, '\0');
       for (int k = 0; k < 4; k++) m[size_t(k)] = char((c.id >> (24 - 8 * k)) & 255);
       m.append(reinterpret_cast<const char *>(p), n);
