@@ -1,6 +1,8 @@
 // hdview.cpp — voir hdview.hpp
 #include "hdview.hpp"
 
+#include <array>
+
 #include <algorithm>
 #include <cstring>
 #include <cmath>
@@ -565,10 +567,34 @@ void HdView::addCar(const OppPose &o, double hs, const Machine &m, bool closed) 
       TexInfo te = tg; te.kind = TEX_ENGINE; te.w0 = zg1 * K; te.w1 = zf * K;
       r3d_.polyTex(eng, 4, 0xff26262au, te);
     }
-    // comme l'original : seul le flanc droit (rose) est dessiné, jamais le gauche
-    // (voitures des autres joueurs : carrosserie fermée, on ne voit pas les flammes à travers)
+    // affichage d'origine : seul le flanc droit (rose) est dessiné, jamais le gauche, comme l'original
+    // (sauf voitures des autres joueurs : carrosserie fermée). Détails élevés : les deux flancs, toujours,
+    // avec une vitre latérale de chaque côté (on ne voit plus le moteur ni le pare-brise à travers)
     paint(right, 4, pink, f, u, zr, zf, yb, yr); r3d_.poly(bottom, 4, black);
-    if (closed) paint(left, 4, pink, f, u, zr, zf, yb, yr);
+    if (closed || hd) paint(left, 4, pink, f, u, zr, zf, yb, yr);
+    if (hd) {
+      // point du flanc : s de l'arrière (0) à l'avant (1), t du bas (0) au haut (1) ; side = -1 gauche, +1 droite
+      auto onSide = [&](double side, double sp, double tp) {
+        const double zb = zr + (zf - zr) * sp, zt = zrt + (zf - zrt) * sp, yt = yr + (yf - yr) * sp;
+        const double x = side * (x1 + (xt - x1) * tp) + side * 0.8;   // un peu en avant du flanc
+        return std::array<double, 3>{x, yb + (yt - yb) * tp, zb + (zt - zb) * tp};
+      };
+      const double S0 = 0.27, S1 = 0.60, T0 = 0.52, T1 = 0.88;   // vitre : milieu de la cabine, partie haute
+      for (double side : {-1.0, 1.0}) {
+        std::array<double, 3> c[4] = {onSide(side, S0, T0), onSide(side, S1, T0), onSide(side, S1, T1), onSide(side, S0, T1)};
+        if (side < 0) std::swap(c[1], c[3]);   // même sens de rotation que le flanc
+        Vec3 win[4];
+        double zmin = 1e9, zmax = -1e9, ymin = 1e9, ymax = -1e9;
+        for (int k = 0; k < 4; k++) {
+          win[k] = WB(c[k][0], c[k][1], c[k][2]);
+          zmin = std::min(zmin, c[k][2]); zmax = std::max(zmax, c[k][2]); ymin = std::min(ymin, c[k][1]); ymax = std::max(ymax, c[k][1]);
+        }
+        // vitre teintée avec le casque du pilote derrière (pilote vers z = -34 dans la voiture)
+        TexInfo ts; ts.kind = TEX_GLASS; ts.o = WB(0, 0, -34); ts.u = f; ts.v = u; ts.r = K;
+        ts.s0 = (zmin + 34) * K; ts.s1 = (zmax + 34) * K; ts.w0 = ymin * K; ts.w1 = ymax * K;
+        r3d_.polyTex(win, 4, pink, ts);
+      }
+    }
   }
   (void)dark; (void)grey;
 }
