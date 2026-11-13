@@ -54,10 +54,14 @@
   .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; margin-left: 6px; vertical-align: 2px; }
   .tag.req { background: rgba(227,57,43,.18); color: #ff8a80; }
   input[type=file] { display: none; }
-  #play { width: 100%; font: inherit; font-size: 22px; font-weight: 900; font-style: italic; letter-spacing: .5px; text-transform: uppercase;
-          padding: 16px; border: 0; border-radius: 12px; color: #fff; cursor: pointer; margin-top: 6px;
-          background: linear-gradient(180deg, #f04a3a, #b8241a); box-shadow: 0 8px 24px rgba(227,57,43,.35); }
-  #play:disabled { background: #39424c; box-shadow: none; cursor: default; color: #9aa6b2; }
+  /* deux lancements : HD modernisée (rouge) ou Classique 1989 */
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 6px; }
+  .mode { font: inherit; border: 0; border-radius: 12px; color: #fff; cursor: pointer; padding: 14px 12px; text-align: center; }
+  .mode b { display: block; font-size: 20px; font-weight: 900; font-style: italic; letter-spacing: .5px; text-transform: uppercase; }
+  .mode span { display: block; font-size: 13px; opacity: .9; margin-top: 2px; }
+  #playHd { background: linear-gradient(180deg, #f04a3a, #b8241a); box-shadow: 0 8px 24px rgba(227,57,43,.35); }
+  #playClassic { background: linear-gradient(180deg, #4b5a68, #2c3640); }
+  .mode:disabled { background: #39424c; box-shadow: none; cursor: default; color: #9aa6b2; }
   .note { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
   #status { color: var(--accent2); font-size: 14px; min-height: 1.3em; margin-top: 8px; }
 
@@ -132,7 +136,10 @@
           <span class="state" id="stDisk"></span>
         </label>
         <input id="fileDisk" type="file" accept=".st,.ST">
-        <button id="play" disabled data-t="play">Play</button>
+        <div class="modes">
+          <button class="mode" id="playHd" disabled><b data-t="playHd">Play HD</b><span data-t="playHdSub">Modernised: scenery, textures, V8</span></button>
+          <button class="mode" id="playClassic" disabled><b data-t="playClassic">Classic</b><span data-t="playClassicSub">The 1989 original, as it was</span></button>
+        </div>
         <div id="status"></div>
         <p class="note" data-t="privacy">Your files stay in this browser: nothing is uploaded, and they are kept for your next visits. No game data is supplied with this page.</p>
       </section>
@@ -199,7 +206,7 @@
     tagline: "Le classique Atari ST de Geoff Crammond (1989) dans votre navigateur — en HD, avec des courses en ligne.",
     ready: 'Préparez-vous', disk: 'Disquette Atari ST', required: 'obligatoire', 
     diskSub: 'Votre propre image de la disquette Stunt Car Racer. Déposez-la ici ou cliquez.',
-    play: 'Jouer',
+    playHd: 'Jouer en HD', playHdSub: 'Modernisée : décor, textures, V8', playClassic: 'Classique', playClassicSub: "L'original de 1989, tel quel",
     privacy: "Vos fichiers restent dans ce navigateur : rien n'est envoyé, et ils sont gardés pour vos prochaines visites. Aucune donnée du jeu n'est fournie avec cette page.",
     keysTitle: 'Touches', kF1: '<b>Menu</b> – options : langue, son, HD, décor, touches, en ligne…',
     kF8: "<b>Ancien / nouveau</b> – bascule entre le jeu d'origine de 1989 et la nouvelle version HD",
@@ -248,7 +255,7 @@
   function refresh() {
     $('slotDisk').classList.toggle('ready', haveDisk);
     $('stDisk').textContent = haveDisk ? '✓ ' + T('ok') : T('missing');
-    $('play').disabled = !(ready && haveDisk);
+    $('playHd').disabled = $('playClassic').disabled = !(ready && haveDisk);
   }
 
   // joueurs en ligne : demandé au serveur relais par le jeu lui-même
@@ -321,7 +328,7 @@
   });
 
   // ---------------------------------------------------------------- lancement
-  async function start() {
+  async function start(mode) {
     if (!ready || !haveDisk || running) return;
     running = true;
     document.body.classList.add('playing');
@@ -329,12 +336,13 @@
     setInterval(save, 5000);                  // options changées dans le jeu (scr.ini)
     window.addEventListener('beforeunload', save);
     const hd = hdReady ? await hdReady : false;
-    const args = [DISK, '--ini', INI].concat(hd ? ['--hddir', '/hd'] : []);
+    const args = [DISK, '--ini', INI, mode === 'classic' ? '--classic' : '--modern'].concat(hd ? ['--hddir', '/hd'] : []);
     try { Module.callMain(args); } catch (e) { if (e !== 'unwind' && !(e && e.name === 'ExitStatus')) console.error(e); }
   }
-  $('play').addEventListener('click', start);
+  $('playHd').addEventListener('click', () => start('modern'));
+  $('playClassic').addEventListener('click', () => start('classic'));
   window.addEventListener('keydown', (e) => {
-    if (!running) { if (e.key === 'Enter') start(); return; }
+    if (!running) { if (e.key === 'Enter') start('modern'); return; }
     // touches du jeu que le navigateur garderait pour lui (F5 recharge la page, F1 aide, F11...)
     if (/^F\d+$/.test(e.key) || ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Backspace'].includes(e.key)) e.preventDefault();
   }, true);

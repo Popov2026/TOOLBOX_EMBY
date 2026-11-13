@@ -22,6 +22,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <iterator>
 #include <fstream>
 #include <map>
 #include <memory>
@@ -30,7 +31,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v91"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v92"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -279,7 +280,10 @@ static Bytes g_saveDisk;
 static std::string g_savePath;
 static void loadSaveDisk(const std::string &path) {
   g_savePath = path;
-  try { g_saveDisk = readFile(path); } catch (std::exception &) { g_saveDisk.clear(); }
+  // lu sans exception (la version navigateur est compilée sans) : fichier absent = disquette vierge
+  g_saveDisk.clear();
+  std::ifstream f(std::filesystem::u8path(path), std::ios::binary);
+  if (f) g_saveDisk.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
 }
 static void writeSaveDisk() {
   if (g_savePath.empty()) return;
@@ -467,12 +471,24 @@ int main(int argc, char **argv) {
     std::string a = argv[i];
     if (a == "--ini") { i++; continue; }
     if (a == "--fullscreen" || a == "--smooth" || a == "--hd" || a == "--host" || a == "--joinlan") { setOption(o, a.substr(2), "1"); continue; }
+    // lancement « Classique » : le jeu de 1989 tel quel (affichage d'origine, sans images HD, son
+    // d'origine) ; « HD » : version modernisée (décor, textures, détails élevés, V8, foule).
+    // Pour cette partie seulement : scr.ini n'est pas modifié (F8, F5 et F1 changent toujours tout)
+    if (a == "--classic") {
+      o.hd = false; o.highDetail = false; o.hdTextures = false; o.engineV8 = false; o.crowd = false;
+      continue;
+    }
+    if (a == "--modern") {
+      o.hd = true; o.highDetail = true; o.hdTextures = true; o.scenery = true; o.sky = true; o.engineV8 = true; o.crowd = true;
+      o.density = std::max(o.density, 2);
+      continue;
+    }
     if (a == "--help" || a == "-h") {
       std::puts("usage : scr [--track N] [--scale N] [--fullscreen] [--speed X] [--smooth] [--hd] [--hdres 1920x1080]\n"
                 "            [--gravity X] [--thrust X] [--brake X] [--timestep X] [--damping X]\n"
                 "            [--boostuse X] [--shock N] [--ini FILE]\n"
                 "            [--host | --joinlan | --join ADDRESS[:PORT] | --online CODE] [--relais SERVER[:PORT]] [--nom NAME]\n"
-                "            [--tnt SCR-TNT|archive.lha] [--circuits tnt]\n"
+                "            [--tnt SCR-TNT|archive.lha] [--circuits tnt] [--classic | --modern]\n"
                 "            DISK.st|GAME.PUT");
       return 0;
     }
