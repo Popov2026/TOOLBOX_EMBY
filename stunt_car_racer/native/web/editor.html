@@ -14,7 +14,8 @@
   a { color: var(--link); }
   header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
   header h1 { font-size: 20px; margin: 0 12px 0 0; font-style: italic; font-weight: 900; text-transform: uppercase; }
-  header h1 span { color: var(--accent); }
+  header h1 .red { color: var(--accent); }
+  #lang { margin-left: auto; }
   button, .btn { font: inherit; font-weight: 700; font-size: 14px; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--line);
                  background: var(--panel2); color: var(--text); cursor: pointer; text-decoration: none; display: inline-block; }
   button.main { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -47,69 +48,120 @@
 </head>
 <body>
 <header>
-  <h1>Éditeur de <span>circuits</span></h1>
-  <button id="bOrig" disabled>Circuits de la disquette</button>
-  <label class="btn" for="fOpen">Ouvrir un .trk</label><input id="fOpen" type="file" accept=".trk,.TRK">
-  <button id="bSave" disabled>Télécharger le .trk</button>
-  <button id="bPlay" class="main" disabled>Essayer dans le jeu</button>
-  <a class="btn" href="index.html">Retour au jeu</a>
+  <h1><span data-t="hT1">Éditeur de</span> <span class="red" data-t="hT2">circuits</span></h1>
+  <button id="bOrig" disabled data-t="bOrig">Circuits de la disquette</button>
+  <button id="bNew" disabled data-t="bNew">Nouveau circuit</button>
+  <label class="btn" for="fOpen" data-t="bOpen">Ouvrir un .trk</label><input id="fOpen" type="file" accept=".trk,.TRK">
+  <button id="bSave" disabled data-t="bSave">Télécharger le .trk</button>
+  <button id="bPlay" class="main" disabled data-t="bPlay">Essayer dans le jeu</button>
+  <button id="bUndo" disabled title="Ctrl+Z">↶</button><button id="bRedo" disabled title="Ctrl+Y">↷</button>
+  <a class="btn" href="index.html" data-t="bBack">Retour au jeu</a>
+  <button id="lang" type="button">English</button>
 </header>
 
 <div id="boot" class="card">
-  <h2>Chargement…</h2>
-  <p id="bootMsg" class="muted">Démarrage du moteur du jeu.</p>
+  <h2 data-t="loading">Chargement…</h2>
+  <p id="bootMsg" class="muted" data-t="starting">Démarrage du moteur du jeu.</p>
   <div id="needDisk" class="hidden">
-    <p>L'éditeur utilise votre disquette de Stunt Car Racer (formes des pièces, profils de hauteur, circuits d'origine).
+    <p data-t="needDisk">L'éditeur utilise votre disquette de Stunt Car Racer (formes des pièces, profils de hauteur, circuits d'origine).
       Ajoutez-la sur la page du jeu, ou ici :</p>
-    <label class="btn" for="fDisk">Choisir la disquette (.st, .zip)</label><input id="fDisk" type="file" accept=".st,.ST,.zip,.ZIP">
+    <label class="btn" for="fDisk" data-t="chooseDisk">Choisir la disquette (.st, .zip)</label><input id="fDisk" type="file" accept=".st,.ST,.zip,.ZIP">
   </div>
 </div>
 
 <main id="app" class="hidden">
   <section class="card">
     <div class="tabs" id="tabs"></div>
-    <div class="row"><label>Nom du circuit</label><input id="name" type="text" maxlength="16"></div>
+    <div class="row"><label data-t="trackName">Nom du circuit</label><input id="name" type="text" maxlength="16"></div>
     <canvas id="top" width="900" height="900"></canvas>
-    <p class="muted">Clic : choisir une pièce. Les numéros suivent le sens de la course ; ⚑ = pièce de départ.</p>
+    <p class="muted" data-t="topHelp">Clic : choisir une pièce. Les numéros suivent le sens de la course ; ⚑ = pièce de départ.</p>
     <canvas id="view3d" width="1200" height="675"></canvas>
-    <p class="muted">Aperçu 3D : glisser pour tourner, molette pour zoomer.</p>
+    <p class="muted" data-t="v3dHelp">Aperçu 3D : glisser pour tourner, molette pour zoomer.</p>
   </section>
   <aside>
     <section class="card">
       <h2 id="pTitle">Pièce</h2>
       <div class="row"><button id="bPrev">◀</button><button id="bNext">▶</button>
-        <button id="bAdd">+ Pièce après</button><button id="bDel">Supprimer</button></div>
-      <div class="row"><label>Forme</label><select id="shape"></select></div>
-      <div class="row rot"><label>Orientation</label><span id="rot"></span></div>
-      <div class="row"><label>Sens inverse</label><input id="rev" type="checkbox"></div>
-      <div class="row"><label>Case (x, z)</label><input id="cx" type="number" min="0" max="15"><input id="cz" type="number" min="0" max="15"></div>
+        <button id="bAdd" data-t="bAdd">+ Pièce après</button><button id="bDel" data-t="bDel">Supprimer</button></div>
+      <div class="row"><label data-t="lShape">Forme</label><select id="shape"></select></div>
+      <div class="row rot"><label data-t="lRot">Orientation</label><span id="rot"></span></div>
+      <div class="row"><label data-t="lRev">Sens inverse</label><input id="rev" type="checkbox"></div>
+      <div class="row"><label data-t="lCell">Case (x, z)</label><input id="cx" type="number" min="0" max="15"><input id="cz" type="number" min="0" max="15"></div>
       <div id="profBox">
-        <div class="row"><label>Profil gauche</label><input id="pl" type="number" min="0" max="127"><span class="muted">long</span><input id="neg" type="checkbox"></div>
+        <div class="row"><label data-t="lPl">Profil gauche</label><input id="pl" type="number" min="0" max="127"><span class="muted" data-t="lLong">long</span><input id="neg" type="checkbox"></div>
         <canvas class="prof" id="plv" width="300" height="46"></canvas>
-        <div class="row"><label>Même profil à droite</label><input id="same" type="checkbox"></div>
-        <div class="row" id="prRow"><label>Profil droit</label><input id="pr" type="number" min="0" max="127"></div>
+        <div class="row"><label data-t="lSame">Même profil à droite</label><input id="same" type="checkbox"></div>
+        <div class="row" id="prRow"><label data-t="lPr">Profil droit</label><input id="pr" type="number" min="0" max="127"></div>
         <canvas class="prof" id="prv" width="300" height="46"></canvas>
-        <p class="muted">0 = plat. Les profils sont ceux du jeu : la courbe montre la variation de hauteur le long de la pièce.</p>
+        <p class="muted" data-t="profHelp">0 = plat. Les profils sont ceux du jeu : la courbe montre la variation de hauteur le long de la pièce.</p>
       </div>
-      <p id="specNote" class="muted hidden">Pièce spéciale : son profil de hauteur est fixé par le jeu.</p>
-      <div class="row"><button id="bStart">⚑ Départ ici</button></div>
+      <p id="specNote" class="muted hidden" data-t="specNote">Pièce spéciale : son profil de hauteur est fixé par le jeu.</p>
+      <div class="row"><button id="bStart" data-t="bStart">⚑ Départ ici</button></div>
     </section>
     <section class="card" style="margin-top:14px">
-      <h2>Circuit</h2>
-      <div class="row"><label>Hauteur de départ</label><input id="h0" type="number" min="0" max="65535" step="32"></div>
-      <div class="row"><label>Pièces</label><span id="nPieces"></span></div>
+      <h2 data-t="circuit">Circuit</h2>
+      <div class="row"><label data-t="lH0">Hauteur de départ</label><input id="h0" type="number" min="0" max="65535" step="32"></div>
+      <div class="row"><label data-t="lPieces">Pièces</label><span id="nPieces"></span></div>
       <div id="report"></div>
-      <p class="muted">Le jeu refuse un circuit dont une pièce ne se raccorde pas à la précédente, ou qui ne se referme pas
-        (en position et en hauteur). <kbd>+ Pièce après</kbd> place la nouvelle pièce au bout de la précédente.</p>
+      <div class="row"><button id="bClose" class="main" data-t="bClose">Refermer automatiquement</button></div>
+      <p id="closeMsg" class="muted"></p>
+      <p class="muted" data-t="circHelp">Le jeu refuse un circuit dont une pièce ne se raccorde pas à la précédente, ou qui ne se referme pas
+        (en position et en hauteur). « Refermer automatiquement » ajoute les pièces qui manquent pour boucler le circuit, puis
+        compense la différence de hauteur sur une ligne droite plate. Ctrl+Z : annuler, Ctrl+Y : rétablir.</p>
     </section>
   </aside>
 </main>
 
 <script>
   const $ = (id) => document.getElementById(id);
+  // ---------------------------------------------------------------- langue (la même que la page du jeu)
+  const EN = {
+    hT1: 'Circuit', hT2: 'editor', bOrig: 'Circuits of the disk', bNew: 'New circuit', bOpen: 'Open a .trk', bSave: 'Download the .trk',
+    bPlay: 'Try in the game', bBack: 'Back to the game', loading: 'Loading…', starting: 'Starting the game engine.',
+    needDisk: 'The editor uses your Stunt Car Racer disk (piece shapes, height profiles, original circuits). Add it on the game page, or here:',
+    chooseDisk: 'Choose the disk (.st, .zip)', trackName: 'Circuit name', topHelp: 'Click: choose a piece. Numbers follow the race direction; ⚑ = start piece.',
+    v3dHelp: '3D preview: drag to turn, mouse wheel to zoom.', bAdd: '+ Piece after', bDel: 'Delete', lShape: 'Shape', lRot: 'Orientation',
+    lRev: 'Reverse direction', lCell: 'Cell (x, z)', lPl: 'Left profile', lLong: 'long', lSame: 'Same profile on the right', lPr: 'Right profile',
+    profHelp: '0 = flat. These are the game\'s profiles: the curve shows the height change along the piece.',
+    specNote: 'Special piece: its height profile is set by the game.', bStart: '⚑ Start here', circuit: 'Circuit', lH0: 'Start height', lPieces: 'Pieces',
+    bClose: 'Close automatically',
+    circHelp: 'The game refuses a circuit where a piece does not connect to the previous one, or that does not close (in position and height). "Close automatically" adds the missing pieces to loop the circuit, then compensates the height difference on a flat straight line. Ctrl+Z: undo, Ctrl+Y: redo.',
+    piece: 'Piece', startTag: '  ⚑ start', allOk: '✓ The 8 circuits are valid: the game will accept them.', thisOk: '✓ This circuit is valid',
+    otherBad: ' (to fix in another circuit: ', closeGapTxt: ' — Closing gap: ', closeHTxt: ' — Height difference at the closing: ', closeHFix: ' (adjust profiles or use "Close automatically")',
+    refused: 'File refused: ', diskTracksBad: 'Circuits of the disk unreadable.', confirmOrig: 'Start again from the circuits of the disk? Changes not downloaded will be lost.',
+    confirmPlay: 'The game will refuse these circuits until they are valid. Keep them anyway?', noDisk: 'Disk missing or not recognised.', diskRefused: 'Disk refused: this is not Stunt Car Racer.',
+    fromDisk: 'circuits of the disk', fromMine: 'my circuits', confirmNew: 'Replace circuit {n} with a new flat oval circuit?', newName: 'NEW CIRCUIT',
+    closeNothing: 'The circuit already closes.', closePath: '{n} piece(s) added to close the circuit.', closeNoPath: 'No way found to close the circuit with the available pieces: move the last pieces closer to the start.',
+    closeHeight: 'Height compensated on piece {p} (profile {c}).', closeNoHeight: 'Height difference {h}: no flat straight line found to compensate it, add one.',
+    shapes: { 0: 'Straight', 1: 'Short right bend (45°)', 3: 'Short left bend (45°)', 6: 'Long right bend (45°)', 7: 'Long left bend (45°)', 4: 'Long diagonal', 10: 'Diagonal', 12: 'Special straight A', 13: 'Special straight B', 14: 'Special straight C', 15: 'Special straight D' }
+  };
+  const FR = {
+    piece: 'Pièce', startTag: '  ⚑ départ', allOk: '✓ Les 8 circuits sont valides : le jeu les acceptera.', thisOk: '✓ Ce circuit est valide',
+    otherBad: ' (à corriger dans un autre circuit : ', closeGapTxt: ' — Écart de fermeture : ', closeHTxt: ' — Différence de hauteur à la fermeture : ', closeHFix: ' (ajustez les profils ou utilisez « Refermer automatiquement »)',
+    refused: 'Fichier refusé : ', diskTracksBad: 'Circuits de la disquette illisibles.', confirmOrig: 'Repartir des circuits de la disquette ? Les modifications non téléchargées seront perdues.',
+    confirmPlay: 'Le jeu refusera ces circuits tant qu\'ils ne sont pas valides. Les garder quand même ?', noDisk: 'Disquette absente ou non reconnue.', diskRefused: 'Disquette refusée : ce n\'est pas Stunt Car Racer.',
+    fromDisk: 'circuits de la disquette', fromMine: 'mes circuits', confirmNew: 'Remplacer le circuit {n} par un nouveau circuit ovale et plat ?', newName: 'NOUVEAU CIRCUIT',
+    closeNothing: 'Le circuit se referme déjà.', closePath: '{n} pièce(s) ajoutée(s) pour refermer le circuit.', closeNoPath: 'Aucun moyen trouvé de refermer le circuit avec les pièces disponibles : rapprochez les dernières pièces du départ.',
+    closeHeight: 'Hauteur compensée sur la pièce {p} (profil {c}).', closeNoHeight: 'Différence de hauteur {h} : aucune ligne droite plate pour la compenser, ajoutez-en une.',
+    shapes: { 0: 'Ligne droite', 1: 'Virage court à droite (45°)', 3: 'Virage court à gauche (45°)', 6: 'Virage long à droite (45°)', 7: 'Virage long à gauche (45°)', 4: 'Diagonale longue', 10: 'Diagonale', 12: 'Droite spéciale A', 13: 'Droite spéciale B', 14: 'Droite spéciale C', 15: 'Droite spéciale D' }
+  };
+  const base = {};
+  document.querySelectorAll('[data-t]').forEach((e) => { base[e.dataset.t] = e.innerHTML; });
+  let fr = (navigator.language || '').toLowerCase().startsWith('fr');
+  try { const l = localStorage.getItem('scr-lang'); if (l) fr = l === 'fr'; } catch (e) {}
+  const T = (k, vars) => { let v = (fr ? FR : EN)[k]; if (v === undefined) v = base[k]; if (vars) for (const n in vars) v = v.replace('{' + n + '}', vars[n]); return v; };
+  function applyLang() {
+    document.documentElement.lang = fr ? 'fr' : 'en';
+    document.querySelectorAll('[data-t]').forEach((e) => { e.innerHTML = fr ? base[e.dataset.t] : (EN[e.dataset.t] || base[e.dataset.t]); });
+    $('lang').textContent = fr ? 'English' : 'Français';
+    document.title = fr ? 'Éditeur de circuits' : 'Circuit editor';
+    const sh = $('shape'); if (sh) for (const o of sh.options) o.textContent = T('shapes')[o.value];
+    if (set) refresh(false);
+  }
+  $('lang').addEventListener('click', () => { fr = !fr; try { localStorage.setItem('scr-lang', fr ? 'fr' : 'en'); } catch (e) {} applyLang(); });
+
   const DISK = '/save/game.st', MINE = '/save/circuits.trk', WORK = '/tmp/editeur.trk', CELL = 0x800;
-  const SHAPE_NAMES = { 0: 'Ligne droite', 1: 'Virage court à droite (45°)', 3: 'Virage court à gauche (45°)', 6: 'Virage long à droite (45°)',
-    7: 'Virage long à gauche (45°)', 4: 'Diagonale longue', 10: 'Diagonale', 12: 'Droite spéciale A', 13: 'Droite spéciale B', 14: 'Droite spéciale C', 15: 'Droite spéciale D' };
+  const SHAPE_KEYS = [0, 1, 3, 6, 7, 4, 10, 12, 13, 14, 15];
   let shapes = [], profiles = [], set = null, cur = 0, sel = 0, geo = null;
 
   // ---------------------------------------------------------------- fichier .trk <-> modèle
@@ -305,6 +357,14 @@
   }
 
   // ---------------------------------------------------------------- panneau de la pièce
+  // messages du moteur (en français) traduits pour la page anglaise
+  function trReport(l) {
+    if (fr || !l) return l;
+    return l.replace(/ : trop peu de pièces \((\d+)\)/, ': too few pieces ($1)')
+      .replace(/ : la pièce (\d+) ne se raccorde pas à la précédente \(écart (\d+)\)/, ': piece $1 does not connect to the previous one (gap $2)')
+      .replace(/ : le circuit ne se referme pas \(écart (\d+), hauteur (\d+)\)/, ': the circuit does not close (gap $1, height $2)')
+      .replace(/^circuits illisibles : /, 'unreadable circuits: ');
+  }
   function refresh(redecode = true) {
     const t = set.tracks[cur];
     sel = Math.max(0, Math.min(sel, t.pieces.length - 1));
@@ -314,7 +374,7 @@
     $('h0').value = t.h0;
     $('nPieces').textContent = t.pieces.length;
     const pc = t.pieces[sel], shape = pc.type & 0xf, special = shape >= 12;
-    $('pTitle').textContent = 'Pièce ' + (sel + 1) + ' / ' + t.pieces.length + (sel === t.hdr[2] ? '  ⚑ départ' : '');
+    $('pTitle').textContent = T('piece') + ' ' + (sel + 1) + ' / ' + t.pieces.length + (sel === t.hdr[2] ? T('startTag') : '');
     $('shape').value = String(shape);
     $('rot').querySelectorAll('button').forEach((b, k) => b.classList.toggle('on', k === ((pc.type >> 6) & 3)));
     $('rev').checked = !!(pc.type & 0x10);
@@ -326,16 +386,33 @@
     drawProfile($('plv'), pc.bba & 127, pc.bba & 0x80); drawProfile($('prv'), pc.v & 127, pc.bba & 0x80);
     const g = trackGeo(), rep = $('report');
     if (geo && !geo.ok) {
-      const mine = geo.report.split('|').filter((l) => l && l.startsWith((set.names[cur] || '').trim() + ' :'));
+      geo.report = geo.report.split('|').map(trReport).join('|');
+      const mine = geo.report.split('|').filter((l) => l && (l.startsWith((set.names[cur] || '').trim() + ' :') || l.startsWith((set.names[cur] || '').trim() + ':')));
       const others = geo.report.split('|').filter((l) => l && !mine.includes(l));
       rep.className = mine.length ? 'bad' : 'ok';
-      rep.textContent = mine.length ? '✗ ' + mine.join(' ; ') : '✓ Ce circuit est valide' + (others.length ? ' (à corriger dans un autre circuit : ' + others.join(' ; ') + ')' : '');
-    } else { rep.className = 'ok'; rep.textContent = '✓ Les 8 circuits sont valides : le jeu les acceptera.'; }
-    if (g && g.close > 48) rep.textContent += ' — Écart de fermeture : ' + g.close;
-    if (g && g.closeH > 32) rep.textContent += ' — Différence de hauteur à la fermeture : ' + g.closeH + ' (ajustez les profils ou la hauteur de départ)';
+      rep.textContent = mine.length ? '✗ ' + mine.join(' ; ') : T('thisOk') + (others.length ? T('otherBad') + others.join(' ; ') + ')' : '');
+    } else { rep.className = 'ok'; rep.textContent = T('allOk'); }
+    if (g && g.close > 48) rep.textContent += T('closeGapTxt') + g.close;
+    if (g && g.closeH > 32) rep.textContent += T('closeHTxt') + g.closeH + T('closeHFix');
+    $('bUndo').disabled = !undo.length; $('bRedo').disabled = !redo.length;
     drawTop(); draw3d();
   }
-  function edit(fn) { const t = set.tracks[cur]; fn(t, t.pieces[sel]); refresh(); }
+  const undo = [], redo = [];
+  function snapshot() { undo.push({ set: structuredClone(set), cur, sel }); if (undo.length > 100) undo.shift(); redo.length = 0; }
+  function restore(from, to) {
+    if (!from.length) return;
+    to.push({ set: structuredClone(set), cur, sel });
+    const st = from.pop(); set = st.set; cur = st.cur; sel = st.sel; refresh();
+  }
+  $('bUndo').addEventListener('click', () => restore(undo, redo));
+  $('bRedo').addEventListener('click', () => restore(redo, undo));
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || !set || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && e.key.toLowerCase() !== 'z') return;
+    const k = e.key.toLowerCase();
+    if (k === 'z' && !e.shiftKey) { e.preventDefault(); restore(undo, redo); }
+    else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); restore(redo, undo); }
+  });
+  function edit(fn) { snapshot(); const t = set.tracks[cur]; fn(t, t.pieces[sel]); refresh(); }
   $('shape').addEventListener('change', () => edit((t, pc) => { pc.type = (pc.type & 0xf0) | +$('shape').value; }));
   $('rev').addEventListener('change', () => edit((t, pc) => { pc.type ^= 0x10; }));
   $('cx').addEventListener('change', () => edit((t, pc) => { pc.cell = (pc.cell & 0xf0) | (Math.max(0, Math.min(15, +$('cx').value)) & 15); }));
@@ -345,7 +422,7 @@
   $('same').addEventListener('change', () => edit((t, pc) => { pc.type ^= 0x20; if (pc.type & 0x20) pc.v = pc.bba; }));
   $('pr').addEventListener('change', () => edit((t, pc) => { pc.v = Math.max(0, Math.min(127, +$('pr').value)) & 127; }));
   $('h0').addEventListener('change', () => edit((t) => { t.h0 = Math.max(0, Math.min(65535, +$('h0').value | 0)); }));
-  $('name').addEventListener('change', () => { set.names[cur] = $('name').value.toUpperCase().slice(0, 16); refresh(); });
+  $('name').addEventListener('change', () => { snapshot(); set.names[cur] = $('name').value.toUpperCase().slice(0, 16); refresh(); });
   $('bPrev').addEventListener('click', () => { sel = (sel - 1 + set.tracks[cur].pieces.length) % set.tracks[cur].pieces.length; refresh(false); });
   $('bNext').addEventListener('click', () => { sel = (sel + 1) % set.tracks[cur].pieces.length; refresh(false); });
   $('bStart').addEventListener('click', () => edit((t) => { t.hdr[1] = t.hdr[2] = sel; }));
@@ -358,6 +435,7 @@
   }
   $('bAdd').addEventListener('click', () => {
     const t = set.tracks[cur]; if (t.pieces.length >= 120) return;
+    snapshot();
     const g = trackGeo(), ss = pieceSecs(g, sel); if (!ss.length) return;
     const shape = +$('shape').value >= 12 ? 0 : +$('shape').value;
     const place = bestPlacement(shape, ss[ss.length - 1]) || bestPlacement(0, ss[ss.length - 1]);
@@ -368,6 +446,7 @@
   });
   $('bDel').addEventListener('click', () => {
     const t = set.tracks[cur]; if (t.pieces.length <= 4) return;
+    snapshot();
     t.pieces.splice(sel, 1);
     t.l1 = t.l1.filter(([p]) => p !== sel); t.l2 = t.l2.filter((p) => p !== sel);
     shiftRefs(t, sel + 1, -1);
@@ -375,17 +454,108 @@
     sel = Math.max(0, sel - 1); refresh();
   });
 
+
+  // ---------------------------------------------------------------- nouveau circuit : ovale plat
+  // tracé de STEPPING STONES (rectangle aux coins arrondis) aplati : toutes les pièces droites ou en
+  // virage, profil 0, sans pièce spéciale ni réglage particulier de l'adversaire
+  $('bNew').addEventListener('click', () => {
+    if (!confirm(T('confirmNew', { n: cur + 1 }))) return;
+    snapshot();
+    let tpl;
+    try { Module.ccall('scr_ed_export', 'number', ['string'], ['/tmp/origine.trk']); tpl = parseTrk(FS.readFile('/tmp/origine.trk')).tracks[1]; } catch (e) { return; }
+    const t = structuredClone(tpl);
+    for (const pc of t.pieces) { if ((pc.type & 0xf) >= 12) pc.type &= 0xf0; pc.type |= 0x20; pc.bba = 0; pc.v = 0; }
+    t.h0 = 1280; t.l1 = []; t.l2 = [];
+    set.tracks[cur] = t; set.names[cur] = T('newName'); sel = 0; refresh();
+  });
+
+  // ---------------------------------------------------------------- refermer automatiquement
+  // 1. position : recherche (A*) d'une suite de pièces plates qui relie la fin du circuit à son début ;
+  // 2. hauteur : profil choisi sur une ligne droite plate pour compenser la différence restante
+  const PATH_SHAPES = [0, 1, 3, 6, 7, 10, 4];
+  function firstSec(shape, type, cell) { const s = shapeSecs(shape, type, cell); return s.length ? s : null; }
+  const gapOf = (a, e) => Math.max(Math.hypot(a[0] - e[0], a[1] - e[1]), Math.hypot(a[2] - e[2], a[3] - e[3]));
+  function closePath(end, target, used) {   // end, target : [lx,lz,rx,rz]
+    const key = (e) => [e[0], e[1], e[2], e[3]].map((v) => Math.round(v / 48)).join(',');
+    const h = (e) => Math.hypot((e[0] + e[2]) / 2 - (target[0] + target[2]) / 2, (e[1] + e[3]) / 2 - (target[1] + target[3]) / 2) / CELL;
+    const open = [{ e: end, path: [], f: h(end) }], seen = new Set([key(end)]);
+    let n = 0;
+    while (open.length && n++ < 25000) {
+      open.sort((a, b) => a.f - b.f);
+      const node = open.shift();
+      if (node.path.length && gapOf(target, node.e) < 48) return node.path;
+      if (node.path.length >= 24) continue;
+      const cx = Math.floor((node.e[0] + node.e[2]) / 2 / CELL), cz = Math.floor((node.e[1] + node.e[3]) / 2 / CELL);
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+        const x = cx + dx, z = cz + dz; if (x < 0 || x > 15 || z < 0 || z > 15) continue;
+        const cell = (z << 4) | x;
+        if (used.has(cell) || node.path.some((p) => p.cell === cell)) continue;
+        for (const shape of PATH_SHAPES) for (let rot = 0; rot < 4; rot++) for (const rv of [0, 0x10]) {
+          const type = (rot << 6) | rv | shape | 0x20, s = firstSec(shape, type, cell);
+          if (!s || gapOf(s[0], node.e) >= 48) continue;
+          const e2 = s[s.length - 1], k = key(e2); if (seen.has(k)) continue; seen.add(k);
+          const path = node.path.concat([{ type, cell, bba: 0, v: 0 }]);
+          open.push({ e: e2, path, f: path.length * 0.9 + h(e2) });
+        }
+      }
+    }
+    return null;
+  }
+  function profileDelta(code, neg, nsec) { const pr = profiles[code]; if (!pr) return null; const v = neg ? pr.w : pr.b; const a = v[0], b = v[nsec - 1]; return a < 0 || b < 0 ? null : b - a; }
+  $('bClose').addEventListener('click', () => {
+    snapshot();
+    const t = set.tracks[cur], msg = []; let g = trackGeo();
+    if (g && g.close > 48) {   // 1. position
+      const last = pieceSecs(g, t.pieces.length - 1), first = pieceSecs(g, 0);
+      if (!last.length || !first.length) return;
+      const e = last[last.length - 1], f = first[0];
+      const used = new Set(t.pieces.map((p) => p.cell));
+      const path = closePath([e[0], e[2], e[3], e[5]], [f[0], f[2], f[3], f[5]], used);
+      if (!path) { $('closeMsg').textContent = T('closeNoPath'); undo.pop(); return; }
+      t.pieces.push(...path); msg.push(T('closePath', { n: path.length }));
+      decodeAll(); g = trackGeo();
+    }
+    if (g && g.closeH > 32) {   // 2. hauteur : profil sur une ligne droite plate, de la variation qui compense la différence
+      const before = g.closeH, last = pieceSecs(g, t.pieces.length - 1), first = pieceSecs(g, 0);
+      const want = -(((last[last.length - 1][1] + last[last.length - 1][4]) / 2) - ((first[0][1] + first[0][4]) / 2));
+      const cands = [];
+      for (let code = 1; code < 128; code++) for (const neg of [0, 0x80]) { const d = profileDelta(code, neg, 9); if (d !== null && d !== 0) cands.push({ code: code | neg, d }); }
+      cands.sort((u, v) => Math.abs(u.d - want) - Math.abs(v.d - want));
+      let best = null, tried = 0;
+      for (let i = t.pieces.length - 1; i >= 0 && tried < 8 && (!best || best.h > 32); i--) {
+        const pc = t.pieces[i];
+        if ((pc.type & 0xf) !== 0 || pc.bba !== 0 || pc.v !== 0) continue;
+        tried++;
+        const saved = { type: pc.type, bba: pc.bba, v: pc.v };
+        for (const c of cands.slice(0, 6)) {
+          pc.type = saved.type | 0x20; pc.bba = c.code; pc.v = c.code;
+          decodeAll(); const gg = trackGeo();
+          if (gg && gg.close <= 48 && (!best || gg.closeH < best.h)) best = { i, code: c.code, h: gg.closeH };
+          if (best && best.h <= 32) break;
+        }
+        Object.assign(pc, saved);
+      }
+      if (best && best.h < before) {
+        const pc = t.pieces[best.i]; pc.type |= 0x20; pc.bba = best.code; pc.v = best.code;
+        msg.push(T('closeHeight', { p: best.i + 1, c: best.code & 127 }));
+      } else msg.push(T('closeNoHeight', { h: before }));
+    }
+    $('closeMsg').textContent = msg.length ? msg.join(' ') : T('closeNothing');
+    if (!msg.length) undo.pop();
+    refresh();
+  });
+
   // ---------------------------------------------------------------- fichiers
   function load(bytes, from) {
-    try { set = parseTrk(bytes); } catch (e) { alert('Fichier refusé : ' + e.message); return; }
-    cur = 0; sel = 0; refresh();
+    try { set = parseTrk(bytes); } catch (e) { alert(T('refused') + e.message); return; }
+    cur = 0; sel = 0; undo.length = 0; redo.length = 0; refresh();
     $('bootMsg').textContent = from;
   }
   function loadOriginals() {
-    if (!Module.ccall('scr_ed_export', 'number', ['string'], ['/tmp/origine.trk'])) { alert('Circuits de la disquette illisibles.'); return; }
-    load(FS.readFile('/tmp/origine.trk'), 'circuits de la disquette');
+    if (!Module.ccall('scr_ed_export', 'number', ['string'], ['/tmp/origine.trk'])) { alert(T('diskTracksBad')); return; }
+    load(FS.readFile('/tmp/origine.trk'), T('fromDisk'));
   }
-  $('bOrig').addEventListener('click', () => { if (!set || confirm('Repartir des circuits de la disquette ? Les modifications non téléchargées seront perdues.')) loadOriginals(); });
+  $('bOrig').addEventListener('click', () => { if (!set || confirm(T('confirmOrig'))) loadOriginals(); });
   $('fOpen').addEventListener('change', async (e) => { const f = e.target.files[0]; if (f) load(new Uint8Array(await f.arrayBuffer()), f.name); e.target.value = ''; });
   $('bSave').addEventListener('click', () => {
     const blob = new Blob([encodeTrk(set)], { type: 'application/octet-stream' });
@@ -393,25 +563,26 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   });
   $('bPlay').addEventListener('click', () => {   // gardés pour la page du jeu (emplacement « Mes circuits »), puis le jeu
-    if (geo && !geo.ok && !confirm('Le jeu refusera ces circuits tant qu\'ils ne sont pas valides. Les garder quand même ?')) return;
+    if (geo && !geo.ok && !confirm(T('confirmPlay'))) return;
     FS.writeFile(MINE, encodeTrk(set));
     FS.syncfs(false, () => { location.href = 'index.html'; });
   });
 
   // ---------------------------------------------------------------- démarrage
   function start() {
-    if (!Module.ccall('scr_ed_init', 'number', ['string'], [DISK])) { $('needDisk').classList.remove('hidden'); $('bootMsg').textContent = 'Disquette absente ou non reconnue.'; return; }
+    if (!Module.ccall('scr_ed_init', 'number', ['string'], [DISK])) { $('needDisk').classList.remove('hidden'); $('bootMsg').textContent = T('noDisk'); return; }
     shapes = JSON.parse(Module.ccall('scr_ed_shapes', 'string', [], []));
     profiles = JSON.parse(Module.ccall('scr_ed_profiles', 'string', [], []));
     const sh = $('shape'); sh.innerHTML = '';
-    for (const k of Object.keys(SHAPE_NAMES)) if (shapes[+k >= 12 ? 0 : +k] && shapes[+k >= 12 ? 0 : +k].length) { const o = document.createElement('option'); o.value = k; o.textContent = SHAPE_NAMES[k]; sh.appendChild(o); }
+    for (const k of SHAPE_KEYS) if (shapes[k >= 12 ? 0 : k] && shapes[k >= 12 ? 0 : k].length) { const o = document.createElement('option'); o.value = String(k); o.textContent = T('shapes')[k]; sh.appendChild(o); }
     const rot = $('rot'); rot.innerHTML = '';
     ['↑', '→', '↓', '←'].forEach((s, k) => { const b = document.createElement('button'); b.textContent = s; b.title = 'quart de tour ' + k; b.addEventListener('click', () => edit((t, pc) => { pc.type = (pc.type & 0x3f) | (k << 6); })); rot.appendChild(b); });
     const tabs = $('tabs'); tabs.innerHTML = '';
     for (let k = 0; k < 8; k++) { const b = document.createElement('button'); b.addEventListener('click', () => { cur = k; sel = 0; refresh(false); }); tabs.appendChild(b); }
     $('boot').classList.add('hidden'); $('app').classList.remove('hidden');
-    ['bOrig', 'bSave', 'bPlay'].forEach((id) => $(id).disabled = false);
-    if (FS.analyzePath(MINE).exists) load(FS.readFile(MINE), 'mes circuits'); else loadOriginals();
+    applyLang();
+    ['bOrig', 'bNew', 'bSave', 'bPlay'].forEach((id) => $(id).disabled = false);
+    if (FS.analyzePath(MINE).exists) load(FS.readFile(MINE), T('fromMine')); else loadOriginals();
   }
   async function useDisk(f) {
     let d = new Uint8Array(await f.arrayBuffer());
@@ -426,10 +597,12 @@
       }
     }
     FS.writeFile(DISK, d);
-    if (!Module.ccall('scr_ed_init', 'number', ['string'], [DISK])) { try { FS.unlink(DISK); } catch (x) {} $('bootMsg').textContent = 'Disquette refusée : ce n\'est pas Stunt Car Racer.'; return; }
+    if (!Module.ccall('scr_ed_init', 'number', ['string'], [DISK])) { try { FS.unlink(DISK); } catch (x) {} $('bootMsg').textContent = T('diskRefused'); return; }
     FS.syncfs(false, () => {}); $('needDisk').classList.add('hidden'); start();
   }
   $('fDisk').addEventListener('change', (e) => useDisk(e.target.files[0]));
+
+  applyLang();   // page de démarrage traduite tout de suite
 
   var Module = {
     print: () => {}, printErr: (t) => console.warn(t),
