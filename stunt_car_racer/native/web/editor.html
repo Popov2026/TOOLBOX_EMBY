@@ -243,23 +243,29 @@
   });
 
   // ---------------------------------------------------------------- aperçu 3D
-  let yaw = 0.7, pitch = 0.55, zoom = 1;
+  let yaw = 0.7, pitch = 0.75, zoom = 1;
   function draw3d() {
     const c = $('view3d'), x = c.getContext('2d'), W = c.width, H = c.height;
     const sky = x.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#5f8fd8'); sky.addColorStop(1, '#2c3f2a');
     x.fillStyle = sky; x.fillRect(0, 0, W, H);
     const g = trackGeo(); if (!g || !g.secs.length) return;
-    let cx = 0, cz = 0, cy = 0; for (const s of g.secs) { cx += s[0] + s[3]; cz += s[2] + s[5]; cy += s[1] + s[4]; }
-    const n = g.secs.length; cx /= 2 * n; cz /= 2 * n; cy /= 2 * n;
-    const HS = 0.5, dist = 26000 / zoom;
+    let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9, cy = 0;
+    for (const s of g.secs) { x0 = Math.min(x0, s[0], s[3]); x1 = Math.max(x1, s[0], s[3]); z0 = Math.min(z0, s[2], s[5]); z1 = Math.max(z1, s[2], s[5]); cy += s[1] + s[4]; }
+    const n = g.secs.length, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2; cy /= 2 * n;
+    const HS = 0.5, dist = Math.max(x1 - x0, z1 - z0, 4096) * 2.3 / zoom;   // tout le circuit dans l'image
     const ca = Math.cos(yaw), sa = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
     const proj = (px, py, pz) => {
       let X = px - cx, Y = (py - cy) * HS, Z = pz - cz;
       const x1 = X * ca - Z * sa, z1 = X * sa + Z * ca;
       const y2 = Y * cp - z1 * sp, z2 = Y * sp + z1 * cp + dist;
       if (z2 < 200) return null;
-      const f = W * 0.9 / z2; return [W / 2 + x1 * f, H / 2 - y2 * f, z2];
+      const f = W * 1.0 / z2; return [W / 2 + x1 * f, H * 0.58 - y2 * f, z2];
     };
+    x.strokeStyle = 'rgba(255,255,255,.08)'; x.lineWidth = 1;   // sol (grille des cases)
+    for (let i = 0; i <= 16; i++) for (const [a0, a1] of [[[i * CELL, 0], [i * CELL, 16 * CELL]], [[0, i * CELL], [16 * CELL, i * CELL]]]) {
+      const p0 = proj(a0[0], 0, a0[1]), p1 = proj(a1[0], 0, a1[1]);
+      if (p0 && p1) { x.beginPath(); x.moveTo(p0[0], p0[1]); x.lineTo(p1[0], p1[1]); x.stroke(); }
+    }
     const quads = [];
     for (let i = 0; i < n; i++) {
       const a = g.secs[i], b = g.secs[(i + 1) % n];
