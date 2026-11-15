@@ -32,7 +32,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v105"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v106"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -585,7 +585,10 @@ int main(int argc, char **argv) {
 
   // --- multijoueur : le câble série du jeu passe par le réseau
   NetLink net;
-  net.setTnt(haveTnt);   // courses à deux en ligne : circuits TNT au tirage si les deux joueurs les ont
+  // en ligne (tirage des courses à deux, courses à plusieurs : circuits 8-15) : les vrais circuits TNT
+  // seulement ; des circuits personnels ne sont pas ceux des autres joueurs
+  const bool onlineTnt = haveTnt && !tntSet.custom;
+  net.setTnt(onlineTnt);   // courses à deux en ligne : circuits TNT au tirage si les deux joueurs les ont
   {
     // empreinte du programme du jeu seulement ; les réglages de physique (scr.ini) sont envoyés en
     // texte et l'esclave adopte ceux du maître pendant la partie
@@ -785,7 +788,7 @@ int main(int argc, char **argv) {
   auto restartMachine = [&](int trk) {
     view.reset();
     m.reset();
-    const TrackSet *ts = trk < 0 ? soloSet : trk >= 8 && haveTnt ? &tntSet : nullptr;
+    const TrackSet *ts = trk < 0 ? soloSet : trk >= 8 && onlineTnt ? &tntSet : nullptr;
     m = start(disk, o, trk < 0 ? -1 : trk & 7, ts);
     trackList = decodeTracks(m->image(), m->trackSet());
     newView();
@@ -942,7 +945,7 @@ int main(int argc, char **argv) {
     return gr.active && net.inGroup() && gr.finished && net.groupPhase() == "racing" && !gr.victoryHold && !specCars().empty();
   };
   int gTrack = 0, gLaps = 3;      // choix de l'organisateur
-  const int nTracks = haveTnt ? 16 : 8;   // choix de l'organisateur : 8 d'origine, puis 8 TNT
+  const int nTracks = onlineTnt ? 16 : 8;   // choix de l'organisateur : 8 d'origine, puis 8 TNT
   auto trackName = [&](int t) {
     const std::vector<Track> &lst = t >= 8 ? tracksTnt : tracksOrig;
     std::string nm = (t & 7) < int(lst.size()) ? lst[size_t(t & 7)].name : "";
@@ -1549,7 +1552,7 @@ int main(int argc, char **argv) {
             gr.slot = 0;
             for (size_t k = 0; k < order.size(); k++) if (order[k] == net.groupMe()) gr.slot = int(k);
           }
-          if ((t & 15) >= 8 && !haveTnt) {   // circuit TNT sans le fichier SCR-TNT : on ne peut pas rouler dessus
+          if ((t & 15) >= 8 && !onlineTnt) {   // circuit TNT sans le fichier SCR-TNT : on ne peut pas rouler dessus
             net.localNote(L("Circuit TNT choisi : fichier SCR-TNT absent (dossier TNT à côté de scr.exe), course ignorée", "TNT track chosen: SCR-TNT file missing (TNT folder next to scr.exe), race skipped"));
             gr = GroupRace(); gr.skip = true;
             net.groupCommand("LOADED");
@@ -1585,7 +1588,7 @@ int main(int argc, char **argv) {
         } else if (ev.rfind("WATCH ", 0) == 0 && !net.inGroup()) {   // course lancée dans la salle sans nous : spectateur
           int t = 0, l = 3;
           std::sscanf(ev.c_str() + 6, "%d %d", &t, &l);
-          if ((t & 15) >= 8 && !haveTnt) {
+          if ((t & 15) >= 8 && !onlineTnt) {
             net.localNote(L("Course sur un circuit TNT : fichier SCR-TNT absent, impossible de la regarder", "Race on a TNT track: SCR-TNT file missing, cannot watch it"));
             continue;
           }
