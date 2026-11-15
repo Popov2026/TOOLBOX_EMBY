@@ -52,6 +52,9 @@
   .slot .state { font-size: 14px; font-weight: 600; color: var(--muted); text-align: right; }
   .slot.ready .state { color: var(--ok); }
   .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; margin-left: 6px; vertical-align: 2px; }
+  .tag.opt { background: rgba(255,176,32,.15); color: var(--accent2); }
+  .slot.trkslot { padding: 10px 14px; }
+  .trkslot .rm { display: block; color: var(--muted); font-size: 13px; font-weight: 400; text-decoration: underline; cursor: pointer; }
   .tag.req { background: rgba(227,57,43,.18); color: #ff8a80; }
   input[type=file] { display: none; }
   /* deux lancements : HD modernisée (rouge) ou Classique 1989 */
@@ -190,6 +193,13 @@
           <span class="state" id="stDisk"></span>
         </label>
         <input id="fileDisk" type="file" accept=".st,.ST,.zip,.ZIP">
+        <label class="slot trkslot" id="slotTrk" for="fileTrk">
+          <span class="icon">🏁</span>
+          <span class="txt"><span class="name"><span data-t="trkName">My circuits</span> (.trk)<span class="tag opt" data-t="optional">optional</span></span><br>
+            <span class="sub" data-t="trkSub">Your own circuits, made with the circuit editor. F7 switches between the original circuits and yours.</span></span>
+          <span class="state" id="stTrk"></span>
+        </label>
+        <input id="fileTrk" type="file" accept=".trk,.TRK">
         <div class="modes">
           <button class="mode" id="playHd" disabled><img src="mode_hd.jpg" alt="" width="480" height="270"><b data-t="playHd">Play HD</b><span data-t="playHdSub">Modernised: scenery, textures, V8</span></button>
           <button class="mode" id="playClassic" disabled><img src="mode_classic.jpg" alt="" width="480" height="270"><b data-t="playClassic">Classic</b><span data-t="playClassicSub">1989 look, high resolution, no extras</span></button>
@@ -311,6 +321,8 @@
     winList: '<li>Full HD 1920×1080 avec rendu OpenGL</li><li>The New Tracks (TNT) : 8 circuits en plus</li><li>Courses en réseau local</li><li>Votre propre serveur relais</li>',
     winBtn: 'Télécharger pour Windows',
     thxTitle: 'Merci, Geoff Crammond',
+    trkName: 'Mes circuits', optional: 'facultatif', trkSub: "Vos propres circuits, faits avec l'éditeur de circuits. F7 passe des circuits d'origine aux vôtres.",
+    trkNone: 'Aucun', trkReady: 'Prêts', trkRemove: 'retirer', trkBad: "Ce fichier n'est pas un fichier de circuits (.trk).", trkSaved: 'Circuits personnels prêts : ils seront chargés au lancement (F7 pour changer).',
     revTitle: 'Avis des joueurs', revLoading: 'Chargement des avis…', revStars: 'Votre note', revNameL: 'Nom', revSend: 'Envoyer',
     revNone: 'Pas encore d\'avis publié : soyez le premier !', revOff: 'Avis indisponibles pour le moment.',
     revPh: 'Votre avis (100 caractères au plus)', revNeed: 'Choisissez une note, un nom et un commentaire.',
@@ -335,6 +347,7 @@
     revSending: 'Sending…', revThanks: 'Thank you! Your review will be published once approved.', revErr: 'Could not send, try again later.',
     revWait: 'Wait a minute before another review.', revPending: 'You already have reviews waiting for approval.',
     revCountN: (n) => n + (n === 1 ? ' review' : ' reviews'),
+    trkNone: 'None', trkReady: 'Ready', trkRemove: 'remove', trkBad: 'This file is not a circuits file (.trk).', trkSaved: 'Custom circuits ready: they will be loaded at start (F7 to switch).',
     ok: 'Ready', missing: 'Missing', checking: 'Checking the online server…',
     online: (p, g) => p + (p === 1 ? ' player' : ' players') + ' online' + (g > 0 ? ' · ' + g + (g === 1 ? ' race' : ' races') + ' in progress' : ''),
     offline: 'Online server unreachable right now',
@@ -356,7 +369,7 @@
     document.documentElement.lang = fr ? 'fr' : 'en';
     document.querySelectorAll('[data-t]').forEach((e) => { e.innerHTML = fr ? FR[e.dataset.t] : base[e.dataset.t]; });
     $('lang').textContent = fr ? 'English' : 'Français';
-    status(statusKey); refresh(); showOnline(); showReviews();
+    status(statusKey); refresh(); showOnline(); showReviews(); if (typeof refreshTrk === 'function' && ready) refreshTrk();
   }
   $('lang').addEventListener('click', () => { fr = !fr; try { localStorage.setItem('scr-lang', fr ? 'fr' : 'en'); } catch (e) {} applyLang(); });
 
@@ -415,6 +428,7 @@
         if (err) console.warn('syncfs', err);
         ready = true; status('');
         haveDisk = FS.analyzePath(DISK).exists;
+        haveTrk = FS.analyzePath(TRK).exists; refreshTrk();
         if (haveDisk) { try { if (!Module.ccall('scr_check_disk', 'number', ['string'], [DISK])) { FS.unlink(DISK); haveDisk = false; save(); } } catch (e) {} }
         refresh();
       });
@@ -462,6 +476,7 @@
   async function useFile(f) {
     if (!f || !ready || running) return;
     let d = new Uint8Array(await f.arrayBuffer());
+    if (d.length > 7 && new TextDecoder().decode(d.subarray(0, 7)) === 'SCRTRK1') { await useTrk(f); return; }   // fichier de circuits
     try { if (d.length > 3 && d[0] === 0x50 && d[1] === 0x4b) d = await unzipDisk(d); } catch (e) { d = null; }   // « PK » : archive .zip
     if (!d || d.length < 300000) { status('badDisk'); return; }
     if (keepDisk(d)) status('');
@@ -538,6 +553,27 @@
     }, 15000);
   });
   drawStarPick();
+
+  // ---------------------------------------------------------------- circuits personnels (.trk)
+  const TRK = '/save/circuits.trk';
+  let haveTrk = false;
+  function refreshTrk() {
+    $('slotTrk').classList.toggle('ready', haveTrk);
+    $('stTrk').innerHTML = '';
+    $('stTrk').textContent = haveTrk ? '✓ ' + T('trkReady') : T('trkNone');
+    if (haveTrk) {
+      const rm = document.createElement('span'); rm.className = 'rm'; rm.textContent = T('trkRemove');
+      rm.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); try { FS.unlink(TRK); } catch (x) {} haveTrk = false; save(); refreshTrk(); });
+      $('stTrk').appendChild(rm);
+    }
+  }
+  async function useTrk(f) {
+    if (!f || !ready || running) return;
+    const d = new Uint8Array(await f.arrayBuffer());
+    if (d.length < 250 || new TextDecoder().decode(d.subarray(0, 7)) !== 'SCRTRK1') { status('trkBad'); return; }
+    FS.writeFile(TRK, d); haveTrk = true; save(); refreshTrk(); status('trkSaved');
+  }
+  $('fileTrk').addEventListener('change', (e) => useTrk(e.target.files[0]));
 
   // ---------------------------------------------------------------- lancement
   // bruit d'un lecteur de disquette (synthétisé) : moteur, pas de la tête et lecture, pendant d time
@@ -619,7 +655,7 @@
     setInterval(save, 5000);                  // options changées dans le jeu (scr.ini)
     window.addEventListener('beforeunload', save);
     const hd = hdReady ? await hdReady : false;
-    const args = [DISK, '--ini', INI, mode === 'classic' ? '--classic' : '--modern'].concat(hd ? ['--hddir', '/hd'] : []);
+    const args = [DISK, '--ini', INI, mode === 'classic' ? '--classic' : '--modern'].concat(haveTrk ? ['--tnt', TRK, '--circuits', 'tnt'] : []).concat(hd ? ['--hddir', '/hd'] : []);
     try { Module.callMain(args); } catch (e) { if (e !== 'unwind' && !(e && e.name === 'ExitStatus')) console.error(e); }
   }
   $('playHd').addEventListener('click', () => start('modern'));

@@ -22,6 +22,10 @@ struct Track {
   std::vector<Section> secs;    // dans l'ordre de parcours, en commençant à la ligne de départ
   int startPiece = 0;
   int pieces = 0;
+  // vérification (circuits personnels) : plus grand écart entre deux pièces qui se suivent (unités
+  // de géométrie, case = $800) et pièce concernée ; écart de fermeture (position, hauteur brute)
+  float maxGap = 0, closeGap = 0, closeHeight = 0;
+  int gapPiece = -1;
 };
 
 static constexpr int CELL = 0x800;
@@ -29,5 +33,7 @@ static constexpr int CELL = 0x800;
 struct TrackSet;
 // image = TEXT+DATA du jeu relogés à $10100 ; ts : circuits TNT à la place des circuits d'origine
 std::vector<Track> decodeTracks(const Bytes &image, const TrackSet *ts = nullptr);
+// circuits personnels : décodage et raccords vérifiés ; vrai si jouables, report = explication
+bool checkTrackSet(const Bytes &image, const TrackSet &ts, std::string &report);
 
 }  // namespace scr

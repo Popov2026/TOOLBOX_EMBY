@@ -1,6 +1,7 @@
 // tnt.cpp — lecture des circuits de Stunt Car Racer TNT (voir tnt.hpp)
 #include "tnt.hpp"
 
+#include <cstdio>
 #include <cstring>
 
 namespace scr {
@@ -125,6 +126,26 @@ Bytes fromLha(const Bytes &d) {
 bool loadTrackSet(const std::string &path, TrackSet &ts, std::string &err) {
   Bytes d;
   try { d = readFile(path); } catch (std::exception &) { err = "fichier introuvable : " + path; return false; }
+  if (d.size() >= 8 && !std::memcmp(d.data(), "SCRTRK1", 8)) {   // circuits personnels (.trk)
+    const size_t H = 8 + 128 + 16 + 8 + 64 + 16 + 2;
+    if (d.size() < H) { err = "fichier de circuits trop court"; return false; }
+    size_t o = 8;
+    for (int k = 0; k < 8; k++, o += 16) {
+      ts.names[k].assign(reinterpret_cast<const char *>(&d[o]), 16);
+      for (char &ch : ts.names[k]) if (static_cast<unsigned char>(ch) < 32 || static_cast<unsigned char>(ch) > 126) ch = ' ';
+    }
+    std::memcpy(ts.initials, &d[o], 16); o += 16;
+    std::memcpy(ts.counts, &d[o], 8); o += 8;
+    std::memcpy(ts.params, &d[o], 64); o += 64;
+    for (int k = 0; k < 8; k++, o += 2) ts.offsets[k] = uint16_t((d[o] << 8) | d[o + 1]);
+    const size_t len = size_t((d[o] << 8) | d[o + 1]); o += 2;
+    if (len == 0 || len > TRK_MAX_DATA || o + len > d.size()) { err = "taille des tracés invalide"; return false; }
+    ts.data.assign(d.begin() + long(o), d.begin() + long(o + len));
+    for (uint16_t off : ts.offsets) if (off + 6u > len) { err = "début de tracé hors du fichier"; return false; }
+    ts.custom = true;
+    return true;
+  }
+  ts.custom = false;
   if (d.size() > 7 && !std::memcmp(&d[2], "-lh", 3)) {
     try { d = fromLha(d); } catch (std::exception &e) { err = e.what(); return false; }
     if (d.empty()) { err = "pas de fichier SCR-TNT dans l'archive"; return false; }
@@ -141,6 +162,24 @@ bool loadTrackSet(const std::string &path, TrackSet &ts, std::string &err) {
   ts.data.assign(d.begin() + long(L + 0x396), d.begin() + long(L + 0xaba));   // tracés, jusqu'à la table suivante
   for (uint16_t o : ts.offsets) if (o >= ts.data.size()) { err = "table des circuits TNT invalide"; return false; }
   return true;
+}
+
+bool saveTrackFile(const std::string &path, const TrackSet &ts, std::string &err) {
+  if (ts.data.empty() || ts.data.size() > TRK_MAX_DATA) { err = "taille des tracés invalide"; return false; }
+  Bytes d(reinterpret_cast<const uint8_t *>("SCRTRK1"), reinterpret_cast<const uint8_t *>("SCRTRK1") + 8);
+  for (int k = 0; k < 8; k++) { std::string n = ts.names[k]; n.resize(16, ' '); d.insert(d.end(), n.begin(), n.end()); }
+  d.insert(d.end(), ts.initials, ts.initials + 16);
+  d.insert(d.end(), ts.counts, ts.counts + 8);
+  d.insert(d.end(), ts.params, ts.params + 64);
+  for (uint16_t off : ts.offsets) { d.push_back(uint8_t(off >> 8)); d.push_back(uint8_t(off)); }
+  d.push_back(uint8_t(ts.data.size() >> 8)); d.push_back(uint8_t(ts.data.size()));
+  d.insert(d.end(), ts.data.begin(), ts.data.end());
+  FILE *f = std::fopen(path.c_str(), "wb");
+  if (!f) { err = "impossible d'écrire " + path; return false; }
+  bool ok = std::fwrite(d.data(), 1, d.size(), f) == d.size();
+  std::fclose(f);
+  if (!ok) err = "écriture incomplète : " + path;
+  return ok;
 }
 
 }  // namespace scr

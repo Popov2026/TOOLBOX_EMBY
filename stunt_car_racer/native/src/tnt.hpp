@@ -18,12 +18,20 @@ struct TrackSet {
   uint8_t params[64] = {};    // réglages par circuit (table $1451A de la version ST)
   uint16_t offsets[8] = {};   // début de chaque tracé dans data ; pointeur 6502 = $B100 + offset
   Bytes data;                 // tracés, format d'origine
+  bool custom = false;        // circuits personnels (fichier .trk), sinon circuits TNT
 };
+
+// fichier de circuits personnels (.trk) : « SCRTRK1 » + 0, noms (8 × 16), initiales (16), valeurs par
+// circuit (8), réglages (64), début de chaque tracé (8 mots gros-boutistes), longueur des tracés
+// (mot gros-boutiste), tracés au format d'origine
+constexpr size_t TRK_MAX_DATA = 0x4000;
+bool saveTrackFile(const std::string &path, const TrackSet &ts, std::string &err);
 
 // adresses (RAM de la machine émulée, zone jamais utilisée par le jeu) des tracés et de leur table
 constexpr uint32_t TNT_DATA = 0xE0000, TNT_TABLE = 0xDFF00;
 
-// fichier SCR-TNT (exécutable Amiga) ou archive .lha le contenant ; faux + err si non reconnu
+// fichier de circuits personnels (.trk), fichier SCR-TNT (exécutable Amiga) ou archive .lha le
+// contenant ; faux + err si non reconnu
 bool loadTrackSet(const std::string &path, TrackSet &ts, std::string &err);
 
 }  // namespace scr

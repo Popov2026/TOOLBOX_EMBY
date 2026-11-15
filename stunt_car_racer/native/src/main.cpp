@@ -32,7 +32,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v103"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v104"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -252,7 +252,7 @@ std::string findTnt(const std::string &opt) {
   if (!opt.empty()) return opt;
   namespace fs = std::filesystem;
   std::vector<fs::path> dirs;
-  for (auto &d : baseDirs()) { dirs.push_back(d / "TNT"); dirs.push_back(d / "tnt"); dirs.push_back(d / "DISK"); dirs.push_back(d / "disk"); dirs.push_back(d); }
+  for (auto &d : baseDirs()) { dirs.push_back(d / "CIRCUITS"); dirs.push_back(d / "circuits"); dirs.push_back(d / "TNT"); dirs.push_back(d / "tnt"); dirs.push_back(d / "DISK"); dirs.push_back(d / "disk"); dirs.push_back(d); }
   for (auto &d : dirs) {
     std::error_code ec;
     std::vector<fs::path> found;
@@ -260,7 +260,7 @@ std::string findTnt(const std::string &opt) {
       std::string ext = e.path().extension().u8string(), name = e.path().filename().u8string();
       for (auto &c : ext) c = (char)tolower((unsigned char)c);
       for (auto &c : name) c = (char)toupper((unsigned char)c);
-      if (name == "SCR-TNT" || (ext == ".lha" && name.find("TNT") != std::string::npos)) found.push_back(e.path());
+      if (name == "SCR-TNT" || (ext == ".lha" && name.find("TNT") != std::string::npos) || ext == ".trk") found.push_back(e.path());   // .trk : circuits personnels
     }
     if (!found.empty()) { std::sort(found.begin(), found.end()); return found[0].u8string(); }
   }
@@ -536,10 +536,16 @@ int main(int argc, char **argv) {
   static TrackSet tntSet;   // circuits TNT (si le fichier de l'utilisateur est trouvé)
   bool haveTnt = false;
 #ifdef __EMSCRIPTEN__
-  // version navigateur : sans les circuits TNT (ni le réseau local, voir Machine::setOnlineOnly)
+  // version navigateur : sans les circuits TNT (ni le réseau local, voir Machine::setOnlineOnly) ;
+  // circuits personnels (.trk) donnés par la page seulement
   constexpr bool kWeb = true;
-  o.tntPath.clear(); o.tnt = false;
-  if (false)
+  {
+    std::string ext = o.tntPath.size() > 4 ? o.tntPath.substr(o.tntPath.size() - 4) : "";
+    for (auto &ch : ext) ch = char(tolower(static_cast<unsigned char>(ch)));
+    if (ext != ".trk") o.tntPath.clear();
+    if (o.tntPath.empty()) o.tnt = false;
+  }
+  if (!o.tntPath.empty())
 #else
   constexpr bool kWeb = false;
 #endif
@@ -552,6 +558,7 @@ int main(int argc, char **argv) {
     if (o.tnt && !haveTnt) std::fprintf(stderr, "circuits = tnt demandé, mais fichier SCR-TNT introuvable : circuits d'origine\n");
   }
   const TrackSet *soloSet = o.tnt && haveTnt ? &tntSet : nullptr;   // jeu complet et entraînement (F7 : changer)
+  auto setLabel = [&]() -> std::string { return tntSet.custom ? L("perso", "custom") : "TNT"; };   // circuits TNT ou personnels
   uint32_t gameHash = 0;
   std::string note;          // message bref du jeu dans le bandeau (circuits changés...)
   double noteUntil = 0;
@@ -560,6 +567,16 @@ int main(int argc, char **argv) {
   const Machine *seenFor = nullptr;
   try {
     disk = readFile(o.disk);
+    if (haveTnt && tntSet.custom) {   // circuits personnels : vérifiés avant d'y rouler (raccords, fermeture)
+      Machine check(disk);
+      std::string rep;
+      if (!checkTrackSet(check.image(), tntSet, rep)) {
+        std::fprintf(stderr, "circuits personnels refusés : %s\n", rep.c_str());
+        haveTnt = false; soloSet = nullptr; o.tnt = false;
+        note = L("Circuits perso refusés : ", "Custom tracks refused: ") + rep.substr(0, rep.find('\n'));
+        noteUntil = NetLink::clock() + 10;
+      }
+    }
     m = start(disk, o, track, soloSet);
   } catch (std::exception &e) {
     fail(std::string(L("Erreur : ", "Error: ")) + e.what());
@@ -811,8 +828,8 @@ int main(int argc, char **argv) {
     if (sc == SDL_SCANCODE_F7 && track < 0) {
       if (view && (hd ? view->raceShown() : view->racing())) {
         swapPending = !swapPending;
-        note = swapPending ? (g_french ? std::string("Circuits ") + (soloSet ? "d'origine" : "TNT") + " après cette course"
-                                         : std::string(soloSet ? "Original" : "TNT") + " tracks after this race")
+        note = swapPending ? (g_french ? std::string("Circuits ") + (soloSet ? "d'origine" : setLabel()) + " après cette course"
+                                         : std::string(soloSet ? "Original" : setLabel()) + " tracks after this race")
                          : L("Changement de circuits annulé", "Track change cancelled");
         noteUntil = NetLink::clock() + 4;
       } else swapSet();
@@ -1102,7 +1119,7 @@ int main(int argc, char **argv) {
     it.push_back({L("Volume de la foule : ", "Crowd volume: ") + std::to_string(int(std::lround(o.crowdVolume * 100))) + " %  < >", 22});
     it.push_back({std::string(L("Son du moteur : ", "Engine sound: ")) + (o.engineV8 ? L("V8 réaliste", "realistic V8") : L("d'origine", "original")), 24});
     it.push_back({L("Plein écran : ", "Full screen: ") + yn(isFullscreen()) + "  (F11)", 7});
-    if (!kWeb) it.push_back({haveTnt ? std::string(L("Circuits : ", "Tracks: ")) + (soloSet ? "TNT" : L("d'origine", "original")) + "  (F7)" : L("Circuits TNT : fichier SCR-TNT absent", "TNT tracks: SCR-TNT file missing"), 8});
+    if (!kWeb || haveTnt) it.push_back({haveTnt ? std::string(L("Circuits : ", "Tracks: ")) + (soloSet ? setLabel() : L("d'origine", "original")) + "  (F7)" : L("Circuits TNT : fichier SCR-TNT absent", "TNT tracks: SCR-TNT file missing"), 8});
     it.push_back({L("Manette : ", "Gamepad: ") + yn(o.usePad) + (pad ? L("  (branchée)", "  (connected)") : L("  (aucune)", "  (none)")), 9});
     it.push_back({L("Vibrations aux chocs : ", "Rumble on impacts: ") + yn(o.rumble), 10});
     for (int k = 0; k < 6; k++)

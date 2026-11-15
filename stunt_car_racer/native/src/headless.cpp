@@ -1,7 +1,10 @@
 // headless.cpp — exécute le jeu sans fenêtre (tests, captures, calage du mode HD).
 // usage : scr_headless DISQUE.st [--track N] [--frames N] [--up] [--shot f.ppm]
 //         [--hd f.ppm] [--cmp f.ppm] [--focal F] [--cx X] [--cy Y] [--eyeup H] [--eyefwd D] [--psign ±1] [--rsign ±1]
-//         [--bench-hd N] [--fire] [--hddir DOSSIER] [--wav son.wav] [--tnt SCR-TNT|archive.lha]
+//         [--bench-hd N] [--fire] [--hddir DOSSIER] [--wav son.wav] [--tnt SCR-TNT|archive.lha|circuits.trk]
+//         [--export-trk circuits.trk]  : les 8 circuits de la disquette dans un fichier de circuits personnels
+//         [--check-trk circuits.trk]   : vérifie un fichier de circuits personnels (raccords, fermeture)
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -13,6 +16,7 @@
 
 #include "hdview.hpp"
 #include "tnt.hpp"
+#include "track.hpp"
 #include "machine.hpp"
 
 static void savePPM(const std::string &path, const uint32_t *px, int W, int H) {
@@ -27,7 +31,7 @@ int main(int argc, char **argv) {
   std::string disk, shot, hd, cmp;
   int track = -1, frames = 500, benchHd = 0;
   bool up = false, fire = false;
-  std::string hdDir, wav, tntPath;
+  std::string hdDir, wav, tntPath, exportTrk, checkTrk;
   scr::HdParams hp;  // valeurs par défaut calées
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
@@ -52,12 +56,43 @@ int main(int argc, char **argv) {
     else if (a == "--wav" && i + 1 < argc) wav = argv[++i];
     else if (a == "--hddir" && i + 1 < argc) hdDir = argv[++i];
     else if (a == "--tnt" && i + 1 < argc) tntPath = argv[++i];
+    else if (a == "--export-trk" && i + 1 < argc) exportTrk = argv[++i];
+    else if (a == "--check-trk" && i + 1 < argc) checkTrk = argv[++i];
     else disk = a;
   }
   try {
     auto bytes = scr::readFile(disk);
     auto t0 = std::chrono::steady_clock::now();
     scr::Machine m(bytes);
+    if (!exportTrk.empty()) {   // circuits de la disquette -> fichier .trk (point de départ de l'éditeur)
+      const scr::Bytes &img = m.image();
+      auto b = [&](uint32_t a) { return img[a - 0x10100]; };
+      scr::TrackSet ts;
+      uint32_t lo = 0xffffffff, hi = 0;
+      for (int k = 0; k < 8; k++) {
+        uint32_t off = uint32_t((b(0x13790 + 2 * k) | (b(0x13791 + 2 * k) << 8)) - 0xb100);
+        lo = std::min(lo, off); hi = std::max(hi, off + 256);
+        ts.names[k].assign(reinterpret_cast<const char *>(&img[0x13498 - 0x10100 + 16 * k]), 16);
+      }
+      hi = std::min<uint32_t>(hi, uint32_t(img.size() - (0x13670 - 0x10100)));
+      for (int k = 0; k < 8; k++) ts.offsets[k] = uint16_t((b(0x13790 + 2 * k) | (b(0x13791 + 2 * k) << 8)) - 0xb100 - lo);
+      ts.data.assign(img.begin() + (0x13670 - 0x10100) + lo, img.begin() + (0x13670 - 0x10100) + hi);
+      std::memcpy(ts.initials, &img[0x4d35c - 0x10100], 16);
+      std::memcpy(ts.counts, &img[0x4e7e4 - 0x10100], 8);
+      std::memcpy(ts.params, &img[0x1451a - 0x10100], 64);
+      std::string err;
+      if (!scr::saveTrackFile(exportTrk, ts, err)) throw std::runtime_error(err);
+      std::printf("8 circuits écrits dans %s (%zu octets de tracés)\n", exportTrk.c_str(), ts.data.size());
+      return 0;
+    }
+    if (!checkTrk.empty()) {   // vérification d'un fichier de circuits personnels
+      scr::TrackSet ts; std::string err;
+      if (!scr::loadTrackSet(checkTrk, ts, err)) { std::printf("REFUSÉ : %s\n", err.c_str()); return 1; }
+      bool ok = scr::checkTrackSet(m.image(), ts, err);
+      std::printf("%s : %s\n", ok ? "VALIDE" : "REFUSÉ", err.c_str());
+      if (ok) for (auto &t : scr::decodeTracks(m.image(), &ts)) std::printf("  %-16s %3d pièces\n", t.name.c_str(), t.pieces);
+      return ok ? 0 : 1;
+    }
     static scr::TrackSet tnt;
     if (!tntPath.empty()) {   // circuits TNT à la place des circuits d'origine
       std::string err;

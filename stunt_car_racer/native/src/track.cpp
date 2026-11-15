@@ -112,12 +112,24 @@ Track buildTrack(const Mem &m, int track, uint32_t table, uint32_t base, const s
         default: return {x, z};
       }
     };
+    if (pi > 0 && !secs.empty() && !all.empty()) {   // raccord avec la pièce précédente
+      auto l = R(secs[0].l), r = R(secs[0].r);
+      const Section &e = all.back();
+      const float g = std::max(std::hypot(float(l.first + p.x * CELL) - e.lx, float(l.second + p.z * CELL) - e.lz),
+                               std::hypot(float(r.first + p.x * CELL) - e.rx, float(r.second + p.z * CELL) - e.rz));
+      if (g > tr.maxGap) { tr.maxGap = g; tr.gapPiece = pi; }
+    }
     for (size_t k = 0; k < secs.size(); k++) {
       if (pi > 0 && k == 0) continue;    // section partagée avec la pièce précédente
       auto l = R(secs[k].l), r = R(secs[k].r);
       all.push_back({float(l.first + p.x * CELL), float(secs[k].hl), float(l.second + p.z * CELL),
                      float(r.first + p.x * CELL), float(secs[k].hr), float(r.second + p.z * CELL), secs[k].fl, pi});
     }
+  }
+  if (all.size() > 2) {   // fermeture : la dernière section doit retrouver la première
+    const Section &f0 = all[0], &e = all.back();
+    tr.closeGap = std::max(std::hypot(f0.lx - e.lx, f0.lz - e.lz), std::hypot(f0.rx - e.rx, f0.rz - e.rz));
+    tr.closeHeight = std::max(std::fabs(f0.ly - e.ly), std::fabs(f0.ry - e.ry));
   }
   // circuit fermé : la dernière section coïncide avec la première
   if (all.size() > 2 && std::fabs(all[0].lx - all.back().lx) + std::fabs(all[0].lz - all.back().lz) < 64) all.pop_back();
@@ -150,6 +162,33 @@ std::vector<Track> decodeTracks(const Bytes &image, const TrackSet *ts) {
   }
   for (int n = 0; n < 8; n++) out.push_back(buildTrack(m, n, TRACK_TABLE, BLOB, TRACK_NAMES[n]));
   return out;
+}
+
+bool checkTrackSet(const Bytes &image, const TrackSet &ts, std::string &report) {
+  std::vector<Track> tracks;
+  try { tracks = decodeTracks(image, &ts); }
+  catch (std::exception &e) { report = std::string("circuits illisibles : ") + e.what(); return false; }
+  bool ok = true;
+  report.clear();
+  char line[200];
+  for (size_t k = 0; k < tracks.size(); k++) {
+    const Track &t = tracks[k];
+    std::string name = ts.names[k];
+    while (!name.empty() && name.back() == ' ') name.pop_back();
+    if (t.pieces < 4 || t.secs.size() < 8) {
+      std::snprintf(line, sizeof line, "%s : trop peu de pièces (%d)\n", name.c_str(), t.pieces); report += line; ok = false; continue;
+    }
+    if (t.maxGap > 48) {   // les circuits d'origine se raccordent à 1 unité près
+      std::snprintf(line, sizeof line, "%s : la pièce %d ne se raccorde pas à la précédente (écart %.0f)\n", name.c_str(), t.gapPiece + 1, t.maxGap);
+      report += line; ok = false;
+    }
+    if (t.closeGap > 48 || t.closeHeight > 32) {
+      std::snprintf(line, sizeof line, "%s : le circuit ne se referme pas (écart %.0f, hauteur %.0f)\n", name.c_str(), t.closeGap, t.closeHeight);
+      report += line; ok = false;
+    }
+  }
+  if (ok) report = "8 circuits valides";
+  return ok;
 }
 
 }  // namespace scr

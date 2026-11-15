@@ -101,6 +101,14 @@ est le fichier scr_saves.dat, créé à côté de scr.ini à la première sauveg
 d'insérer la disquette de sauvegarde, appuyez simplement sur une touche. Gardez ce fichier pour
 conserver vos saisons (copiez-le dans le dossier d'une nouvelle version).
 
+Circuits personnels (fichier .trk) : placez votre fichier de circuits dans un dossier CIRCUITS à
+côté de scr.exe (ou dans le dossier TNT) ; F7 passe des circuits d'origine aux vôtres. Le jeu
+vérifie chaque circuit avant de le charger (pièces qui se raccordent, circuit qui se referme) et
+refuse le fichier sinon, avec la raison. Pour partir des circuits de votre disquette :
+  scr_headless VOTRE_DISQUETTE.st --export-trk circuits.trk
+et pour vérifier un fichier :  scr_headless VOTRE_DISQUETTE.st --check-trk circuits.trk
+Version navigateur : emplacement « Mes circuits (.trk) » de la page.
+
 Son : puce sonore YM2149 de l'Atari ST émulée (moteur, chocs...).
 
 Réglages : scr.ini (gravité, poussée, freinage, pas de temps, amortissement,
@@ -216,6 +224,14 @@ in scr.ini: tnt = path). Then:
 Saving (season menu, "4. Load/Save/Replay"): the game's save disk is the file scr_saves.dat,
 created next to scr.ini on the first save. When the game asks you to insert the save disk, just
 press a key. Keep this file to keep your seasons (copy it into the folder of a new version).
+
+Custom circuits (.trk file): put your circuits file in a CIRCUITS folder next to scr.exe (or in
+the TNT folder); F7 switches between the original circuits and yours. The game checks every
+circuit before loading it (pieces that connect, circuit that closes) and otherwise refuses the
+file, giving the reason. To start from the circuits of your disk:
+  scr_headless YOUR_DISK.st --export-trk circuits.trk
+and to check a file:  scr_headless YOUR_DISK.st --check-trk circuits.trk
+Browser version: "My circuits (.trk)" slot of the page.
 
 Sound: the Atari ST's YM2149 sound chip is emulated (engine, impacts...).
 
