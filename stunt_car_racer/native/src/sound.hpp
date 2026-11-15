@@ -38,4 +38,16 @@ private:
   double ph1_ = 0, ph2_ = 0, lp1_ = 0, lp2_ = 0;
 };
 
+// sonnerie « ding-dong » (multijoueur : un joueur arrive dans la salle, rejoint la course, adversaire trouvé)
+class Chime {
+public:
+  void trigger(double gain = 0.7) { voices_.push_back({0, gain}); }
+  void mix(int16_t *pcm, size_t n, int rate, double volume);
+  bool active() const { return !voices_.empty(); }
+
+private:
+  struct Voice { double t, gain; };
+  std::vector<Voice> voices_;
+};
+
 }  // namespace scr

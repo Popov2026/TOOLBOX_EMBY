@@ -25,13 +25,14 @@
 #include <iterator>
 #include <fstream>
 #include <map>
+#include <set>
 #include <memory>
 #include <cmath>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v99"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v100"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -71,6 +72,7 @@ struct Options {
   bool hdTextures = true;   // images HD du dossier hd/ (cockpit, sprites)
   double crowdVolume = 0.4;   // volume de la foule (0 à 2, par rapport au volume du jeu)
   bool crowd = true;   // encouragements de la foule des tribunes (HD, décor)
+  bool joinChime = true;   // multijoueur : sonnerie quand un joueur arrive (salle, course, adversaire trouvé)
   bool usePad = true, rumble = true;                         // manette, vibrations lors des chocs
   std::string keyNames[6] = {"Up", "Down", "Left", "Right", "Space", "K"};   // touches : accélérer, freiner, gauche, droite, boost, klaxon
   bool engineV8 = false;
@@ -145,6 +147,7 @@ void setOption(Options &o, const std::string &key, const std::string &val) {
   else if (key == "ciel" || key == "sky") o.sky = val != "0";
   else if (key == "decor" || key == "décor" || key == "scenery") o.scenery = val != "0";
   else if (key == "foule" || key == "crowd") o.crowd = val != "0";
+  else if (key == "sonnerie" || key == "join_chime") o.joinChime = val != "0";
   else if (key == "densite" || key == "densité" || key == "density") o.density = std::clamp(int(d()), 1, 4);
   else if (key == "volume_foule" || key == "crowd_volume") o.crowdVolume = std::clamp(d(), 0.0, 2.0);
   else if (key == "textures_hd" || key == "images_hd" || key == "hd_images") o.hdTextures = val != "0";
@@ -558,7 +561,11 @@ int main(int argc, char **argv) {
   {
     // empreinte du programme du jeu seulement ; les réglages de physique (scr.ini) sont envoyés en
     // texte et l'esclave adopte ceux du maître pendant la partie
-    uint32_t h = fnv1a(m->image().data(), m->image().size());
+    // empreinte du jeu pour jouer à deux : les données des circuits ($13490-$16000) ; deux copies
+    // différentes du même jeu (autres images disque, même version reconnue) peuvent jouer ensemble
+    const Bytes &im = m->image();
+    const size_t t0 = 0x13490 - 0x10100, t1 = std::min(im.size(), size_t(0x16000 - 0x10100));
+    uint32_t h = t1 > t0 ? fnv1a(im.data() + t0, t1 - t0) : fnv1a(im.data(), im.size());
     if (soloSet) h = fnv1a(tntSet.data.data(), tntSet.data.size(), h);   // duel : les deux avec les mêmes circuits
     gameHash = h;
     std::string nm = cleanPseudo(o.playerName);
@@ -711,6 +718,7 @@ int main(int argc, char **argv) {
   setupAudio();
   EngineV8 v8;
   Horn horn;
+  Chime chime;
   bool throttleNow = false, boostNow = false;
   auto queueAudio = [&] {
     if (!audio) return;
@@ -718,11 +726,12 @@ int main(int argc, char **argv) {
     // son du moteur V8 (les voix B et C de la puce son, le moteur d'origine, sont coupées en course)
     const bool v8on = o.engineV8 && !muted && view && view->racing();
     m->setYmMute(v8on ? 6 : 0);
-    if (!pcm.empty() && (v8on || horn.active())) {
+    if (!pcm.empty() && (v8on || horn.active() || chime.active())) {
       static std::vector<int16_t> mixed;
       mixed = pcm;
       if (v8on) v8.mix(mixed.data(), mixed.size(), AUDIO_RATE, m->w(0x10a1e), throttleNow, boostNow, o.volume);
       if (!muted) horn.mix(mixed.data(), mixed.size(), AUDIO_RATE, o.volume);
+      if (!muted) chime.mix(mixed.data(), mixed.size(), AUDIO_RATE, o.volume);
       if (hd && o.crowd && !muted && view) view->mixCrowd(mixed.data(), mixed.size(), AUDIO_RATE, o.volume * o.crowdVolume);
       if (SDL_GetQueuedAudioSize(audio) <= Uint32(AUDIO_RATE / 50 * 2 * 6)) SDL_QueueAudio(audio, mixed.data(), Uint32(mixed.size() * 2));
       return;
@@ -777,7 +786,11 @@ int main(int argc, char **argv) {
     m->useTrackSet(soloSet);
     trackList = decodeTracks(m->image(), m->trackSet());
     if (view) view->setTracks(*m);
-    uint32_t h = fnv1a(m->image().data(), m->image().size());
+    // empreinte du jeu pour jouer à deux : les données des circuits ($13490-$16000) ; deux copies
+    // différentes du même jeu (autres images disque, même version reconnue) peuvent jouer ensemble
+    const Bytes &im = m->image();
+    const size_t t0 = 0x13490 - 0x10100, t1 = std::min(im.size(), size_t(0x16000 - 0x10100));
+    uint32_t h = t1 > t0 ? fnv1a(im.data() + t0, t1 - t0) : fnv1a(im.data(), im.size());
     if (soloSet) h = fnv1a(tntSet.data.data(), tntSet.data.size(), h);
     gameHash = h;
     net.setIdentity(SCR_VERSION, gameHash, o.playerName, tuningText(o.tuning));
@@ -806,7 +819,11 @@ int main(int argc, char **argv) {
       o.tnt = tntNow;
       saveIniValue(ini, {"circuits", "tracks"}, tntNow ? "tnt" : "original", "circuits : original ou tnt (touche F7)");
       note = tntNow ? L("Circuits TNT (F7 : circuits d'origine)", "TNT tracks (F7: original tracks)") : L("Circuits d'origine (F7 : circuits TNT)", "Original tracks (F7: TNT tracks)"); noteUntil = NetLink::clock() + 4;
-      uint32_t h = fnv1a(m->image().data(), m->image().size());
+      // empreinte du jeu pour jouer à deux : les données des circuits ($13490-$16000) ; deux copies
+    // différentes du même jeu (autres images disque, même version reconnue) peuvent jouer ensemble
+    const Bytes &im = m->image();
+    const size_t t0 = 0x13490 - 0x10100, t1 = std::min(im.size(), size_t(0x16000 - 0x10100));
+    uint32_t h = t1 > t0 ? fnv1a(im.data() + t0, t1 - t0) : fnv1a(im.data(), im.size());
       if (soloSet) h = fnv1a(tntSet.data.data(), tntSet.data.size(), h);
       gameHash = h;
       net.setIdentity(SCR_VERSION, gameHash, o.playerName, tuningText(o.tuning));
@@ -1080,6 +1097,7 @@ int main(int argc, char **argv) {
     for (int k = 0; k < 6; k++)
       it.push_back({std::string(L("Touche ", "Key ")) + L(bindLabelsFr[k], bindLabelsEn[k]) + L(" : ", ": ") + (optBind == k ? L("appuyez sur une touche...", "press a key...") : keyLabel(bindSc[k])), k < 5 ? 11 + k : 25});
     it.push_back({L("Touches par défaut", "Default keys"), 16});
+    it.push_back({L("Sonnerie quand un joueur arrive (en ligne) : ", "Chime when a player arrives (online): ") + yn(o.joinChime), 28});
     it.push_back({L("Langue : français  (Language: English)", "Language: English  (Langue : français)"), 27});
     it.push_back({L("Fermer", "Close"), 17});
     return it;
@@ -1127,6 +1145,11 @@ int main(int argc, char **argv) {
         }
         break;
       case 17: optOpen = false; break;
+      case 28:
+        o.joinChime = !o.joinChime;
+        saveFlag({"sonnerie", "join_chime"}, o.joinChime, "multijoueur : sonnerie quand un joueur arrive / chime when a player arrives");
+        if (o.joinChime) chime.trigger();   // aperçu du son
+        break;
       case 27: g_french = o.french = !o.french; saveIniValue(ini, {"langue", "language", "lang"}, o.french ? "fr" : "en", "langue / language : en ou fr (menu F1)"); break;
       case 19: o.scenery = !o.scenery; view->params.scenery = o.scenery; saveFlag({"decor", "décor", "scenery"}, o.scenery, "décor autour des circuits : tribunes, panneaux, arbres (HD)"); break;
       case 21:
@@ -1161,7 +1184,35 @@ int main(int argc, char **argv) {
   };
   int lastDamage = -1;              // vibrations : hausse des dégâts de la voiture
   const Machine *damageOf = nullptr;
+  // sonnerie : nouveaux joueurs dans la salle (liste du serveur), dans la course à plusieurs, ou
+  // adversaire trouvé (connexion établie) ; jamais pour la première liste reçue en entrant
+  std::set<uint32_t> roomSeen, groupSeen;
+  bool roomListed = false, groupListed = false, wasConnected = false;
+  auto watchArrivals = [&] {
+    bool ring = false;
+    const bool inRoom = net.mode() == NetLink::Mode::Relay && net.relayRoom() && net.state() == NetLink::State::Waiting;
+    if (inRoom) {
+      std::set<uint32_t> now;
+      for (auto &p : net.peers()) now.insert(p.id);
+      if (roomListed) for (uint32_t id : now) ring = ring || !roomSeen.count(id);
+      if (!now.empty() || roomListed) roomListed = true;
+      roomSeen = now;
+    } else { roomSeen.clear(); roomListed = false; }
+    if (net.inGroup()) {
+      std::set<uint32_t> now;
+      for (auto &g : net.groupMembers()) if (g.id != net.groupMe()) now.insert(g.id);
+      if (groupListed) for (uint32_t id : now) ring = ring || !groupSeen.count(id);
+      groupListed = true;
+      groupSeen = now;
+    } else { groupSeen.clear(); groupListed = false; }
+    const bool conn = net.connected() && net.mode() == NetLink::Mode::Relay;
+    if (conn && !wasConnected) ring = true;   // adversaire trouvé
+    wasConnected = conn;
+    if (ring && o.joinChime) chime.trigger();
+  };
+
   while (running) {
+    watchArrivals();
     for (size_t k = 0; k < autoKeys.size();) {
       if (m->frames() < autoKeys[k].frame) { k++; continue; }
       SDL_Event e{}; e.type = SDL_KEYDOWN; e.key.keysym.scancode = autoKeys[k].sc; SDL_PushEvent(&e);

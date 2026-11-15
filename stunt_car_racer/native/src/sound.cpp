@@ -95,4 +95,23 @@ void Horn::mix(int16_t *pcm, size_t n, int rate, double volume) {
   voices_.erase(std::remove_if(voices_.begin(), voices_.end(), [](const Voice &v) { return v.t >= v.len; }), voices_.end());
 }
 
+void Chime::mix(int16_t *pcm, size_t n, int rate, double volume) {
+  if (voices_.empty() || rate <= 0) return;
+  // deux notes de carillon (mi puis do), sinus avec une harmonique, attaque brève et longue extinction
+  auto bell = [](double t, double f) {
+    if (t < 0) return 0.0;
+    const double e = std::min(1.0, t / 0.004) * std::exp(-t * 4.0);
+    return e * (std::sin(2 * PI * f * t) + 0.35 * std::sin(2 * PI * f * 2.76 * t) * std::exp(-t * 6.0));
+  };
+  for (size_t i = 0; i < n; i++) {
+    double y = 0;
+    for (auto &v : voices_) {
+      y += v.gain * (bell(v.t, 1318.5) + bell(v.t - 0.28, 1046.5));
+      v.t += 1.0 / rate;
+    }
+    pcm[i] = int16_t(std::clamp(pcm[i] + y * volume * 0.25 * 32767.0, -32768.0, 32767.0));
+  }
+  voices_.erase(std::remove_if(voices_.begin(), voices_.end(), [](const Voice &v) { return v.t >= 1.4; }), voices_.end());
+}
+
 }  // namespace scr

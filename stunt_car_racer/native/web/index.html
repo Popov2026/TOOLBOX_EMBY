@@ -164,7 +164,7 @@
             <span class="sub" data-t="diskSub">Your own Stunt Car Racer disk image. Drop it here or click.</span></span>
           <span class="state" id="stDisk"></span>
         </label>
-        <input id="fileDisk" type="file" accept=".st,.ST">
+        <input id="fileDisk" type="file" accept=".st,.ST,.zip,.ZIP">
         <div class="modes">
           <button class="mode" id="playHd" disabled><img src="mode_hd.jpg" alt="" width="480" height="270"><b data-t="playHd">Play HD</b><span data-t="playHdSub">Modernised: scenery, textures, V8</span></button>
           <button class="mode" id="playClassic" disabled><img src="mode_classic.jpg" alt="" width="480" height="270"><b data-t="playClassic">Classic</b><span data-t="playClassicSub">1989 look, high resolution, no extras</span></button>
@@ -281,14 +281,16 @@
     ok: 'Prête', missing: 'Manquante', checking: 'Test du serveur en ligne…',
     online: (p, g) => p + (p > 1 ? ' joueurs' : ' joueur') + ' en ligne' + (g > 0 ? ' · ' + g + (g > 1 ? ' courses' : ' course') + ' en cours' : ''),
     offline: 'Serveur en ligne injoignable pour le moment',
-    badDisk: "Ce fichier n'est pas une image de disquette Atari ST (.st).",
+    badDisk: "Ce fichier n'est pas une image de disquette Atari ST (.st, ou .zip qui en contient une).",
+    diskRefused: "Disquette refusée : ce n'est pas la version de Stunt Car Racer reconnue par le jeu.",
     loadingGame: 'Chargement du jeu…', ended: 'Partie terminée. Rechargez la page pour rejouer.'
   };
   const EN = {
     ok: 'Ready', missing: 'Missing', checking: 'Checking the online server…',
     online: (p, g) => p + (p === 1 ? ' player' : ' players') + ' online' + (g > 0 ? ' · ' + g + (g === 1 ? ' race' : ' races') + ' in progress' : ''),
     offline: 'Online server unreachable right now',
-    badDisk: 'This file is not an Atari ST disk image (.st).',
+    badDisk: 'This file is not an Atari ST disk image (.st, or a .zip containing one).',
+    diskRefused: 'Disk refused: this is not the Stunt Car Racer version the game recognises.',
     loadingGame: 'Loading the game…', ended: 'The game has ended. Reload the page to play again.'
   };
   const base = {};
@@ -363,6 +365,7 @@
         if (err) console.warn('syncfs', err);
         ready = true; status('');
         haveDisk = FS.analyzePath(DISK).exists;
+        if (haveDisk) { try { if (!Module.ccall('scr_check_disk', 'number', ['string'], [DISK])) { FS.unlink(DISK); haveDisk = false; save(); } } catch (e) {} }
         refresh();
       });
     },
@@ -370,12 +373,49 @@
   };
 
   // ---------------------------------------------------------------- image disque du joueur
+  // ---------------------------------------------------------------- disquette en .zip, vérification
+  // archive .zip : la page en sort l'image .st (stockée ou compressée « deflate »)
+  async function unzipDisk(buf) {
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    let e = -1;
+    for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { e = i; break; }
+    if (e < 0) return null;
+    const count = dv.getUint16(e + 10, true);
+    let p = dv.getUint32(e + 16, true), best = null;
+    for (let k = 0; k < count && p + 46 <= buf.length; k++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) break;
+      const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true), usize = dv.getUint32(p + 24, true);
+      const nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), lho = dv.getUint32(p + 42, true);
+      const name = new TextDecoder().decode(buf.subarray(p + 46, p + 46 + nl));
+      p += 46 + nl + xl + cl;
+      if (usize < 300000 || usize > 4000000 || (method !== 0 && method !== 8)) continue;
+      const score = (/\.st$/i.test(name) ? 2 : 0) + (/stunt/i.test(name) ? 1 : 0);
+      if (!best || score > best.score) best = { method, csize, lho, score };
+    }
+    if (!best || dv.getUint32(best.lho, true) !== 0x04034b50) return null;
+    const start = best.lho + 30 + dv.getUint16(best.lho + 26, true) + dv.getUint16(best.lho + 28, true);
+    const data = buf.subarray(start, start + best.csize);
+    if (best.method === 0) return new Uint8Array(data);
+    return new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+  }
+  // le jeu vérifie la disquette avant qu'elle soit gardée (version reconnue) : une mauvaise image
+  // n'est jamais enregistrée, la page ne reste pas bloquée dessus
+  function keepDisk(disk) {
+    FS.writeFile(DISK, disk);
+    let ok = 1;
+    try { ok = Module.ccall('scr_check_disk', 'number', ['string'], [DISK]); } catch (e) { console.warn('vérification', e); }
+    if (!ok) { try { FS.unlink(DISK); } catch (e) {} haveDisk = false; save(); status('diskRefused'); return false; }
+    haveDisk = true; save();
+    return true;
+  }
+
   async function useFile(f) {
     if (!f || !ready || running) return;
-    const d = new Uint8Array(await f.arrayBuffer());
-    if (d.length < 300000) { status('badDisk'); return; }
-    FS.writeFile(DISK, d); haveDisk = true;
-    status(''); save(); refresh();
+    let d = new Uint8Array(await f.arrayBuffer());
+    try { if (d.length > 3 && d[0] === 0x50 && d[1] === 0x4b) d = await unzipDisk(d); } catch (e) { d = null; }   // « PK » : archive .zip
+    if (!d || d.length < 300000) { status('badDisk'); return; }
+    if (keepDisk(d)) status('');
+    refresh();
   }
   $('fileDisk').addEventListener('change', (e) => useFile(e.target.files[0]));
   window.addEventListener('dragover', (e) => { e.preventDefault(); document.body.classList.add('dragging'); });
