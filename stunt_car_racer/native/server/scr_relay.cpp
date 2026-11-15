@@ -123,7 +123,7 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v102"
+#define SCR_RELAY_VERSION "v103"
 
 namespace {
 
@@ -222,6 +222,7 @@ uint32_t nextId = 1;
 uint64_t totalConnections = 0, totalGames = 0, totalBots = 0, totalWeb = 0;
 struct Strike { int n = 0; double until = 0, last = 0; };
 std::map<std::string, Strike> strikes;   // adresses des robots
+std::map<std::string, Strike> adminFails; // mots de passe d'administration faux (3 : page bloquée 1 h pour l'adresse)
 struct BotSeen { std::string when, ip, why; };
 std::vector<BotSeen> recentBots;          // derniers robots (page d'administration)
 void noteBot(const std::string &ip, const std::string &why) {
@@ -458,15 +459,15 @@ bool httpUpgrade(Client &c) {
     std::string body, extra;
     if ((path == "/admin" || path.rfind("/admin?", 0) == 0) && !adminPassword.empty()) {
       // page d'administration : mot de passe (authentification HTTP Basic, par le HTTPS du reverse proxy)
-      auto st = strikes.find(c.ip);
+      auto st = adminFails.find(c.ip);   // essais de mot de passe : comptés à part des robots
       std::string auth = hd.count("authorization") ? hd["authorization"] : "", given;
       if (auth.size() > 6 && auth.compare(0, 6, "Basic ") == 0) { given = b64decode(auth.substr(6)); given = given.substr(given.find(':') + 1); }
-      if (st != strikes.end() && st->second.until > now()) { status = 403; type = "text/plain; charset=utf-8"; body = "Adresse bloquée pendant 1 h.\n"; }
+      if (st != adminFails.end() && st->second.until > now()) { status = 403; type = "text/plain; charset=utf-8"; body = "Adresse bloquée pendant 1 h.\n"; }
       else if (given != adminPassword) {
         status = 401; type = "text/plain; charset=utf-8"; body = "Mot de passe requis.\n";
         extra = "WWW-Authenticate: Basic realm=\"Stunt Car Racer relay admin\", charset=\"UTF-8\"\r\n";
         if (!auth.empty()) {   // mauvais mot de passe : compté comme un robot (3 essais, puis adresse bloquée 1 h)
-          Strike &s2 = strikes[c.ip];
+          Strike &s2 = adminFails[c.ip];
           if (now() - s2.last > BOT_BAN) s2.n = 0;
           s2.last = now();
           if (++s2.n >= BOT_STRIKES) { s2.until = now() + BOT_BAN; logf("%s : mots de passe d'administration faux, adresse bloquée 1 h", c.ip.c_str()); }
@@ -834,6 +835,9 @@ void drop(Sock fd, const char *why) {
     if (p != clients.end()) { frame(p->second, NF_INFO, "GONE"); p->second.peer = NONE; p->second.closing = true; }
   }
   if (c.web) totalWeb++;   // page d'état servie à un navigateur
+  // WebSocket ouverte puis fermée sans message : un vrai jeu ou la page du jeu (menu quitté, page
+  // rechargée ou fermée pendant une demande), jamais un robot : pas compté, pas de surveillance
+  else if (!c.joined && !c.probe && c.ws) {}
   else if (!c.joined && !c.probe && isPrivate(c.ip)) { totalBots++; noteBot(c.ip, why); }   // réseau local (proxy compris) : jamais surveillé
   else if (!c.joined && !c.probe) {   // jamais inscrit : robot (ou jeu coupé avant l'inscription), pas de journal
     totalBots++;
@@ -1436,6 +1440,7 @@ std::string adminPage(const std::string &viewer) {
   size_t players = 0, pending = 0, blocked = 0, used = 0;
   for (auto &kv : clients) { if (kv.second.joined && !kv.second.closing) players++; else if (!kv.second.closing) pending++; }
   for (auto &kv : strikes) blocked += kv.second.until > t;
+  for (auto &kv : adminFails) blocked += kv.second.until > t;
   for (auto &kv : licenceUses) used += kv.second.count > 0;
   auto stat = [&](const std::string &n, const std::string &v, bool hot = false) {
     h += "<div class=\"stat" + std::string(hot ? " hot" : "") + "\"><b>" + v + "</b>" + n + "</div>";
@@ -1518,9 +1523,11 @@ std::string adminPage(const std::string &viewer) {
   h += "<h2>Robots et adresses bloquées</h2>";
   std::string bl;
   for (auto &kv : strikes)
-    if (kv.second.until > t) bl += "<tr><td class=\"mono\">" + esc(kv.first) + "</td><td>" + std::to_string(kv.second.n) + "</td><td>encore " + duration(kv.second.until - t) + "</td></tr>";
+    if (kv.second.until > t) bl += "<tr><td class=\"mono\">" + esc(kv.first) + "</td><td>robot (surveillé)</td><td>" + std::to_string(kv.second.n) + "</td><td>encore " + duration(kv.second.until - t) + "</td></tr>";
+  for (auto &kv : adminFails)
+    if (kv.second.until > t) bl += "<tr><td class=\"mono\">" + esc(kv.first) + "</td><td>mots de passe faux (/admin bloquée)</td><td>" + std::to_string(kv.second.n) + "</td><td>encore " + duration(kv.second.until - t) + "</td></tr>";
   if (bl.empty()) h += "<div class=\"none\">Aucune adresse bloquée.</div>";
-  else h += "<div class=\"wrap\"><table><tr><th>Adresse bloquée</th><th>Tentatives</th><th>Blocage</th></tr>" + bl + "</table></div>";
+  else h += "<div class=\"wrap\"><table><tr><th>Adresse bloquée</th><th>Raison</th><th>Tentatives</th><th>Blocage</th></tr>" + bl + "</table></div>";
   h += "<p class=\"sub\">Derniers robots (connexions qui ne sont pas le jeu) :</p>";
   if (recentBots.empty()) h += "<div class=\"none\">Aucun robot depuis le lancement.</div>";
   else {
