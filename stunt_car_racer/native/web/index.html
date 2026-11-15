@@ -109,6 +109,31 @@
              background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.18); }
   .chips a:hover { border-color: var(--accent2); color: #fff; }
   .chips a.steam { border-color: rgba(102,192,244,.5); }
+  /* avis des joueurs (validés dans la page d'administration du serveur avant publication) */
+  .reviews { margin-top: 18px; }
+  .reviews h2 { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  #revAvg { font-size: 15px; font-weight: 600; color: var(--accent2); }
+  .rev { border-top: 1px solid var(--line); padding: 10px 0; }
+  .rev:first-child { border-top: 0; }
+  .rev .who { font-weight: 700; } .rev .when { color: var(--muted); font-size: 13px; margin-left: 8px; }
+  .rev .st, .starpick button { color: var(--accent2); letter-spacing: 1px; }
+  .rev p { margin: 4px 0 0; overflow-wrap: anywhere; }
+  .reviews .none { color: var(--muted); font-style: italic; padding: 6px 0; }
+  #revList { max-height: 360px; overflow-y: auto; margin-bottom: 14px; }
+  #revForm { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; background: var(--panel2);
+             border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  #revForm .full { grid-column: 1 / -1; }
+  .starpick { display: flex; gap: 2px; }
+  .starpick button { font-size: 26px; line-height: 1; background: none; border: 0; cursor: pointer; padding: 0 2px; color: #4a5562; }
+  .starpick button.on { color: var(--accent2); }
+  #revForm input, #revForm textarea { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); width: 100%; }
+  #revForm textarea { resize: vertical; min-height: 44px; }
+  #revForm .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #revForm button[type=submit] { font: inherit; font-weight: 800; padding: 9px 18px; border-radius: 8px; border: 0; background: var(--accent); color: #fff; cursor: pointer; }
+  #revForm button[type=submit]:disabled { background: #39424c; color: #9aa6b2; cursor: default; }
+  #revCount, #revMsg { color: var(--muted); font-size: 13px; }
+  #revMsg.ok { color: var(--ok); } #revMsg.bad { color: #ff8a80; }
+  @media (max-width: 560px) { #revForm { grid-template-columns: 1fr; } }
   .feat { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 18px; }
   .feat .card { padding: 16px; }
   .feat h3 { margin: 0 0 6px; font-size: 16px; }
@@ -207,6 +232,19 @@
       </section>
     </div>
 
+    <section class="card reviews">
+      <h2><span data-t="revTitle">Players' reviews</span> <span id="revAvg"></span></h2>
+      <div id="revList"><div class="none" data-t="revLoading">Loading reviews…</div></div>
+      <form id="revForm" autocomplete="off">
+        <span data-t="revStars">Your rating</span>
+        <div class="starpick" id="starPick" role="radiogroup" aria-label="Rating"></div>
+        <span data-t="revNameL">Name</span>
+        <input id="revName" maxlength="24" required>
+        <textarea id="revText" class="full" maxlength="100" rows="2" required></textarea>
+        <div class="row full"><span id="revCount">0 / 100</span><span id="revMsg"></span><button type="submit" id="revSend" data-t="revSend">Send</button></div>
+      </form>
+    </section>
+
     <section class="thanks">
       <span class="icon">🏆</span>
       <div><h2 data-t="thxTitle">Thank you, Geoff Crammond</h2>
@@ -273,6 +311,12 @@
     winList: '<li>Full HD 1920×1080 avec rendu OpenGL</li><li>The New Tracks (TNT) : 8 circuits en plus</li><li>Courses en réseau local</li><li>Votre propre serveur relais</li>',
     winBtn: 'Télécharger pour Windows',
     thxTitle: 'Merci, Geoff Crammond',
+    revTitle: 'Avis des joueurs', revLoading: 'Chargement des avis…', revStars: 'Votre note', revNameL: 'Nom', revSend: 'Envoyer',
+    revNone: 'Pas encore d\'avis publié : soyez le premier !', revOff: 'Avis indisponibles pour le moment.',
+    revPh: 'Votre avis (100 caractères au plus)', revNeed: 'Choisissez une note, un nom et un commentaire.',
+    revSending: 'Envoi…', revThanks: 'Merci ! Votre avis sera publié après validation.', revErr: 'Envoi impossible, réessayez plus tard.',
+    revWait: 'Attendez une minute avant un nouvel avis.', revPending: 'Vous avez déjà des avis en attente de validation.',
+    revCountN: (n) => n + ' avis', 
     thxJohn: "Merci aussi à <b>John Cumming</b> pour les graphismes additionnels de la version Atari ST.",
     gpWiki: 'Série Grand Prix (Wikipédia)', gcrArticle: "L'annonce (GTPlanet, en anglais)", gcrDevlog: 'Journal de développement n° 1 (OverTake, en anglais)',
     gcrNews: "<b>Actualité :</b> MicroProse et Geoff Crammond font revenir les jeux Grand Prix sur Steam sous le nom <i>Geoff Crammond Racing</i> (GCR1 à GCR4), avec le Steam Workshop. Annoncé en décembre 2025, pour 2026.",
@@ -286,6 +330,11 @@
     loadingGame: 'Chargement du jeu…', ended: 'Partie terminée. Rechargez la page pour rejouer.'
   };
   const EN = {
+    revNone: 'No review published yet: be the first!', revOff: 'Reviews unavailable right now.',
+    revPh: 'Your review (100 characters max)', revNeed: 'Choose a rating, a name and a comment.',
+    revSending: 'Sending…', revThanks: 'Thank you! Your review will be published once approved.', revErr: 'Could not send, try again later.',
+    revWait: 'Wait a minute before another review.', revPending: 'You already have reviews waiting for approval.',
+    revCountN: (n) => n + (n === 1 ? ' review' : ' reviews'),
     ok: 'Ready', missing: 'Missing', checking: 'Checking the online server…',
     online: (p, g) => p + (p === 1 ? ' player' : ' players') + ' online' + (g > 0 ? ' · ' + g + (g === 1 ? ' race' : ' races') + ' in progress' : ''),
     offline: 'Online server unreachable right now',
@@ -307,7 +356,7 @@
     document.documentElement.lang = fr ? 'fr' : 'en';
     document.querySelectorAll('[data-t]').forEach((e) => { e.innerHTML = fr ? FR[e.dataset.t] : base[e.dataset.t]; });
     $('lang').textContent = fr ? 'English' : 'Français';
-    status(statusKey); refresh(); showOnline();
+    status(statusKey); refresh(); showOnline(); showReviews();
   }
   $('lang').addEventListener('click', () => { fr = !fr; try { localStorage.setItem('scr-lang', fr ? 'fr' : 'en'); } catch (e) {} applyLang(); });
 
@@ -359,6 +408,7 @@
     onRuntimeInitialized: () => {
       loadHd();
       probeOnline(); setInterval(probeOnline, 20000);
+      loadReviews();
       FS.mkdir('/save');
       FS.mount(IDBFS, {}, '/save');
       FS.syncfs(true, (err) => {
@@ -424,6 +474,70 @@
     e.preventDefault(); document.body.classList.remove('dragging');
     useFile(e.dataTransfer.files[0]);
   });
+
+  // ---------------------------------------------------------------- avis des joueurs (par le serveur relais)
+  let revStars = 0, revData = null;
+  function starStr(n) { return '★★★★★'.slice(0, n) + '☆☆☆☆☆'.slice(0, 5 - n); }
+  function drawStarPick() {
+    const box = $('starPick'); box.innerHTML = '';
+    for (let k = 1; k <= 5; k++) {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = '★'; b.className = k <= revStars ? 'on' : '';
+      b.setAttribute('aria-label', k + ' / 5');
+      b.addEventListener('click', () => { revStars = k; drawStarPick(); });
+      box.appendChild(b);
+    }
+  }
+  function showReviews() {
+    const list = $('revList');
+    $('revText').placeholder = T('revPh');
+    if (revData === null) return;
+    list.innerHTML = '';
+    if (revData === false) { list.innerHTML = '<div class="none"></div>'; list.firstChild.textContent = T('revOff'); $('revAvg').textContent = ''; return; }
+    const lines = revData.split('\n').filter((l) => l.length);
+    const head = (lines.shift() || '0 0').split(' ');
+    const n = parseInt(head[0], 10) || 0, avg = parseFloat(head[1]) || 0;
+    $('revAvg').textContent = n ? '★ ' + avg.toFixed(1).replace('.', fr ? ',' : '.') + ' / 5 · ' + T('revCountN', n) : '';
+    if (!lines.length) { list.innerHTML = '<div class="none"></div>'; list.firstChild.textContent = T('revNone'); return; }
+    for (const l of lines) {
+      const [st, date, name, text] = l.split('\t');
+      const d = document.createElement('div'); d.className = 'rev';
+      const top = document.createElement('div');
+      const s1 = document.createElement('span'); s1.className = 'st'; s1.textContent = starStr(Math.max(1, Math.min(5, parseInt(st, 10) || 1))) + ' ';
+      const s2 = document.createElement('span'); s2.className = 'who'; s2.textContent = name || '';
+      const s3 = document.createElement('span'); s3.className = 'when'; s3.textContent = date || '';
+      top.append(s1, s2, s3);
+      const p = document.createElement('p'); p.textContent = text || '';
+      d.append(top, p); list.appendChild(d);
+    }
+  }
+  function pollProbe(stateFn, done, ms) {   // réponse du serveur : 1 reçue, -1 échec
+    const t0 = Date.now(), iv = setInterval(() => {
+      let st = 0; try { st = Module.ccall(stateFn, 'number', [], []); } catch (e) { st = -1; }
+      if (st === 0 && Date.now() - t0 < ms) return;
+      clearInterval(iv); done(st === 1);
+    }, 250);
+  }
+  function loadReviews() {
+    try { Module.ccall('scr_web_reviews_load', null, [], []); } catch (e) { revData = false; showReviews(); return; }
+    pollProbe('scr_web_reviews_state', (ok) => { revData = ok ? Module.ccall('scr_web_reviews_text', 'string', [], []) : false; showReviews(); }, 15000);
+  }
+  $('revText').addEventListener('input', () => { $('revCount').textContent = $('revText').value.length + ' / 100'; });
+  $('revForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const msg = $('revMsg'), name = $('revName').value.trim(), text = $('revText').value.trim().replace(/\s+/g, ' ');
+    msg.className = '';
+    if (!revStars || !name || !text) { msg.textContent = T('revNeed'); msg.className = 'bad'; return; }
+    if (!ready) return;
+    $('revSend').disabled = true; msg.textContent = T('revSending');
+    Module.ccall('scr_web_review_post', null, ['number', 'string', 'string'], [revStars, name.slice(0, 24), text.slice(0, 100)]);
+    pollProbe('scr_web_review_state', (ok) => {
+      $('revSend').disabled = false;
+      const r = ok ? Module.ccall('scr_web_review_reply', 'string', [], []) : '';
+      if (r === 'OK') { msg.textContent = T('revThanks'); msg.className = 'ok'; $('revText').value = ''; $('revCount').textContent = '0 / 100'; revStars = 0; drawStarPick(); }
+      else { msg.textContent = /minute/.test(r) ? T('revWait') : /attente/.test(r) ? T('revPending') : T('revErr'); msg.className = 'bad'; }
+    }, 15000);
+  });
+  drawStarPick();
 
   // ---------------------------------------------------------------- lancement
   // bruit d'un lecteur de disquette (synthétisé) : moteur, pas de la tête et lecture, pendant d time

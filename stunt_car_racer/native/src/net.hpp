@@ -28,7 +28,8 @@ constexpr int NET_DISCOVERY_PORT = 27421; // UDP : annonces de parties en résea
 
 enum NetFrame : uint8_t { NF_HELLO = 1, NF_DATA = 2, NF_PING = 3, NF_PONG = 4, NF_BYE = 5, NF_JOIN = 10, NF_INFO = 11,
                           NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16, NF_CHAT = 17,
-                          NF_GSTATE = 18, NF_GCMD = 19, NF_GEVENT = 20, NF_GPOS = 21, NF_HORN = 22, NF_STATUS = 23 };
+                          NF_GSTATE = 18, NF_GCMD = 19, NF_GEVENT = 20, NF_GPOS = 21, NF_HORN = 22, NF_STATUS = 23,
+                          NF_REVIEWS = 24, NF_REVIEW = 25 };   // avis des joueurs : liste publiée, envoi d'un avis
 
 class NetLink {
  public:
@@ -181,6 +182,8 @@ class RelayProbe {
   void start(const std::string &server, bool status = false);   // serveur[:port] ; status : état complet (STATUS)
   // version navigateur : texte joint à la question PROBE (« LIC nom » : code de licence utilisé, noté par le relais)
   void setNote(const std::string &note) { note_ = note; }
+  // question quelconque au serveur (type de trame, contenu) ; la réponse arrive dans status()
+  void request(const std::string &server, uint8_t type, const std::string &payload) { reqType_ = type; note_ = payload; start(server, true); }
   std::string status() const;              // réponse STATUS du serveur (lignes S/P/G/R), vide sinon
   State state() const;
   std::string text() const;                // texte pour le menu
@@ -196,6 +199,7 @@ class RelayProbe {
     State state = State::Off;
     std::string server, error, params, version, status, note;
     bool wantStatus = false;
+    uint8_t reqType = 0;   // question (NF_STATUS par défaut avec wantStatus)
 #ifdef __EMSCRIPTEN__
     int fd = -1, phase = 0;              // navigateur : test pas à pas (connexion, attente de la réponse)
     double t0 = 0, t1 = 0, t2 = 0;
@@ -206,6 +210,7 @@ class RelayProbe {
   std::shared_ptr<Shared> sh_;
   std::thread th_;
   std::string note_;
+  uint8_t reqType_ = 0;
   void step() const;   // navigateur : avance le test (sans fil d'exécution) ; rien ailleurs
   static void applyReply(Shared &sh, const std::string &got);   // réponse complète reçue (verrou pris)
 };

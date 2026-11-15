@@ -123,12 +123,13 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v101"
+#define SCR_RELAY_VERSION "v102"
 
 namespace {
 
 constexpr uint8_t NF_JOIN = 10, NF_INFO = 11, NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16, NF_CHAT = 17,
-                  NF_GSTATE = 18, NF_GCMD = 19, NF_GEVENT = 20, NF_GPOS = 21, NF_HORN = 22, NF_STATUS = 23;
+                  NF_GSTATE = 18, NF_GCMD = 19, NF_GEVENT = 20, NF_GPOS = 21, NF_HORN = 22, NF_STATUS = 23,
+                  NF_REVIEWS = 24, NF_REVIEW = 25;   // avis des joueurs (page web) : liste publiée, envoi
 constexpr size_t GROUP_MAX = 6;
 constexpr size_t MAX_CLIENTS = 512, MAX_PER_IP = 16, MAX_BUFFER = 1 << 20;
 const Sock NONE = Sock(-1);
@@ -402,6 +403,7 @@ void wsDecode(Client &c) {
 
 std::string webPage(const std::string &path, std::string &type, int &status);
 std::string adminPage(const std::string &ip);
+bool reviewAction(const std::string &query);
 std::string b64decode(const std::string &s) {
   std::string r; uint32_t v = 0; int n = 0;
   for (char ch : s) {
@@ -470,10 +472,13 @@ bool httpUpgrade(Client &c) {
           if (++s2.n >= BOT_STRIKES) { s2.until = now() + BOT_BAN; logf("%s : mots de passe d'administration faux, adresse bloquée 1 h", c.ip.c_str()); }
           noteBot(c.ip, "mot de passe d'administration faux");
         }
+      } else if (path.find('?') != std::string::npos && path.find("act=") != std::string::npos) {   // avis : publier, refuser...
+        reviewAction(path.substr(path.find('?') + 1));
+        status = 303; type = "text/plain; charset=utf-8"; body = "OK\n"; extra = "Location: /admin\r\n";
       } else { type = "text/html; charset=utf-8"; body = adminPage(c.ip); }
     } else body = webPage(path, type, status);
     if (status != 404) {
-      const char *line = status == 200 ? "200 OK" : status == 401 ? "401 Unauthorized" : status == 403 ? "403 Forbidden" : "204 No Content";
+      const char *line = status == 200 ? "200 OK" : status == 303 ? "303 See Other" : status == 401 ? "401 Unauthorized" : status == 403 ? "403 Forbidden" : "204 No Content";
       std::string resp = "HTTP/1.1 " + std::string(line) + "\r\n" + extra + "Content-Type: " + type +
                          "\r\nContent-Length: " + std::to_string(body.size()) +
                          "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n" + body;
@@ -945,6 +950,111 @@ void onPick(Client &c, const std::string &s) {
   frame(c, NF_INFO, "BUSY");   // déjà parti ou en partie : la liste se met à jour
 }
 
+// ------------------------------------------------------------------ avis des joueurs (page web)
+// envoyés par la page du jeu (étoiles 1 à 5, nom, commentaire de 100 caractères au plus), publiés
+// seulement après validation dans la page d'administration ; gardés dans scr_avis.txt
+struct Review { uint32_t id = 0; long long when = 0; int status = 0, stars = 0; std::string ip, name, text; };   // 0 en attente, 1 publié, 2 refusé
+std::vector<Review> reviews;
+uint32_t nextReview = 1;
+std::string reviewsPath, adminToken;
+std::map<std::string, double> reviewLast;   // adresse -> dernier envoi
+
+void saveReviews() {
+  if (reviewsPath.empty()) return;
+  const std::string tmp = reviewsPath + ".tmp";
+  FILE *f = std::fopen(tmp.c_str(), "wb");
+  if (!f) { logf("avis : impossible d'écrire %s", tmp.c_str()); return; }
+  for (auto &r : reviews)
+    std::fprintf(f, "%u\t%lld\t%d\t%d\t%s\t%s\t%s\n", r.id, r.when, r.status, r.stars, r.ip.c_str(), r.name.c_str(), r.text.c_str());
+  std::fclose(f);
+  std::remove(reviewsPath.c_str());
+  std::rename(tmp.c_str(), reviewsPath.c_str());
+}
+
+void loadReviews() {
+  FILE *f = std::fopen(reviewsPath.c_str(), "rb");
+  if (!f) return;
+  char line[2048];
+  while (std::fgets(line, sizeof line, f)) {
+    std::vector<std::string> v(1);
+    for (char *q = line; *q && *q != '\n' && *q != '\r'; q++) { if (*q == '\t') v.emplace_back(); else v.back() += *q; }
+    if (v.size() != 7) continue;
+    Review r;
+    r.id = uint32_t(std::strtoul(v[0].c_str(), nullptr, 10)); r.when = std::atoll(v[1].c_str());
+    r.status = std::atoi(v[2].c_str()); r.stars = std::max(1, std::min(5, std::atoi(v[3].c_str())));
+    r.ip = v[4]; r.name = cleanName(v[5], 24); r.text = cleanName(v[6], 100);
+    if (!r.id || r.name.empty() || r.text.empty()) continue;
+    reviews.push_back(r);
+    nextReview = std::max(nextReview, r.id + 1);
+  }
+  std::fclose(f);
+}
+
+std::string dateFr(long long when) {
+  char b[32]; time_t t = time_t(when); strftime(b, sizeof b, "%d/%m/%Y", localtime(&t)); return b;
+}
+
+// avis publiés pour la page : « nombre moyenne » puis « étoiles date nom texte » (tabulations), récents d'abord
+std::string reviewsText() {
+  int n = 0, sum = 0;
+  for (auto &r : reviews) if (r.status == 1) { n++; sum += r.stars; }
+  char head[64]; std::snprintf(head, sizeof head, "%d %.2f\n", n, n ? double(sum) / n : 0.0);
+  std::string out = head;
+  int k = 0;
+  for (size_t i = reviews.size(); i-- > 0 && k < 50;)
+    if (reviews[i].status == 1) { out += std::to_string(reviews[i].stars) + "\t" + dateFr(reviews[i].when) + "\t" + reviews[i].name + "\t" + reviews[i].text + "\n"; k++; }
+  return out;
+}
+
+// avis reçu : « étoiles TAB nom TAB texte » ; réponse « OK » ou « ERR raison »
+std::string postReview(const Client &c, const std::string &msg) {
+  std::vector<std::string> v(1);
+  for (char ch : msg) { if (ch == '\t') v.emplace_back(); else v.back() += ch; }
+  if (v.size() != 3) return "ERR format";
+  const int stars = std::atoi(v[0].c_str());
+  const std::string name = cleanName(v[1], 24), text = cleanName(v[2], 100);
+  if (stars < 1 || stars > 5 || name.empty() || text.empty()) return "ERR champs";
+  const double t = now();
+  auto last = reviewLast.find(c.ip);
+  if (last != reviewLast.end() && t - last->second < 60) return "ERR attendez une minute";
+  int pendingIp = 0, pending = 0;
+  for (auto &r : reviews) if (r.status == 0) { pending++; pendingIp += r.ip == c.ip; }
+  if (pendingIp >= 3) return "ERR déjà en attente";
+  if (pending >= 500) return "ERR trop d'avis en attente";
+  reviewLast[c.ip] = t;
+  Review r; r.id = nextReview++; r.when = (long long)time(nullptr); r.status = 0; r.stars = stars; r.ip = c.ip; r.name = name; r.text = text;
+  reviews.push_back(r);
+  saveReviews();
+  logf("AVIS REÇU n° %u de %s (%s) : %d/5 « %s » (à valider dans /admin)", r.id, name.c_str(), c.ip.c_str(), stars, text.c_str());
+  return "OK";
+}
+
+// action de la page d'administration : publier, refuser, retirer, supprimer
+bool reviewAction(const std::string &query) {
+  std::map<std::string, std::string> q;
+  size_t i = 0;
+  while (i < query.size()) {
+    size_t amp = query.find('&', i); if (amp == std::string::npos) amp = query.size();
+    std::string kv = query.substr(i, amp - i); size_t eq = kv.find('=');
+    if (eq != std::string::npos) q[kv.substr(0, eq)] = kv.substr(eq + 1);
+    i = amp + 1;
+  }
+  if (q["t"] != adminToken || q["act"].empty()) return false;
+  const uint32_t id = uint32_t(std::strtoul(q["id"].c_str(), nullptr, 10));
+  for (size_t k = 0; k < reviews.size(); k++) {
+    if (reviews[k].id != id) continue;
+    const std::string &a = q["act"];
+    if (a == "pub") reviews[k].status = 1;
+    else if (a == "ref") reviews[k].status = 2;
+    else if (a == "del") reviews.erase(reviews.begin() + long(k));
+    else return false;
+    saveReviews();
+    logf("avis n° %u : %s", id, a == "pub" ? "publié" : a == "ref" ? "refusé" : "supprimé");
+    return true;
+  }
+  return false;
+}
+
 // positions de course : relayées à tous les membres et spectateurs, donc limitées par joueur (un jeu
 // trafiqué qui en enverrait des milliers par seconde saturerait la connexion des autres)
 bool gposAllowed(Client &c) {
@@ -964,7 +1074,7 @@ void process(Client &c) {
   // avant l'inscription, seules JOIN2, JOIN et PROBE (courtes) sont admises : le reste est un robot
   if (!c.joined && !c.in.empty()) {
     uint8_t t0 = c.in[0];
-    bool bad = t0 != NF_JOIN2 && t0 != NF_JOIN && t0 != NF_PROBE && t0 != NF_STATUS;
+    bool bad = t0 != NF_JOIN2 && t0 != NF_JOIN && t0 != NF_PROBE && t0 != NF_STATUS && t0 != NF_REVIEWS && t0 != NF_REVIEW;
     if (!bad && c.in.size() >= 3) bad = ((size_t(c.in[1]) << 8) | c.in[2]) > MAX_JOIN_FRAME;
     if (bad) { c.bot = c.closing = true; c.in.clear(); return; }
   }
@@ -998,6 +1108,14 @@ void process(Client &c) {
         frame(c, NF_INFO, "SERVER " + std::to_string(players) + " " + std::to_string(games / 2) + ";" + paramsText() + ";version=" SCR_RELAY_VERSION);
         c.probe = c.closing = true;
         if (c.ws) logf("%s : test du serveur par WebSocket, réponse envoyée", c.ip.c_str());
+      }
+      else if (type == NF_REVIEWS) {   // page web : avis publiés
+        frame(c, NF_REVIEWS, reviewsText());
+        c.probe = c.closing = true;
+      }
+      else if (type == NF_REVIEW) {   // page web : nouvel avis (en attente de validation)
+        frame(c, NF_REVIEW, postReview(c, std::string(reinterpret_cast<const char *>(p), n)));
+        c.probe = c.closing = true;
       }
       else if (type == NF_STATUS) {   // état du serveur pour le menu du jeu (parties, joueurs, salles)
         frame(c, NF_STATUS, statusText());
@@ -1310,7 +1428,9 @@ std::string adminPage(const std::string &viewer) {
       ".none{color:#7c8792;font-style:italic;padding:8px}.ok{color:#5fd38a;font-weight:700}.no{color:#7c8792}.bad{color:#ff7b6b}"
       ".mono{font-family:ui-monospace,Consolas,monospace;font-size:12.5px}.log{background:#151b21;border-radius:8px;padding:8px 10px;max-height:420px;overflow:auto}"
       ".log div{white-space:pre-wrap;border-bottom:1px solid #1f2830;padding:2px 0}.lic{color:#ffd84a;font-weight:700}"
-      ".wrap{overflow-x:auto}</style></head><body><main>"
+      ".wrap{overflow-x:auto}.stars{color:#ffd84a;white-space:nowrap}.acts{white-space:nowrap}"
+      ".btn{display:inline-block;margin:0 4px 2px 0;padding:3px 10px;border-radius:6px;font-weight:700;text-decoration:none;font-size:13px}"
+      ".btn.ok{background:#1f5d36;color:#bff5d0}.btn.bad{background:#5d1f1f;color:#ffd0d0}</style></head><body><main>"
       "<h1>Relais Stunt Car Racer &middot; administration</h1><div class=\"sub\">Version " SCR_RELAY_VERSION " &middot; en service depuis " +
       duration(t - startedAt) + " &middot; actualisé toutes les 5 s &middot; vous : " + esc(viewer) + "</div><div class=\"stats\">";
   size_t players = 0, pending = 0, blocked = 0, used = 0;
@@ -1344,6 +1464,35 @@ std::string adminPage(const std::string &viewer) {
            (yes ? esc(u->second.last) : "-") + "</td><td class=\"mono\">" + (yes ? esc(u->second.ip) : "-") + "</td></tr>";
     }
     h += "</table></div><p class=\"sub\">Compté depuis le lancement du serveur ; le journal scr_relay.log garde tout.</p>";
+  }
+
+  h += "<h2>Avis des joueurs</h2>";
+  {
+    auto starsTxt = [](int n) { std::string r; for (int k = 1; k <= 5; k++) r += k <= n ? "&#9733;" : "&#9734;"; return r; };
+    auto link = [&](const char *act, uint32_t id, const char *label, const char *cls) {
+      return std::string("<a class=\"btn ") + cls + "\" href=\"/admin?act=" + act + "&id=" + std::to_string(id) + "&t=" + adminToken + "\">" + label + "</a>";
+    };
+    int nPend = 0, nPub = 0;
+    for (auto &r : reviews) { nPend += r.status == 0; nPub += r.status == 1; }
+    h += "<p class=\"sub\">" + std::to_string(nPend) + " en attente &middot; " + std::to_string(nPub) + " publiés. Rien n'apparaît sur la page du jeu sans votre validation.</p>";
+    auto table = [&](int st, const char *title, int maxRows) {
+      std::string rows; int k = 0;
+      for (size_t i = reviews.size(); i-- > 0 && k < maxRows;) {
+        const Review &r = reviews[i];
+        if (r.status != st) continue;
+        k++;
+        rows += "<tr><td>" + dateFr(r.when) + "</td><td class=\"stars\">" + starsTxt(r.stars) + "</td><td>" + esc(r.name) + "</td><td>" + esc(r.text) +
+                "</td><td class=\"mono\">" + esc(r.ip) + "</td><td class=\"acts\">" +
+                (st != 1 ? link("pub", r.id, "Publier", "ok") : "") + (st == 0 ? link("ref", r.id, "Refuser", "bad") : "") +
+                (st == 1 ? link("ref", r.id, "Retirer", "bad") : "") + (st == 2 ? link("del", r.id, "Supprimer", "bad") : "") + "</td></tr>";
+      }
+      h += std::string("<p class=\"sub\"><b>") + title + "</b></p>";
+      if (rows.empty()) h += "<div class=\"none\">Aucun.</div>";
+      else h += "<div class=\"wrap\"><table><tr><th>Date</th><th>Note</th><th>Nom</th><th>Commentaire</th><th>Adresse</th><th></th></tr>" + rows + "</table></div>";
+    };
+    table(0, "En attente de validation", 100);
+    table(1, "Publiés (visibles sur la page du jeu)", 100);
+    table(2, "Refusés (20 derniers)", 20);
   }
 
   h += "<h2>Joueurs connectés</h2>";
@@ -1483,6 +1632,13 @@ int main(int argc, char **argv) {
     if (!(haveConfig = readConfig(config, port))) { std::fprintf(stderr, "fichier de réglages introuvable : %s\n", config.c_str()); return 1; }
   } else if ((haveConfig = readConfig(exeDir() + "scr_relay.ini", port))) config = exeDir() + "scr_relay.ini";
   else if ((haveConfig = readConfig("scr_relay.ini", port))) config = "scr_relay.ini";
+  {   // avis des joueurs : scr_avis.txt à côté de scr_relay.ini (ou du programme)
+    std::string dir = config.empty() ? exeDir() : config.substr(0, config.find_last_of("\\/") == std::string::npos ? 0 : config.find_last_of("\\/") + 1);
+    reviewsPath = dir + "scr_avis.txt";
+    loadReviews();
+    char tk[17]; std::snprintf(tk, sizeof tk, "%08x%08x", unsigned(rng()()), unsigned(rng()()));
+    adminToken = tk;   // jeton des liens d'action de la page d'administration (contre les liens piégés)
+  }
   for (int i = 1; i < argc; i++) {
     if (!std::strcmp(argv[i], "--port") && i + 1 < argc) port = std::atoi(argv[++i]);
     else if (!std::strcmp(argv[i], "--config") && i + 1 < argc) i++;

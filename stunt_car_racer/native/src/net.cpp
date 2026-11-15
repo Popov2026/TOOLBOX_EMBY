@@ -702,7 +702,7 @@ RelayProbe::~RelayProbe() {
 void RelayProbe::start(const std::string &server, bool status) {
   if (th_.joinable()) th_.detach();
   auto sh = std::make_shared<Shared>();
-  sh->server = server; sh->wantStatus = status; sh->note = note_.substr(0, 64);
+  sh->server = server; sh->wantStatus = status; sh->reqType = reqType_; sh->note = note_.substr(0, reqType_ ? 400 : 64);
   sh_ = sh;
   if (server.empty()) { sh->state = State::Failed; sh->error = L("aucun serveur dans scr.ini", "no server in scr.ini"); return; }
   sh->state = State::Probing;
@@ -757,8 +757,9 @@ void RelayProbe::start(const std::string &server, bool status) {
     if (err != 0) { closeRaw(intptr_t(s)); fin(State::Failed, L("connexion refusée (serveur arrêté ?)", "connection refused (server stopped?)")); return; }
     const bool tunnel = isWsUrl(sh->server);
     double t1 = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(), t2 = 0;
-    const char q[3] = {char(sh->wantStatus ? NF_STATUS : NF_PROBE), 0, 0};
-    ::send(s, q, 3, 0);
+    std::string q = {char(sh->reqType ? sh->reqType : sh->wantStatus ? NF_STATUS : NF_PROBE), char(sh->note.size() >> 8), char(sh->note.size() & 255)};
+    q += sh->note;
+    ::send(s, q.data(), int(q.size()), 0);
     std::string got;
     while (got.size() < 3 || got.size() < 3 + ((size_t(uint8_t(got[1])) << 8) | uint8_t(got[2]))) {
       if (!waitFor(false, tunnel ? 12 : 5)) break;   // tunnel : connexion chiffrée en plus
@@ -784,7 +785,7 @@ void RelayProbe::start(const std::string &server, bool status) {
 
 void RelayProbe::applyReply(Shared &sh, const std::string &got) {
   std::string msg = got.substr(3);
-  if (uint8_t(got[0]) == NF_STATUS) sh.status = msg;
+  if (uint8_t(got[0]) == NF_STATUS || uint8_t(got[0]) == NF_REVIEWS || uint8_t(got[0]) == NF_REVIEW) sh.status = msg;
   if (uint8_t(got[0]) == NF_INFO && msg.compare(0, 7, "SERVER ") == 0) {
     std::sscanf(msg.c_str() + 7, "%d %d", &sh.players, &sh.games);
     size_t sc = msg.find(';');
@@ -818,7 +819,7 @@ void RelayProbe::step() const {
       int err = 0; socklen_t len = sizeof err;
       getsockopt(sh.fd, SOL_SOCKET, SO_ERROR, &err, &len);
       if (err) { fail("connexion refusée (serveur arrêté ?)", "connection refused (server stopped?)"); return; }
-      std::string q = {char(sh.wantStatus ? NF_STATUS : NF_PROBE), char(sh.note.size() >> 8), char(sh.note.size() & 255)};
+      std::string q = {char(sh.reqType ? sh.reqType : sh.wantStatus ? NF_STATUS : NF_PROBE), char(sh.note.size() >> 8), char(sh.note.size() & 255)};
       q += sh.note;
       ::send(sh.fd, q.data(), q.size(), 0);
       sh.t1 = t; sh.phase = 2;

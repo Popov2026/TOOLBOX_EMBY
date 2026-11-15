@@ -198,6 +198,10 @@ données. Façons de se trouver (menu « 4. Online Multiplayer » du jeu) :
   - les robots refusés et les adresses bloquées ;
   - les 200 dernières lignes du journal.
   3 mots de passe faux bloquent l'adresse pendant 1 h. Sans ligne « admin », la page n'existe pas.
+  Avis des joueurs : les avis envoyés depuis la page du jeu (note de 1 à 5 étoiles, nom, commentaire
+  de 100 caractères au plus) arrivent « en attente » dans cette page ; boutons Publier / Refuser /
+  Retirer / Supprimer. Seuls les avis publiés apparaissent sur la page du jeu. Ils sont gardés dans
+  scr_avis.txt à côté de scr_relay.ini. Un avis par minute et 3 en attente au plus par adresse.
 
 ==============================================================================
 ENGLISH
@@ -402,3 +406,7 @@ data along. Ways to find each other (the game's "4. Online Multiplayer" menu):
   - the refused bots and the blocked addresses;
   - the last 200 log lines.
   3 wrong passwords block the address for 1 h. Without an "admin" line, the page does not exist.
+  Players' reviews: reviews sent from the game page (1 to 5 stars, name, comment of 100 characters
+  max) arrive "waiting" in this page; Publish / Refuse / Withdraw / Delete buttons. Only published
+  reviews appear on the game page. They are kept in scr_avis.txt next to scr_relay.ini. One review
+  per minute and 3 waiting at most per address.

@@ -32,7 +32,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v101"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v102"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -438,6 +438,17 @@ extern "C" EMSCRIPTEN_KEEPALIVE void scr_web_licence(const char *who) {
   licProbe.start(defaultRelay());
 }
 extern "C" EMSCRIPTEN_KEEPALIVE int scr_web_licence_sent() { return licProbe.state() == RelayProbe::State::Ok ? 1 : licProbe.state() == RelayProbe::State::Failed ? -1 : 0; }
+// avis des joueurs (page web) : liste publiée, envoi d'un avis ; réponses du serveur relais en texte
+static RelayProbe revList, revPost;
+static int probeState(const RelayProbe &p) { return p.state() == RelayProbe::State::Ok ? 1 : p.state() == RelayProbe::State::Failed ? -1 : 0; }
+extern "C" EMSCRIPTEN_KEEPALIVE void scr_web_reviews_load() { revList.request(defaultRelay(), NF_REVIEWS, ""); }
+extern "C" EMSCRIPTEN_KEEPALIVE int scr_web_reviews_state() { return probeState(revList); }
+extern "C" EMSCRIPTEN_KEEPALIVE const char *scr_web_reviews_text() { static std::string t; t = revList.status(); return t.c_str(); }
+extern "C" EMSCRIPTEN_KEEPALIVE void scr_web_review_post(int stars, const char *name, const char *text) {
+  revPost.request(defaultRelay(), NF_REVIEW, std::to_string(stars) + "\t" + std::string(name ? name : "") + "\t" + std::string(text ? text : ""));
+}
+extern "C" EMSCRIPTEN_KEEPALIVE int scr_web_review_state() { return probeState(revPost); }
+extern "C" EMSCRIPTEN_KEEPALIVE const char *scr_web_review_reply() { static std::string t; t = revPost.status(); return t.c_str(); }
 #endif
 
 // courte pause de la boucle du jeu (navigateur : la main est rendue à la page)
