@@ -2,6 +2,7 @@
 #include "track.hpp"
 #include "tnt.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -189,6 +190,62 @@ bool checkTrackSet(const Bytes &image, const TrackSet &ts, std::string &report) 
   }
   if (ok) report = "8 circuits valides";
   return ok;
+}
+
+TrackSet originalTrackSet(const Bytes &image) {
+  Mem m{image};
+  TrackSet ts;
+  uint32_t lo = 0xffffffff, hi = 0;
+  for (int k = 0; k < 8; k++) {
+    const uint32_t off = m.le(TRACK_TABLE + 2 * k) - 0xb100;
+    lo = std::min(lo, off); hi = std::max(hi, off + 256);
+    for (int c = 0; c < 16; c++) ts.names[k] += char(m.b(NAMES + 16 * k + c));
+  }
+  hi = std::min<uint32_t>(hi, uint32_t(image.size() - (BLOB - BASE)));
+  for (int k = 0; k < 8; k++) ts.offsets[k] = uint16_t(m.le(TRACK_TABLE + 2 * k) - 0xb100 - lo);
+  ts.data.assign(image.begin() + (BLOB - BASE) + lo, image.begin() + (BLOB - BASE) + hi);
+  for (int k = 0; k < 16; k++) ts.initials[k] = m.b(0x4d35c + k);
+  for (int k = 0; k < 8; k++) ts.counts[k] = m.b(0x4e7e4 + k);
+  for (int k = 0; k < 64; k++) ts.params[k] = m.b(0x1451a + k);
+  return ts;
+}
+
+// formes : sections transversales (gauche, droite) en coordonnées locales de case, dans l'ordre
+std::string shapesJson(const Bytes &image) {
+  Mem m{image};
+  std::string j = "[";
+  for (int s = 0; s < 16; s++) {
+    std::string one;
+    try {   // forme absente ou inutilisée : liste vide
+      uint32_t a = p6502(m.le(SHAPE_TABLE + 2 * s)), o = m.b(a), n = m.b(a + o), base = a + o + 7;
+      for (uint32_t i = 0; i < n; i++)
+        one += (i ? ",[" : "[") + std::to_string(s16(m.le(base + 4 * i))) + "," + std::to_string(s16(m.le(base + 4 * i + 2))) + "]";
+    } catch (...) { one.clear(); }
+    j += (s ? ",[" : "[") + one + "]";
+  }
+  return j + "]";
+}
+
+// profils de hauteur : pour chaque code (0 à 127), hauteurs relatives des 16 premières sections, format
+// court (octets) et format long (mots, profil gauche avec le bit 7)
+std::string profilesJson(const Bytes &image) {
+  Mem m{image};
+  std::string j = "[";
+  for (int code = 0; code < 128; code++) {
+    const uint32_t ptr = m.le(PROFILE_TABLE + ((code << 1) & 0xff));
+    j += code ? ",{" : "{";
+    for (int neg = 0; neg < 2; neg++) {
+      j += neg ? ",\"w\":[" : "\"b\":[";
+      for (int i = 0; i < 16; i++) {
+        long v = -1;
+        try { v = long(profile(m, ptr, neg != 0, i)); } catch (...) {}
+        j += (i ? "," : "") + std::to_string(v);
+      }
+      j += "]";
+    }
+    j += "}";
+  }
+  return j + "]";
 }
 
 }  // namespace scr

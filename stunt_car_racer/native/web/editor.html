@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Éditeur de circuits</title>
+<meta name="description" content="Éditeur de circuits pour Stunt Car Racer (version native) : pièces sur la grille, profils de hauteur, aperçu 3D, fichier .trk.">
+<style>
+  /* éditeur de circuits : la géométrie et la vérification viennent du moteur du jeu (scr.wasm) */
+  :root { --bg: #0b0e12; --panel: #141a21; --panel2: #1b232c; --text: #eef1f4; --muted: #9aa6b2; --line: #2a3540;
+          --accent: #e3392b; --accent2: #ffb020; --ok: #48d17a; --bad: #ff7b6b; --link: #8cc0ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a { color: var(--link); }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 20px; margin: 0 12px 0 0; font-style: italic; font-weight: 900; text-transform: uppercase; }
+  header h1 span { color: var(--accent); }
+  button, .btn { font: inherit; font-weight: 700; font-size: 14px; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--line);
+                 background: var(--panel2); color: var(--text); cursor: pointer; text-decoration: none; display: inline-block; }
+  button.main { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type=file] { display: none; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 14px; padding: 14px 16px; max-width: 1400px; margin: 0 auto; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .card h2 { font-size: 15px; margin: 0 0 10px; color: var(--accent2); }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .tabs button { font-size: 13px; padding: 5px 9px; }
+  .tabs button.on { background: var(--accent2); color: #111; border-color: var(--accent2); }
+  canvas { display: block; width: 100%; background: #0f1418; border-radius: 8px; touch-action: none; }
+  #top { aspect-ratio: 1; cursor: crosshair; }
+  #view3d { aspect-ratio: 16 / 9; cursor: grab; margin-top: 12px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+  .row label { min-width: 120px; color: var(--muted); font-size: 13px; }
+  select, input[type=number], input[type=text] { font: inherit; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  input[type=number] { width: 76px; }
+  #name { text-transform: uppercase; width: 190px; letter-spacing: 1px; }
+  .rot button { width: 44px; } .rot button.on { background: var(--accent2); color: #111; }
+  #report { margin-top: 10px; padding: 8px 10px; border-radius: 8px; font-size: 14px; background: var(--panel2); }
+  #report.ok { color: var(--ok); } #report.bad { color: var(--bad); }
+  .muted { color: var(--muted); font-size: 13px; }
+  .prof { width: 100%; height: 46px; background: #0f1418; border-radius: 6px; margin-top: 4px; }
+  #boot { max-width: 640px; margin: 40px auto; padding: 0 16px; }
+  .hidden { display: none !important; }
+  kbd { background: #232c36; border: 1px solid #3a4652; border-radius: 4px; padding: 0 5px; font: 12px ui-monospace, Consolas, monospace; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Éditeur de <span>circuits</span></h1>
+  <button id="bOrig" disabled>Circuits de la disquette</button>
+  <label class="btn" for="fOpen">Ouvrir un .trk</label><input id="fOpen" type="file" accept=".trk,.TRK">
+  <button id="bSave" disabled>Télécharger le .trk</button>
+  <button id="bPlay" class="main" disabled>Essayer dans le jeu</button>
+  <a class="btn" href="index.html">Retour au jeu</a>
+</header>
+
+<div id="boot" class="card">
+  <h2>Chargement…</h2>
+  <p id="bootMsg" class="muted">Démarrage du moteur du jeu.</p>
+  <div id="needDisk" class="hidden">
+    <p>L'éditeur utilise votre disquette de Stunt Car Racer (formes des pièces, profils de hauteur, circuits d'origine).
+      Ajoutez-la sur la page du jeu, ou ici :</p>
+    <label class="btn" for="fDisk">Choisir la disquette (.st, .zip)</label><input id="fDisk" type="file" accept=".st,.ST,.zip,.ZIP">
+  </div>
+</div>
+
+<main id="app" class="hidden">
+  <section class="card">
+    <div class="tabs" id="tabs"></div>
+    <div class="row"><label>Nom du circuit</label><input id="name" type="text" maxlength="16"></div>
+    <canvas id="top" width="900" height="900"></canvas>
+    <p class="muted">Clic : choisir une pièce. Les numéros suivent le sens de la course ; ⚑ = pièce de départ.</p>
+    <canvas id="view3d" width="1200" height="675"></canvas>
+    <p class="muted">Aperçu 3D : glisser pour tourner, molette pour zoomer.</p>
+  </section>
+  <aside>
+    <section class="card">
+      <h2 id="pTitle">Pièce</h2>
+      <div class="row"><button id="bPrev">◀</button><button id="bNext">▶</button>
+        <button id="bAdd">+ Pièce après</button><button id="bDel">Supprimer</button></div>
+      <div class="row"><label>Forme</label><select id="shape"></select></div>
+      <div class="row rot"><label>Orientation</label><span id="rot"></span></div>
+      <div class="row"><label>Sens inverse</label><input id="rev" type="checkbox"></div>
+      <div class="row"><label>Case (x, z)</label><input id="cx" type="number" min="0" max="15"><input id="cz" type="number" min="0" max="15"></div>
+      <div id="profBox">
+        <div class="row"><label>Profil gauche</label><input id="pl" type="number" min="0" max="127"><span class="muted">long</span><input id="neg" type="checkbox"></div>
+        <canvas class="prof" id="plv" width="300" height="46"></canvas>
+        <div class="row"><label>Même profil à droite</label><input id="same" type="checkbox"></div>
+        <div class="row" id="prRow"><label>Profil droit</label><input id="pr" type="number" min="0" max="127"></div>
+        <canvas class="prof" id="prv" width="300" height="46"></canvas>
+        <p class="muted">0 = plat. Les profils sont ceux du jeu : la courbe montre la variation de hauteur le long de la pièce.</p>
+      </div>
+      <p id="specNote" class="muted hidden">Pièce spéciale : son profil de hauteur est fixé par le jeu.</p>
+      <div class="row"><button id="bStart">⚑ Départ ici</button></div>
+    </section>
+    <section class="card" style="margin-top:14px">
+      <h2>Circuit</h2>
+      <div class="row"><label>Hauteur de départ</label><input id="h0" type="number" min="0" max="65535" step="32"></div>
+      <div class="row"><label>Pièces</label><span id="nPieces"></span></div>
+      <div id="report"></div>
+      <p class="muted">Le jeu refuse un circuit dont une pièce ne se raccorde pas à la précédente, ou qui ne se referme pas
+        (en position et en hauteur). <kbd>+ Pièce après</kbd> place la nouvelle pièce au bout de la précédente.</p>
+    </section>
+  </aside>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const DISK = '/save/game.st', MINE = '/save/circuits.trk', WORK = '/tmp/editeur.trk', CELL = 0x800;
+  const SHAPE_NAMES = { 0: 'Ligne droite', 1: 'Virage court à droite (45°)', 3: 'Virage court à gauche (45°)', 6: 'Virage long à droite (45°)',
+    7: 'Virage long à gauche (45°)', 4: 'Diagonale longue', 10: 'Diagonale', 12: 'Droite spéciale A', 13: 'Droite spéciale B', 14: 'Droite spéciale C', 15: 'Droite spéciale D' };
+  let shapes = [], profiles = [], set = null, cur = 0, sel = 0, geo = null;
+
+  // ---------------------------------------------------------------- fichier .trk <-> modèle
+  function parseTrk(d) {
+    const td = new TextDecoder('latin1');
+    if (td.decode(d.subarray(0, 7)) !== 'SCRTRK1') throw new Error('pas un fichier de circuits');
+    let o = 8; const s = { names: [], tracks: [] };
+    for (let k = 0; k < 8; k++, o += 16) s.names.push(td.decode(d.subarray(o, o + 16)).replace(/\s+$/, ''));
+    s.initials = d.slice(o, o + 16); o += 16; s.counts = d.slice(o, o + 8); o += 8; s.params = d.slice(o, o + 64); o += 64;
+    const offs = []; for (let k = 0; k < 8; k++, o += 2) offs.push((d[o] << 8) | d[o + 1]);
+    const len = (d[o] << 8) | d[o + 1]; o += 2;
+    const data = d.subarray(o, o + len);
+    for (let k = 0; k < 8; k++) s.tracks.push(parseTrack(data, offs[k]));
+    return s;
+  }
+  function parseTrack(data, p0) {
+    let p = p0; const f = () => { if (p >= data.length) throw new Error('tracé coupé'); return data[p++]; };
+    const hdr = [f(), f(), f(), f()]; const h0 = f() | (f() << 8);
+    const pieces = []; let rep = 0, prevType = 0, prevCell = 0;
+    while (pieces.length < hdr[0]) {
+      let t, c;
+      if (rep) {   // pièce répétée : case suivante dans la direction de la pièce
+        rep--; t = prevType; let dirb = t; if (t & 0x10) dirb ^= 0xc0;
+        const step = (dirb & 0x40) ? 1 : 0x10; c = ((dirb & 0x80) ? prevCell - step : prevCell + step) & 0xff;
+      } else {
+        t = f(); if ((t & 0xf) === 0xf) { rep = t >> 4; continue; }
+        prevType = t; c = f();
+      }
+      prevCell = c;
+      let bba = 0, v = 0;
+      if ((t & 0xf) < 12) { bba = f(); v = (t & 0x20) ? bba : f(); }
+      pieces.push({ type: t, cell: c, bba, v });
+    }
+    const six = [f(), f(), f(), f(), f(), f()];
+    const l1 = []; for (let k = 0; k < six[4]; k++) l1.push([f(), f()]);
+    const l2 = []; for (let k = 0; k < six[5]; k++) l2.push(f());
+    return { hdr, h0, pieces, six, l1, l2 };
+  }
+  function encodeTrack(t) {
+    const out = [t.pieces.length, t.hdr[1], t.hdr[2], t.hdr[3], t.h0 & 255, (t.h0 >> 8) & 255];
+    for (const pc of t.pieces) {
+      out.push(pc.type & 255, pc.cell & 255);
+      if ((pc.type & 0xf) < 12) { out.push(pc.bba & 255); if (!(pc.type & 0x20)) out.push(pc.v & 255); }
+    }
+    out.push(t.six[0], t.six[1], t.six[2], t.six[3], t.l1.length, t.l2.length);
+    for (const [a, b] of t.l1) out.push(a, b);
+    for (const a of t.l2) out.push(a);
+    return out;
+  }
+  function encodeTrk(s) {
+    const bytes = []; const offs = [];
+    for (const t of s.tracks) { offs.push(bytes.length); bytes.push(...encodeTrack(t)); }
+    const head = [...new TextEncoder().encode('SCRTRK1'), 0];
+    for (const n of s.names) { const u = (n.toUpperCase().replace(/[^ -~]/g, ' ') + ' '.repeat(16)).slice(0, 16); for (const ch of u) head.push(ch.charCodeAt(0)); }
+    head.push(...s.initials, ...s.counts, ...s.params);
+    for (const o of offs) head.push(o >> 8, o & 255);
+    head.push(bytes.length >> 8, bytes.length & 255);
+    return new Uint8Array([...head, ...bytes]);
+  }
+
+  // ---------------------------------------------------------------- moteur : géométrie et vérification
+  function decodeAll() {
+    FS.writeFile(WORK, encodeTrk(set));
+    geo = JSON.parse(Module.ccall('scr_ed_decode', 'string', ['string'], [WORK]));
+  }
+  function trackGeo() { return geo && geo.tracks[cur] ? geo.tracks[cur] : null; }
+  // sections d'une pièce (coordonnées du monde), dans l'ordre de la course
+  function pieceSecs(g, i) { return g ? g.secs.filter((s) => s[6] === i) : []; }
+
+  // ---------------------------------------------------------------- pièce suivante : place et orientation
+  function shapeSecs(shape, type, cell) {   // comme le décodeur : sens inverse, rotation, case
+    const pts = shapes[(shape & 0xf) >= 12 ? 0 : shape] || [];
+    let secs = []; for (let k = 0; k + 1 < pts.length; k += 2) secs.push([pts[k], pts[k + 1]]);
+    if (type & 0x10) secs = secs.reverse().map(([l, r]) => [r, l]);
+    const rot = (type >> 6) & 3;
+    const R = ([x, z]) => rot === 1 ? [z, CELL - x] : rot === 2 ? [CELL - x, CELL - z] : rot === 3 ? [CELL - z, x] : [x, z];
+    const cx = (cell & 15) * CELL, cz = (cell >> 4) * CELL;
+    return secs.map(([l, r]) => { const a = R(l), b = R(r); return [a[0] + cx, a[1] + cz, b[0] + cx, b[1] + cz]; });
+  }
+  function bestPlacement(shape, end) {   // end : dernière section de la pièce précédente [lx,ly,lz,rx,ry,rz]
+    let best = null;
+    const ex = (end[0] + end[3]) / 2, ez = (end[2] + end[5]) / 2;
+    const bx = Math.floor(ex / CELL), bz = Math.floor(ez / CELL);
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const x = bx + dx, z = bz + dz; if (x < 0 || x > 15 || z < 0 || z > 15) continue;
+      for (let rot = 0; rot < 4; rot++) for (const rev of [0, 0x10]) {
+        const type = (rot << 6) | rev | shape | 0x20;
+        const s = shapeSecs(shape, type, (z << 4) | x); if (!s.length) continue;
+        const f0 = s[0], g = Math.max(Math.hypot(f0[0] - end[0], f0[1] - end[2]), Math.hypot(f0[2] - end[3], f0[3] - end[5]));
+        if (!best || g < best.g - 0.5 || (Math.abs(g - best.g) <= 0.5 && !rev)) best = { g, type, cell: (z << 4) | x };
+      }
+    }
+    return best && best.g < 48 ? best : null;
+  }
+
+  // ---------------------------------------------------------------- dessin : vue de dessus
+  function drawTop() {
+    const c = $('top'), x = c.getContext('2d'), W = c.width, k = W / (16 * CELL);
+    x.fillStyle = '#0f1418'; x.fillRect(0, 0, W, W);
+    x.strokeStyle = '#1d262e'; x.lineWidth = 1;
+    for (let i = 0; i <= 16; i++) { x.beginPath(); x.moveTo(i * CELL * k, 0); x.lineTo(i * CELL * k, W); x.moveTo(0, i * CELL * k); x.lineTo(W, i * CELL * k); x.stroke(); }
+    const g = trackGeo(); if (!g) return;
+    const P = (px, pz) => [px * k, W - pz * k];
+    let ymin = 1e9, ymax = -1e9; for (const s of g.secs) { ymin = Math.min(ymin, s[1], s[4]); ymax = Math.max(ymax, s[1], s[4]); }
+    const n = g.secs.length;
+    for (let i = 0; i < n; i++) {
+      const a = g.secs[i], b = g.secs[(i + 1) % n];
+      if (i === n - 1 && Math.hypot(a[0] - b[0], a[2] - b[2]) > CELL) continue;
+      const h = ((a[1] + a[4]) / 2 - ymin) / Math.max(1, ymax - ymin);
+      x.fillStyle = b[6] === sel ? '#ffb020' : `rgb(${110 + 110 * h | 0},${120 + 90 * h | 0},${135 + 60 * h | 0})`;
+      x.beginPath(); x.moveTo(...P(a[0], a[2])); x.lineTo(...P(a[3], a[5])); x.lineTo(...P(b[3], b[5])); x.lineTo(...P(b[0], b[2])); x.closePath(); x.fill();
+    }
+    // numéros des pièces (au milieu de chacune), départ
+    x.font = 'bold 15px system-ui'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    const t = set.tracks[cur];
+    for (let i = 0; i < t.pieces.length; i++) {
+      const ss = pieceSecs(g, i); if (!ss.length) continue;
+      const m = ss[ss.length >> 1], [px, pz] = P((m[0] + m[3]) / 2, (m[2] + m[5]) / 2);
+      const start = i === t.hdr[2];
+      x.fillStyle = i === sel ? '#111' : start ? '#ffb020' : '#e8edf2';
+      x.fillText(start ? '⚑' + (i + 1) : String(i + 1), px, pz);
+    }
+  }
+  $('top').addEventListener('click', (e) => {
+    const g = trackGeo(); if (!g) return;
+    const r = $('top').getBoundingClientRect(), k = (16 * CELL) / r.width;
+    const wx = (e.clientX - r.left) * k, wz = (r.height - (e.clientY - r.top)) * k;
+    let best = -1, bd = 1e18;
+    for (const s of g.secs) { const d = Math.hypot((s[0] + s[3]) / 2 - wx, (s[2] + s[5]) / 2 - wz); if (d < bd) { bd = d; best = s[6]; } }
+    if (best >= 0 && bd < CELL) { sel = best; refresh(false); }
+  });
+
+  // ---------------------------------------------------------------- aperçu 3D
+  let yaw = 0.7, pitch = 0.55, zoom = 1;
+  function draw3d() {
+    const c = $('view3d'), x = c.getContext('2d'), W = c.width, H = c.height;
+    const sky = x.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#5f8fd8'); sky.addColorStop(1, '#2c3f2a');
+    x.fillStyle = sky; x.fillRect(0, 0, W, H);
+    const g = trackGeo(); if (!g || !g.secs.length) return;
+    let cx = 0, cz = 0, cy = 0; for (const s of g.secs) { cx += s[0] + s[3]; cz += s[2] + s[5]; cy += s[1] + s[4]; }
+    const n = g.secs.length; cx /= 2 * n; cz /= 2 * n; cy /= 2 * n;
+    const HS = 0.5, dist = 26000 / zoom;
+    const ca = Math.cos(yaw), sa = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+    const proj = (px, py, pz) => {
+      let X = px - cx, Y = (py - cy) * HS, Z = pz - cz;
+      const x1 = X * ca - Z * sa, z1 = X * sa + Z * ca;
+      const y2 = Y * cp - z1 * sp, z2 = Y * sp + z1 * cp + dist;
+      if (z2 < 200) return null;
+      const f = W * 0.9 / z2; return [W / 2 + x1 * f, H / 2 - y2 * f, z2];
+    };
+    const quads = [];
+    for (let i = 0; i < n; i++) {
+      const a = g.secs[i], b = g.secs[(i + 1) % n];
+      if (i === n - 1 && Math.hypot(a[0] - b[0], a[2] - b[2]) > CELL) continue;
+      const p = [proj(a[0], a[1], a[2]), proj(a[3], a[4], a[5]), proj(b[3], b[4], b[5]), proj(b[0], b[1], b[2])];
+      if (p.some((q) => !q)) continue;
+      quads.push({ p, z: (p[0][2] + p[1][2] + p[2][2] + p[3][2]) / 4, s: b[6] === sel, y: Math.min(a[1], a[4]) });
+      // piliers sous la route (hauteur)
+      const gnd = proj((a[0] + a[3]) / 2, 0, (a[2] + a[5]) / 2), top = proj((a[0] + a[3]) / 2, (a[1] + a[4]) / 2, (a[2] + a[5]) / 2);
+      if (gnd && top && i % 3 === 0) quads.push({ line: [gnd, top], z: top[2] + 1 });
+    }
+    quads.sort((u, v) => v.z - u.z);
+    for (const q of quads) {
+      if (q.line) { x.strokeStyle = 'rgba(0,0,0,.35)'; x.lineWidth = 1; x.beginPath(); x.moveTo(q.line[0][0], q.line[0][1]); x.lineTo(q.line[1][0], q.line[1][1]); x.stroke(); continue; }
+      x.fillStyle = q.s ? '#ffb020' : '#b9b48f'; x.strokeStyle = q.s ? '#ffb020' : '#7a1d17'; x.lineWidth = 1;
+      x.beginPath(); x.moveTo(q.p[0][0], q.p[0][1]); for (let k = 1; k < 4; k++) x.lineTo(q.p[k][0], q.p[k][1]); x.closePath(); x.fill(); x.stroke();
+    }
+  }
+  (() => {
+    const c = $('view3d'); let drag = null;
+    c.addEventListener('pointerdown', (e) => { drag = [e.clientX, e.clientY]; c.setPointerCapture(e.pointerId); });
+    c.addEventListener('pointermove', (e) => { if (!drag) return; yaw += (e.clientX - drag[0]) * 0.008; pitch = Math.max(0.05, Math.min(1.45, pitch + (e.clientY - drag[1]) * 0.006)); drag = [e.clientX, e.clientY]; draw3d(); });
+    c.addEventListener('pointerup', () => { drag = null; });
+    c.addEventListener('wheel', (e) => { e.preventDefault(); zoom = Math.max(0.3, Math.min(6, zoom * (e.deltaY < 0 ? 1.12 : 0.89))); draw3d(); }, { passive: false });
+  })();
+
+  // ---------------------------------------------------------------- profils : petite courbe
+  function drawProfile(canvas, code, neg) {
+    const x = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
+    x.fillStyle = '#0f1418'; x.fillRect(0, 0, W, H);
+    const pr = profiles[code & 127]; if (!pr) return;
+    const v = (neg ? pr.w : pr.b).slice(0, 10).filter((a) => a >= 0); if (v.length < 2) return;
+    const lo = Math.min(...v), hi = Math.max(...v), span = Math.max(1, hi - lo);
+    x.strokeStyle = '#ffb020'; x.lineWidth = 2; x.beginPath();
+    v.forEach((a, i) => { const px = 6 + i * (W - 12) / (v.length - 1), py = H - 6 - (a - lo) / span * (H - 12); i ? x.lineTo(px, py) : x.moveTo(px, py); });
+    x.stroke(); x.fillStyle = '#9aa6b2'; x.font = '11px system-ui'; x.fillText((v[v.length - 1] - v[0] >= 0 ? '+' : '') + (v[v.length - 1] - v[0]), 6, 12);
+  }
+
+  // ---------------------------------------------------------------- panneau de la pièce
+  function refresh(redecode = true) {
+    const t = set.tracks[cur];
+    sel = Math.max(0, Math.min(sel, t.pieces.length - 1));
+    if (redecode) decodeAll();
+    $('tabs').querySelectorAll('button').forEach((b, k) => { b.classList.toggle('on', k === cur); b.textContent = (k + 1) + '. ' + (set.names[k] || '—'); });
+    $('name').value = set.names[cur];
+    $('h0').value = t.h0;
+    $('nPieces').textContent = t.pieces.length;
+    const pc = t.pieces[sel], shape = pc.type & 0xf, special = shape >= 12;
+    $('pTitle').textContent = 'Pièce ' + (sel + 1) + ' / ' + t.pieces.length + (sel === t.hdr[2] ? '  ⚑ départ' : '');
+    $('shape').value = String(shape);
+    $('rot').querySelectorAll('button').forEach((b, k) => b.classList.toggle('on', k === ((pc.type >> 6) & 3)));
+    $('rev').checked = !!(pc.type & 0x10);
+    $('cx').value = pc.cell & 15; $('cz').value = pc.cell >> 4;
+    $('profBox').classList.toggle('hidden', special); $('specNote').classList.toggle('hidden', !special);
+    $('pl').value = pc.bba & 127; $('neg').checked = !!(pc.bba & 0x80);
+    $('same').checked = !!(pc.type & 0x20); $('prRow').classList.toggle('hidden', !!(pc.type & 0x20)); $('prv').classList.toggle('hidden', !!(pc.type & 0x20));
+    $('pr').value = pc.v & 127;
+    drawProfile($('plv'), pc.bba & 127, pc.bba & 0x80); drawProfile($('prv'), pc.v & 127, pc.bba & 0x80);
+    const g = trackGeo(), rep = $('report');
+    if (geo && !geo.ok) {
+      const mine = geo.report.split('|').filter((l) => l && l.startsWith((set.names[cur] || '').trim() + ' :'));
+      const others = geo.report.split('|').filter((l) => l && !mine.includes(l));
+      rep.className = mine.length ? 'bad' : 'ok';
+      rep.textContent = mine.length ? '✗ ' + mine.join(' ; ') : '✓ Ce circuit est valide' + (others.length ? ' (à corriger dans un autre circuit : ' + others.join(' ; ') + ')' : '');
+    } else { rep.className = 'ok'; rep.textContent = '✓ Les 8 circuits sont valides : le jeu les acceptera.'; }
+    if (g && g.close > 48) rep.textContent += ' — Écart de fermeture : ' + g.close;
+    if (g && g.closeH > 32) rep.textContent += ' — Différence de hauteur à la fermeture : ' + g.closeH + ' (ajustez les profils ou la hauteur de départ)';
+    drawTop(); draw3d();
+  }
+  function edit(fn) { const t = set.tracks[cur]; fn(t, t.pieces[sel]); refresh(); }
+  $('shape').addEventListener('change', () => edit((t, pc) => { pc.type = (pc.type & 0xf0) | +$('shape').value; }));
+  $('rev').addEventListener('change', () => edit((t, pc) => { pc.type ^= 0x10; }));
+  $('cx').addEventListener('change', () => edit((t, pc) => { pc.cell = (pc.cell & 0xf0) | (Math.max(0, Math.min(15, +$('cx').value)) & 15); }));
+  $('cz').addEventListener('change', () => edit((t, pc) => { pc.cell = (pc.cell & 0x0f) | ((Math.max(0, Math.min(15, +$('cz').value)) & 15) << 4); }));
+  $('pl').addEventListener('change', () => edit((t, pc) => { pc.bba = (pc.bba & 0x80) | (Math.max(0, Math.min(127, +$('pl').value)) & 127); if (pc.type & 0x20) pc.v = pc.bba; }));
+  $('neg').addEventListener('change', () => edit((t, pc) => { pc.bba ^= 0x80; if (pc.type & 0x20) pc.v = pc.bba; }));
+  $('same').addEventListener('change', () => edit((t, pc) => { pc.type ^= 0x20; if (pc.type & 0x20) pc.v = pc.bba; }));
+  $('pr').addEventListener('change', () => edit((t, pc) => { pc.v = Math.max(0, Math.min(127, +$('pr').value)) & 127; }));
+  $('h0').addEventListener('change', () => edit((t) => { t.h0 = Math.max(0, Math.min(65535, +$('h0').value | 0)); }));
+  $('name').addEventListener('change', () => { set.names[cur] = $('name').value.toUpperCase().slice(0, 16); refresh(); });
+  $('bPrev').addEventListener('click', () => { sel = (sel - 1 + set.tracks[cur].pieces.length) % set.tracks[cur].pieces.length; refresh(false); });
+  $('bNext').addEventListener('click', () => { sel = (sel + 1) % set.tracks[cur].pieces.length; refresh(false); });
+  $('bStart').addEventListener('click', () => edit((t) => { t.hdr[1] = t.hdr[2] = sel; }));
+  // index de pièce dans les listes de la fin du tracé (vitesses de l'adversaire...) : suivent les insertions
+  function shiftRefs(t, from, delta) {
+    const sh = (i) => (i >= from ? i + delta : i);
+    t.hdr[1] = sh(t.hdr[1]); t.hdr[2] = sh(t.hdr[2]); t.hdr[3] = sh(t.hdr[3]) % Math.max(1, t.pieces.length);
+    t.l1 = t.l1.map(([p, v]) => [sh(p), v]).filter(([p]) => p >= 0 && p < t.pieces.length);
+    t.l2 = t.l2.map(sh).filter((p) => p >= 0 && p < t.pieces.length);
+  }
+  $('bAdd').addEventListener('click', () => {
+    const t = set.tracks[cur]; if (t.pieces.length >= 120) return;
+    const g = trackGeo(), ss = pieceSecs(g, sel); if (!ss.length) return;
+    const shape = +$('shape').value >= 12 ? 0 : +$('shape').value;
+    const place = bestPlacement(shape, ss[ss.length - 1]) || bestPlacement(0, ss[ss.length - 1]);
+    const np = place ? { type: place.type, cell: place.cell, bba: 0, v: 0 } : { ...t.pieces[sel] };
+    t.pieces.splice(sel + 1, 0, np);
+    shiftRefs(t, sel + 1, 1);
+    sel++; refresh();
+  });
+  $('bDel').addEventListener('click', () => {
+    const t = set.tracks[cur]; if (t.pieces.length <= 4) return;
+    t.pieces.splice(sel, 1);
+    t.l1 = t.l1.filter(([p]) => p !== sel); t.l2 = t.l2.filter((p) => p !== sel);
+    shiftRefs(t, sel + 1, -1);
+    if (t.hdr[2] >= t.pieces.length) t.hdr[1] = t.hdr[2] = 0;
+    sel = Math.max(0, sel - 1); refresh();
+  });
+
+  // ---------------------------------------------------------------- fichiers
+  function load(bytes, from) {
+    try { set = parseTrk(bytes); } catch (e) { alert('Fichier refusé : ' + e.message); return; }
+    cur = 0; sel = 0; refresh();
+    $('bootMsg').textContent = from;
+  }
+  function loadOriginals() {
+    if (!Module.ccall('scr_ed_export', 'number', ['string'], ['/tmp/origine.trk'])) { alert('Circuits de la disquette illisibles.'); return; }
+    load(FS.readFile('/tmp/origine.trk'), 'circuits de la disquette');
+  }
+  $('bOrig').addEventListener('click', () => { if (!set || confirm('Repartir des circuits de la disquette ? Les modifications non téléchargées seront perdues.')) loadOriginals(); });
+  $('fOpen').addEventListener('change', async (e) => { const f = e.target.files[0]; if (f) load(new Uint8Array(await f.arrayBuffer()), f.name); e.target.value = ''; });
+  $('bSave').addEventListener('click', () => {
+    const blob = new Blob([encodeTrk(set)], { type: 'application/octet-stream' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'mes_circuits.trk'; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  });
+  $('bPlay').addEventListener('click', () => {   // gardés pour la page du jeu (emplacement « Mes circuits »), puis le jeu
+    if (geo && !geo.ok && !confirm('Le jeu refusera ces circuits tant qu\'ils ne sont pas valides. Les garder quand même ?')) return;
+    FS.writeFile(MINE, encodeTrk(set));
+    FS.syncfs(false, () => { location.href = 'index.html'; });
+  });
+
+  // ---------------------------------------------------------------- démarrage
+  function start() {
+    if (!Module.ccall('scr_ed_init', 'number', ['string'], [DISK])) { $('needDisk').classList.remove('hidden'); $('bootMsg').textContent = 'Disquette absente ou non reconnue.'; return; }
+    shapes = JSON.parse(Module.ccall('scr_ed_shapes', 'string', [], []));
+    profiles = JSON.parse(Module.ccall('scr_ed_profiles', 'string', [], []));
+    const sh = $('shape'); sh.innerHTML = '';
+    for (const k of Object.keys(SHAPE_NAMES)) if (shapes[+k >= 12 ? 0 : +k] && shapes[+k >= 12 ? 0 : +k].length) { const o = document.createElement('option'); o.value = k; o.textContent = SHAPE_NAMES[k]; sh.appendChild(o); }
+    const rot = $('rot'); rot.innerHTML = '';
+    ['↑', '→', '↓', '←'].forEach((s, k) => { const b = document.createElement('button'); b.textContent = s; b.title = 'quart de tour ' + k; b.addEventListener('click', () => edit((t, pc) => { pc.type = (pc.type & 0x3f) | (k << 6); })); rot.appendChild(b); });
+    const tabs = $('tabs'); tabs.innerHTML = '';
+    for (let k = 0; k < 8; k++) { const b = document.createElement('button'); b.addEventListener('click', () => { cur = k; sel = 0; refresh(false); }); tabs.appendChild(b); }
+    $('boot').classList.add('hidden'); $('app').classList.remove('hidden');
+    ['bOrig', 'bSave', 'bPlay'].forEach((id) => $(id).disabled = false);
+    if (FS.analyzePath(MINE).exists) load(FS.readFile(MINE), 'mes circuits'); else loadOriginals();
+  }
+  async function useDisk(f) {
+    let d = new Uint8Array(await f.arrayBuffer());
+    if (d.length > 3 && d[0] === 0x50 && d[1] === 0x4b) {   // .zip : l'image .st à l'intérieur
+      const dv = new DataView(d.buffer); let e = -1;
+      for (let i = d.length - 22; i >= Math.max(0, d.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { e = i; break; }
+      if (e >= 0) {
+        let p = dv.getUint32(e + 16, true);
+        const m = dv.getUint16(p + 10, true), cs = dv.getUint32(p + 20, true), lho = dv.getUint32(p + 42, true);
+        const st = lho + 30 + dv.getUint16(lho + 26, true) + dv.getUint16(lho + 28, true), raw = d.subarray(st, st + cs);
+        d = m === 0 ? new Uint8Array(raw) : new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+      }
+    }
+    FS.writeFile(DISK, d);
+    if (!Module.ccall('scr_ed_init', 'number', ['string'], [DISK])) { try { FS.unlink(DISK); } catch (x) {} $('bootMsg').textContent = 'Disquette refusée : ce n\'est pas Stunt Car Racer.'; return; }
+    FS.syncfs(false, () => {}); $('needDisk').classList.add('hidden'); start();
+  }
+  $('fDisk').addEventListener('change', (e) => useDisk(e.target.files[0]));
+
+  var Module = {
+    print: () => {}, printErr: (t) => console.warn(t),
+    onRuntimeInitialized: () => {
+      FS.mkdir('/save'); FS.mount(IDBFS, {}, '/save');
+      FS.syncfs(true, () => start());
+    }
+  };
+</script>
+<script async src="scr.js"></script>
+</body>
+</html>

@@ -35,5 +35,10 @@ struct TrackSet;
 std::vector<Track> decodeTracks(const Bytes &image, const TrackSet *ts = nullptr);
 // circuits personnels : décodage et raccords vérifiés ; vrai si jouables, report = explication
 bool checkTrackSet(const Bytes &image, const TrackSet &ts, std::string &report);
+// éditeur de circuits : les 8 circuits de la disquette sous forme de TrackSet (fichier .trk), les
+// formes des pièces et les profils de hauteur du jeu (JSON)
+TrackSet originalTrackSet(const Bytes &image);
+std::string shapesJson(const Bytes &image);
+std::string profilesJson(const Bytes &image);
 
 }  // namespace scr

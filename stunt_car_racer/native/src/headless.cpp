@@ -65,21 +65,7 @@ int main(int argc, char **argv) {
     auto t0 = std::chrono::steady_clock::now();
     scr::Machine m(bytes);
     if (!exportTrk.empty()) {   // circuits de la disquette -> fichier .trk (point de départ de l'éditeur)
-      const scr::Bytes &img = m.image();
-      auto b = [&](uint32_t a) { return img[a - 0x10100]; };
-      scr::TrackSet ts;
-      uint32_t lo = 0xffffffff, hi = 0;
-      for (int k = 0; k < 8; k++) {
-        uint32_t off = uint32_t((b(0x13790 + 2 * k) | (b(0x13791 + 2 * k) << 8)) - 0xb100);
-        lo = std::min(lo, off); hi = std::max(hi, off + 256);
-        ts.names[k].assign(reinterpret_cast<const char *>(&img[0x13498 - 0x10100 + 16 * k]), 16);
-      }
-      hi = std::min<uint32_t>(hi, uint32_t(img.size() - (0x13670 - 0x10100)));
-      for (int k = 0; k < 8; k++) ts.offsets[k] = uint16_t((b(0x13790 + 2 * k) | (b(0x13791 + 2 * k) << 8)) - 0xb100 - lo);
-      ts.data.assign(img.begin() + (0x13670 - 0x10100) + lo, img.begin() + (0x13670 - 0x10100) + hi);
-      std::memcpy(ts.initials, &img[0x4d35c - 0x10100], 16);
-      std::memcpy(ts.counts, &img[0x4e7e4 - 0x10100], 8);
-      std::memcpy(ts.params, &img[0x1451a - 0x10100], 64);
+      scr::TrackSet ts = scr::originalTrackSet(m.image());
       std::string err;
       if (!scr::saveTrackFile(exportTrk, ts, err)) throw std::runtime_error(err);
       std::printf("8 circuits écrits dans %s (%zu octets de tracés)\n", exportTrk.c_str(), ts.data.size());
