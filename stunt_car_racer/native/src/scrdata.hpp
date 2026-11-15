@@ -16,6 +16,7 @@ std::map<std::string, Bytes> fatList(const Bytes &img);
 Bytes byteKiller(const Bytes &buf, size_t end, bool &ok);
 Bytes unpackPrg(const Bytes &prg, bool &ok);
 // programme du jeu (exécutable interne de GAME.PUT) depuis une image .st ou GAME.PUT
+Bytes iceDepack(const Bytes &f, bool wide);   // Pack-Ice (« ICE! »)
 Bytes innerProgram(const Bytes &file);
 // TEXT+DATA relogés pour une base donnée ; bss = taille du BSS
 Bytes relocate(const Bytes &prg, uint32_t base, uint32_t &bss);
