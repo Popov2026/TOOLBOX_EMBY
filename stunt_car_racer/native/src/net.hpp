@@ -19,6 +19,8 @@
 #include <mutex>
 #include <thread>
 #include <string>
+
+#include "scrdata.hpp"
 #include <vector>
 
 namespace scr {
@@ -29,7 +31,8 @@ constexpr int NET_DISCOVERY_PORT = 27421; // UDP : annonces de parties en résea
 enum NetFrame : uint8_t { NF_HELLO = 1, NF_DATA = 2, NF_PING = 3, NF_PONG = 4, NF_BYE = 5, NF_JOIN = 10, NF_INFO = 11,
                           NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16, NF_CHAT = 17,
                           NF_GSTATE = 18, NF_GCMD = 19, NF_GEVENT = 20, NF_GPOS = 21, NF_HORN = 22, NF_STATUS = 23,
-                          NF_REVIEWS = 24, NF_REVIEW = 25 };   // avis des joueurs : liste publiée, envoi d'un avis
+                          NF_REVIEWS = 24, NF_REVIEW = 25,
+                          NF_GTRACKS = 26 };   // circuits de l'organisateur (fichier .trk), envoyés à la salle   // avis des joueurs : liste publiée, envoi d'un avis
 
 class NetLink {
  public:
@@ -96,6 +99,10 @@ class NetLink {
   int groupLaps() const { return groupLaps_; }
   bool groupDuel() const { return groupDuel_; }   // course à deux (circuit proposé, accepté par les deux)
   bool takeGroupEvent(std::string &ev);        // START / GO / END reçus (dans l'ordre)
+  // circuits personnels de l'organisateur (contenu d'un fichier .trk) : envoyés avant le départ,
+  // reçus par tous les joueurs de la course et les spectateurs
+  void sendGroupTracks(const Bytes &trk);
+  bool takeGroupTracks(Bytes &trk);
   void sendGhost(const float v[7], uint8_t lap, uint8_t flags);
   const std::map<uint32_t, std::deque<GhostSample>> &ghosts() const { return ghosts_; }
   void close(const std::string &why = "");
@@ -143,6 +150,8 @@ class NetLink {
   bool tnt_ = false;
   bool groupIn_ = false;
   std::vector<GroupMember> groupMembers_;
+  Bytes groupTracks_;
+  bool groupTracksNew_ = false;
   uint32_t groupMe_ = 0, groupHost_ = 0;
   std::string groupPhase_;
   int groupTrack_ = 0, groupLaps_ = 3;

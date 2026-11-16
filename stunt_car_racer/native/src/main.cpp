@@ -32,7 +32,7 @@
 #include <string>
 #include <vector>
 
-#define SCR_VERSION "v106"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
+#define SCR_VERSION "v107"   // même numéro que SCR_RELAY_VERSION (server/scr_relay.cpp)
 
 #include "banner.hpp"
 #include "hdview.hpp"
@@ -588,6 +588,10 @@ int main(int argc, char **argv) {
   // en ligne (tirage des courses à deux, courses à plusieurs : circuits 8-15) : les vrais circuits TNT
   // seulement ; des circuits personnels ne sont pas ceux des autres joueurs
   const bool onlineTnt = haveTnt && !tntSet.custom;
+  const bool haveCustom = haveTnt && tntSet.custom;   // circuits personnels : proposés aux autres par l'organisateur
+  // circuits 16 à 23 d'une course en ligne : ceux de l'organisateur, reçus par le serveur et vérifiés
+  static TrackSet roomSet;
+  bool roomSetOk = false;
   net.setTnt(onlineTnt);   // courses à deux en ligne : circuits TNT au tirage si les deux joueurs les ont
   {
     // empreinte du programme du jeu seulement ; les réglages de physique (scr.ini) sont envoyés en
@@ -788,7 +792,7 @@ int main(int argc, char **argv) {
   auto restartMachine = [&](int trk) {
     view.reset();
     m.reset();
-    const TrackSet *ts = trk < 0 ? soloSet : trk >= 8 && onlineTnt ? &tntSet : nullptr;
+    const TrackSet *ts = trk < 0 ? soloSet : trk >= 16 ? (roomSetOk ? &roomSet : nullptr) : trk >= 8 && onlineTnt ? &tntSet : nullptr;
     m = start(disk, o, trk < 0 ? -1 : trk & 7, ts);
     trackList = decodeTracks(m->image(), m->trackSet());
     newView();
@@ -945,8 +949,22 @@ int main(int argc, char **argv) {
     return gr.active && net.inGroup() && gr.finished && net.groupPhase() == "racing" && !gr.victoryHold && !specCars().empty();
   };
   int gTrack = 0, gLaps = 3;      // choix de l'organisateur
-  const int nTracks = onlineTnt ? 16 : 8;   // choix de l'organisateur : 8 d'origine, puis 8 TNT
+  // choix de l'organisateur : 8 d'origine, puis 8 TNT (si tous peuvent les avoir), puis ses 8 circuits personnels
+  std::vector<int> hostTracks;
+  for (int k = 0; k < 8; k++) hostTracks.push_back(k);
+  if (onlineTnt) for (int k = 8; k < 16; k++) hostTracks.push_back(k);
+  if (haveCustom) for (int k = 16; k < 24; k++) hostTracks.push_back(k);
+  auto nextTrack = [&](int t, int d) {
+    auto it = std::find(hostTracks.begin(), hostTracks.end(), t);
+    const int n = int(hostTracks.size()), i = it == hostTracks.end() ? 0 : int(it - hostTracks.begin());
+    return hostTracks[size_t(((i + d) % n + n) % n)];
+  };
   auto trackName = [&](int t) {
+    if (t >= 16) {   // circuits de l'organisateur : reçus (ou les nôtres, si c'est nous)
+      std::string nm = roomSetOk ? roomSet.names[t & 7] : haveCustom ? tntSet.names[t & 7] : "";
+      while (!nm.empty() && nm.back() == ' ') nm.pop_back();
+      return (nm.empty() ? L("Circuit ", "Track ") + std::to_string((t & 7) + 1) : nm) + L(" (perso)", " (custom)");
+    }
     const std::vector<Track> &lst = t >= 8 ? tracksTnt : tracksOrig;
     std::string nm = (t & 7) < int(lst.size()) ? lst[size_t(t & 7)].name : "";
     if (nm.empty()) return L("Circuit ", "Track ") + std::to_string(t + 1);
@@ -1050,9 +1068,12 @@ int main(int argc, char **argv) {
       case 8: if (net.canChat()) { typing = Typing::Chat; typed.clear(); SDL_StartTextInput(); } break;
       case 9: net.groupCommand("ENTER"); menuSel = 0; break;
       case 14: typing = Typing::Pseudo; typed = o.playerName; SDL_StartTextInput(); break;
-      case 10: gTrack = (gTrack + 1) % nTracks; break;
+      case 10: gTrack = nextTrack(gTrack, 1); break;
       case 11: gLaps = gLaps % 9 + 1; break;
-      case 12: net.groupCommand("START " + std::to_string(gTrack) + " " + std::to_string(gLaps)); break;
+      case 12:
+        if (gTrack >= 16 && haveCustom) net.sendGroupTracks(trackFileBytes(tntSet));   // nos circuits, avant le départ
+        net.groupCommand("START " + std::to_string(gTrack) + " " + std::to_string(gLaps));
+        break;
       case 13: leaveGroup(); break;
       case 15: net.groupCommand("ACCEPT"); break;
       case 16: net.groupCommand("REJECT"); menuSel = 0; break;
@@ -1374,7 +1395,7 @@ int main(int argc, char **argv) {
         int kind = n ? items[size_t(std::min(menuSel, n - 1))].kind : -1;
         if ((sc == SDL_SCANCODE_LEFT || sc == SDL_SCANCODE_RIGHT) && (kind == 10 || kind == 11)) {   // circuit, tours
           int d = sc == SDL_SCANCODE_RIGHT ? 1 : -1;
-          if (kind == 10) gTrack = (gTrack + nTracks + d) % nTracks; else gLaps = std::clamp(gLaps + d, 1, 9);
+          if (kind == 10) gTrack = nextTrack(gTrack, d); else gLaps = std::clamp(gLaps + d, 1, 9);
         }
         else if (sc == SDL_SCANCODE_ESCAPE && statusView) { statusView = false; menuSel = 0; }
         else if (statusView && (sc == SDL_SCANCODE_LEFT || sc == SDL_SCANCODE_PAGEUP)) statusScroll = std::max(0, statusScroll - 5);
@@ -1537,6 +1558,14 @@ int main(int argc, char **argv) {
         if (std::getenv("SCR_HORNLOG")) std::fprintf(stderr, "klaxon reçu de %u (volume %.2f)\n", from, g);
       }
     }
+    {   // circuits de l'organisateur reçus : vérifiés comme un fichier .trk local
+      Bytes trk;
+      if (net.takeGroupTracks(trk)) {
+        std::string err;
+        roomSetOk = parseTrackFile(trk, roomSet, err) && checkTrackSet(m->image(), roomSet, err);
+        if (!roomSetOk) net.localNote(L("Circuits de l'organisateur refusés : ", "Organiser's tracks refused: ") + err.substr(0, err.find('\n')));
+      }
+    }
     {   // course à plusieurs : départ (machine relancée sur le circuit), top départ, fin
       std::string ev;
       while (net.takeGroupEvent(ev)) {
@@ -1552,14 +1581,20 @@ int main(int argc, char **argv) {
             gr.slot = 0;
             for (size_t k = 0; k < order.size(); k++) if (order[k] == net.groupMe()) gr.slot = int(k);
           }
-          if ((t & 15) >= 8 && !onlineTnt) {   // circuit TNT sans le fichier SCR-TNT : on ne peut pas rouler dessus
+          if (t >= 16 && !roomSetOk) {   // circuits de l'organisateur pas reçus ou refusés
+            net.localNote(L("Circuits de l'organisateur absents ou refusés, course ignorée", "Organiser's tracks missing or refused, race skipped"));
+            gr = GroupRace(); gr.skip = true;
+            net.groupCommand("LOADED");
+            continue;
+          }
+          if (t < 16 && (t & 15) >= 8 && !onlineTnt) {   // circuit TNT sans le fichier SCR-TNT : on ne peut pas rouler dessus
             net.localNote(L("Circuit TNT choisi : fichier SCR-TNT absent (dossier TNT à côté de scr.exe), course ignorée", "TNT track chosen: SCR-TNT file missing (TNT folder next to scr.exe), race skipped"));
             gr = GroupRace(); gr.skip = true;
             net.groupCommand("LOADED");
             continue;
           }
           specMenu = false; specFollow = 0; view->resetSpectator();
-          gr.track = t & 15; gr.laps = l; gr.active = true; gr.waitingGo = true; gr.racing = false; gr.finished = false; gr.out = false; gr.wreckFrames = 0;
+          gr.track = std::clamp(t, 0, 23); gr.laps = l; gr.active = true; gr.waitingGo = true; gr.racing = false; gr.finished = false; gr.out = false; gr.wreckFrames = 0;
           gr.lastRel = -1; gr.total = 0; gr.lapOffset = 0; gr.lastTick = 0; gr.goAt = 0;
           if (typing != Typing::None && typing != Typing::Chat) { typing = Typing::None; SDL_StopTextInput(); }
           if (!hd) { hd = true; applyMode(true); }   // les autres voitures ne sont visibles qu'en HD
@@ -1588,11 +1623,15 @@ int main(int argc, char **argv) {
         } else if (ev.rfind("WATCH ", 0) == 0 && !net.inGroup()) {   // course lancée dans la salle sans nous : spectateur
           int t = 0, l = 3;
           std::sscanf(ev.c_str() + 6, "%d %d", &t, &l);
-          if ((t & 15) >= 8 && !onlineTnt) {
+          if (t >= 16 && !roomSetOk) {
+            net.localNote(L("Course sur les circuits de l'organisateur : pas reçus, impossible de la regarder", "Race on the organiser's tracks: not received, cannot watch it"));
+            continue;
+          }
+          if (t < 16 && (t & 15) >= 8 && !onlineTnt) {
             net.localNote(L("Course sur un circuit TNT : fichier SCR-TNT absent, impossible de la regarder", "Race on a TNT track: SCR-TNT file missing, cannot watch it"));
             continue;
           }
-          specM = start(disk, o, t & 7, (t & 15) >= 8 ? &tntSet : nullptr);
+          specM = start(disk, o, t & 7, t >= 16 ? &roomSet : (t & 15) >= 8 ? &tntSet : nullptr);
           for (int k = 0; k < 60; k++) specM->runFrame();   // couleurs de la course en place
           specView = std::make_unique<HdView>(*specM);
           specView->params = view->params;

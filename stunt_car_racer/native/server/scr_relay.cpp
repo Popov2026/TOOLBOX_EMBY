@@ -123,13 +123,14 @@ static const char *errText(int e) { return std::strerror(e); }
 #endif
 
 // version du serveur : toujours la même que celle du jeu (SCR_VERSION de src/main.cpp)
-#define SCR_RELAY_VERSION "v106"
+#define SCR_RELAY_VERSION "v107"
 
 namespace {
 
 constexpr uint8_t NF_JOIN = 10, NF_INFO = 11, NF_JOIN2 = 12, NF_LIST = 13, NF_PICK = 14, NF_PROBE = 15, NF_PARAMS = 16, NF_CHAT = 17,
                   NF_GSTATE = 18, NF_GCMD = 19, NF_GEVENT = 20, NF_GPOS = 21, NF_HORN = 22, NF_STATUS = 23,
-                  NF_REVIEWS = 24, NF_REVIEW = 25;   // avis des joueurs (page web) : liste publiée, envoi
+                  NF_REVIEWS = 24, NF_REVIEW = 25,   // avis des joueurs (page web) : liste publiée, envoi
+                  NF_GTRACKS = 26;   // circuits personnels de l'organisateur (fichier .trk), relayés à la course
 constexpr size_t GROUP_MAX = 6;
 constexpr size_t MAX_CLIENTS = 512, MAX_PER_IP = 16, MAX_BUFFER = 1 << 20;
 const Sock NONE = Sock(-1);
@@ -532,6 +533,8 @@ struct Group {
                                  // chacun mène son jeu, circuit proposé et accepté par les deux (phase vote)
   double deadline = 0, firstFinish = 0, startedAt = 0;
   std::string lastState;
+  std::string trk;               // circuits de l'organisateur (circuits 16 à 23), envoyés au départ
+  std::string trkNames[8];
 };
 std::map<std::string, Group> groups;   // salle -> groupe
 
@@ -571,6 +574,7 @@ void watchSync(const std::string &key) {
     if (want && c.watchKey.empty()) {
       const Group &g = git->second;
       c.watchKey = key;
+      if (g.track >= 16) frame(c, NF_GTRACKS, g.trk);   // spectateur : les circuits de la course aussi
       std::string msg = "WATCH " + std::to_string(g.track) + " " + std::to_string(g.laps);
       for (Sock f : g.members) msg += " " + std::to_string(clients[f].id);
       frame(c, NF_GEVENT, msg);
@@ -633,8 +637,10 @@ void groupLeave(Client &c) {
   auto git = groups.find(key);
   if (git == groups.end()) return;
   Group &g = git->second;
+  const bool wasHost = !g.members.empty() && g.members[0] == c.fd;
   g.members.erase(std::remove(g.members.begin(), g.members.end(), c.fd), g.members.end());
   logf("%s quitte la course %s", who(c).c_str(), key.c_str());
+  if (wasHost && g.phase == "lobby") { g.trk.clear(); for (auto &nm : g.trkNames) nm.clear(); }   // circuits du nouvel organisateur à envoyer
   if (g.members.empty()) { groups.erase(git); return; }
   // course à deux : seul, le joueur restant retrouve la salle ou attend un autre adversaire (hors course)
   if (g.duel && g.phase != "racing" && g.phase != "loading") { duelDissolve(key); return; }
@@ -691,6 +697,7 @@ void groupStart(const std::string &key, Group &g) {
   std::vector<uint32_t> grid;
   for (Sock f : g.members) grid.push_back(clients[f].id);
   for (size_t i = grid.size(); i > 1; i--) std::swap(grid[i - 1], grid[size_t(std::rand()) % i]);
+  if (g.track >= 16) groupSend(g, NF_GTRACKS, g.trk);   // circuits de l'organisateur avant le départ
   std::string startMsg = "START " + std::to_string(g.track) + " " + std::to_string(g.laps);
   for (uint32_t id : grid) startMsg += " " + std::to_string(id);
   groupSend(g, NF_GEVENT, startMsg);
@@ -712,7 +719,7 @@ void groupCmd(Client &c, const std::string &cmd) {
     if (g.duel || g.members.empty() || g.members[0] != c.fd || g.phase != "lobby" || g.members.size() < 2) return;
     int t = 0, l = 3;
     std::sscanf(cmd.c_str() + 5, "%d %d", &t, &l);
-    g.track = std::max(0, std::min(15, t)); g.laps = std::max(1, std::min(9, l));   // 8-15 : circuits TNT
+    g.track = std::max(0, std::min(g.trk.empty() ? 15 : 23, t)); g.laps = std::max(1, std::min(9, l));   // 8-15 : circuits TNT, 16-23 : ceux de l'organisateur
     groupStart(key, g);
   } else if (cmd == "ACCEPT") {   // course à deux : circuit proposé accepté ; départ quand les deux acceptent
     if (!g.duel || g.phase != "vote") return;
@@ -1131,6 +1138,18 @@ void process(Client &c) {
       if (o.out.size() < MAX_BUFFER) o.out.insert(o.out.end(), c.in.begin() + long(pos), c.in.begin() + long(pos + 3 + n));
       else o.overflow = true;
     } else if (type == NF_PICK) onPick(c, std::string(reinterpret_cast<const char *>(p), n));
+    else if (type == NF_GTRACKS && c.inGroup && n >= 250 && n <= 0x4400 && std::memcmp(p, "SCRTRK1", 8) == 0) {
+      Group &g = groups[c.gkey];   // circuits de l'organisateur, gardés pour le départ
+      if (!g.duel && !g.members.empty() && g.members[0] == c.fd && g.phase == "lobby") {
+        g.trk.assign(reinterpret_cast<const char *>(p), n);
+        for (int k = 0; k < 8; k++) {
+          std::string nm = cleanName(std::string(reinterpret_cast<const char *>(p) + 8 + 16 * k, 16), 16);
+          while (!nm.empty() && nm.back() == ' ') nm.pop_back();
+          g.trkNames[k] = nm;
+        }
+        logf("%s : %s envoie ses circuits personnels (%zu octets)", c.gkey.c_str(), who(c).c_str(), size_t(n));
+      }
+    }
     else if (type == NF_GCMD) groupCmd(c, std::string(reinterpret_cast<const char *>(p), std::min<size_t>(n, 64)));
     else if (type == NF_GPOS && c.inGroup && n <= 64 && gposAllowed(c)) {   // position : aux autres membres, avec le numéro
       std::string m(4, '\0');
@@ -1231,7 +1250,8 @@ void draw(double t) {
 const char *const TRACK_NAMES[16] = {"Little Ramp", "Stepping Stones", "Hump Back", "Big Ramp", "Ski Jump", "Draw Bridge",
                                      "High Jump", "Roller Coaster", "Dizzy Descent", "Witty Way", "Crazy Caper", "Amazing Adept",
                                      "Jerkily Jump", "Evilly Episode", "Teasing Temper", "Rat Race"};
-std::string trackLabel(int t) {
+std::string trackLabel(int t, const std::string *custom = nullptr) {
+  if (t >= 16 && t < 24) return (custom && !custom[t - 16].empty() ? custom[t - 16] : "Track " + std::to_string(t - 15)) + " (custom)";
   if (t < 0 || t > 15) return "?";
   return std::string(TRACK_NAMES[t]) + (t >= 8 ? " (TNT)" : "");
 }
@@ -1292,7 +1312,7 @@ std::string webPage(const std::string &path, std::string &type, int &status) {
     Game gm;
     gm.kind = g.duel ? "Two-player race" : "Multi-car race";
     gm.where = kv.first.rfind("DUEL", 0) == 0 ? "first available player" : "room " + kv.first;
-    gm.track = trackLabel(g.track) + ", " + std::to_string(g.laps) + " lap" + (g.laps > 1 ? "s" : "");
+    gm.track = trackLabel(g.track, g.trkNames) + ", " + std::to_string(g.laps) + " lap" + (g.laps > 1 ? "s" : "");
     gm.phase = phaseEn(g.phase);
     for (Sock f : g.members) {
       auto it = clients.find(f);

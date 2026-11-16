@@ -119,6 +119,10 @@ disponible »).
      lui et « abandon » s'affiche à côté de son nom. À la fin (tous arrivés ou abandonnés, ou deux
      minutes après le premier arrivé), le menu affiche les
      temps et l'organisateur peut relancer une course. « Quitter la course à plusieurs » (ou Échap) ramène au titre du jeu.
+     Circuits personnels : si l'organisateur a chargé ses circuits (fichier .trk, éditeur de circuits),
+     la liste « Circuit » propose aussi ses 8 circuits, marqués « (perso) ». Le serveur les envoie à tous
+     les joueurs de la course et aux spectateurs au départ ; chaque jeu les vérifie avant de rouler
+     dessus. Personne n'a besoin d'avoir le fichier (serveur relais v107 ou plus récent).
      Klaxon : touche K (ou bouton Y de la manette) pour narguer les autres : ils l'entendent,
      plus fort quand votre voiture est proche (aussi en Computer Link).
      Discussion : dans la salle privée, « Écrire un message (F9) » (ou la touche F9) : le message va
@@ -312,6 +316,10 @@ with the French language chosen in the F1 options menu; the English meaning is g
      shown next to their name. At the end (all finished or out, or two minutes after the first
      finisher), the menu shows the times and the organiser can start another race. "Quitter la
      course à plusieurs" (leave the multi-car race) or Escape goes back to the game's title.
+     Custom circuits: if the organiser loaded their circuits (.trk file, circuit editor), the "Circuit"
+     list also offers their 8 circuits, marked "(custom)". The server sends them to every player of
+     the race and to the spectators at the start; each game checks them before racing on them.
+     Nobody else needs the file (relay server v107 or later).
      Horn: K key (or the gamepad's Y button) to taunt the others: they hear it, louder when your
      car is close (also in Computer Link).
      Chat: in the private room, "Écrire un message (F9)" (write a message) or the F9 key: the

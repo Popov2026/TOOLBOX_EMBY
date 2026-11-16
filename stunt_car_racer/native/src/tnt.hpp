@@ -26,6 +26,8 @@ struct TrackSet {
 // (mot gros-boutiste), tracés au format d'origine
 constexpr size_t TRK_MAX_DATA = 0x4000;
 bool saveTrackFile(const std::string &path, const TrackSet &ts, std::string &err);
+Bytes trackFileBytes(const TrackSet &ts);                                  // contenu d'un fichier .trk
+bool parseTrackFile(const Bytes &d, TrackSet &ts, std::string &err);       // .trk en mémoire (réseau)
 
 // adresses (RAM de la machine émulée, zone jamais utilisée par le jeu) des tracés et de leur table
 constexpr uint32_t TNT_DATA = 0xE0000, TNT_TABLE = 0xDFF00;

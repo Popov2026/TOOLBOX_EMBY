@@ -485,6 +485,9 @@ void NetLink::handle(uint8_t type, const uint8_t *p, size_t n) {
       if (horns_.size() < 8) horns_.push_back(id);
       break;
     }
+    case NF_GTRACKS:   // circuits de l'organisateur (vérifiés par le jeu avant de rouler dessus)
+      if (n >= 8 && n <= 0x4400) { groupTracks_.assign(p, p + n); groupTracksNew_ = true; }
+      break;
     case NF_GEVENT:
       groupEvents_.emplace_back(reinterpret_cast<const char *>(p), n);
       if (groupEvents_.back().rfind("START", 0) == 0 || groupEvents_.back().rfind("WATCH ", 0) == 0) ghosts_.clear();
@@ -541,6 +544,18 @@ void NetLink::flush() {
     if (r > 0) out_.erase(out_.begin(), out_.begin() + r);
     else { if (r < 0 && SCR_WOULDBLOCK(sockErr())) break; fail(L("connexion perdue", "connection lost")); break; }
   }
+}
+
+void NetLink::sendGroupTracks(const Bytes &trk) {
+  if (mode_ != Mode::Relay || tcp_ == BAD || trk.empty() || trk.size() > 0x4400) return;
+  frame(NF_GTRACKS, trk.data(), trk.size());
+  flush();
+}
+
+bool NetLink::takeGroupTracks(Bytes &trk) {
+  if (!groupTracksNew_) return false;
+  groupTracksNew_ = false; trk = groupTracks_;
+  return true;
 }
 
 void NetLink::groupCommand(const std::string &cmd) {
