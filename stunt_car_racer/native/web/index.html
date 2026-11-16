@@ -31,6 +31,13 @@
   .tagline { font-size: clamp(17px, 2.4vw, 21px); max-width: 640px; margin: 0 0 22px; text-shadow: 0 2px 12px rgba(0,0,0,.9); }
   .online { display: inline-flex; align-items: center; gap: 10px; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.2);
             border-radius: 999px; padding: 8px 16px; font-weight: 600; }
+  .online { flex-wrap: wrap; row-gap: 4px; }
+  .online .netico { width: 22px; height: 22px; color: var(--muted); flex: none; }
+  .online.on .netico { color: var(--ok); } .online.off .netico { color: #d05050; }
+  .online .otitle { font-weight: 800; }
+  .online .ostate { display: inline-flex; align-items: center; gap: 7px; padding: 2px 10px; border-radius: 999px; background: rgba(255,255,255,.08); font-size: 14px; }
+  .online.on .ostate { background: rgba(72,209,122,.18); color: #9ff0bd; } .online.off .ostate { background: rgba(208,80,80,.2); color: #ffb3b3; }
+  #onlinetxt { font-weight: 600; }
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
   .online.on .dot { background: var(--ok); animation: pulse 2s infinite; }
   .online.off .dot { background: #d05050; }
@@ -178,7 +185,13 @@
     </div>
     <h1>Stunt <span>Car</span> Racer</h1>
     <p class="tagline" data-t="tagline">The 1989 Atari ST classic by Geoff Crammond, in your browser — in HD, with online races.</p>
-    <div id="online" class="online"><span class="dot"></span><span id="onlinetxt">…</span></div>
+    <div id="online" class="online" role="status">
+      <svg class="netico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      <span class="otitle" data-t="mpTitle">Online multiplayer</span>
+      <span class="ostate"><span class="dot"></span><span id="onlinestate">…</span></span>
+      <span id="onlinetxt"></span>
+    </div>
   </div>
 </header>
 
@@ -337,7 +350,7 @@
     gcrNews: "<b>Actualité :</b> MicroProse et Geoff Crammond font revenir les jeux Grand Prix sur Steam sous le nom <i>Geoff Crammond Racing</i> (GCR1 à GCR4), avec le Steam Workshop. Annoncé en décembre 2025, pour 2026.",
     thxText: "Pour Stunt Car Racer, la série Grand Prix et tous les souvenirs inoubliables que vous avez offerts à des générations de joueurs. Les circuits suspendus, les sauts impossibles, le châssis fissuré dans le dernier tour… Ce projet est un hommage sincère à votre travail.",
     foot: 'Stunt Car Racer © Geoff Crammond / Micro Style 1989 — données du jeu non fournies. Version native et images HD par Popov2026.',
-    ok: 'Prête', missing: 'Manquante', checking: 'Test du serveur en ligne…',
+    ok: 'Prête', missing: 'Manquante', checking: 'Test du serveur…', srvUp: 'Serveur en marche', srvDown: 'Serveur arrêté', mpTitle: 'Multijoueur en ligne',
     online: (p, g) => p + (p > 1 ? ' joueurs' : ' joueur') + ' en ligne' + (g > 0 ? ' · ' + g + (g > 1 ? ' courses' : ' course') + ' en cours' : ''),
     offline: 'Serveur en ligne injoignable pour le moment',
     badDisk: "Ce fichier n'est pas une image de disquette Atari ST (.st, ou .zip qui en contient une).",
@@ -351,7 +364,7 @@
     revWait: 'Wait a minute before another review.', revPending: 'You already have reviews waiting for approval.',
     revCountN: (n) => n + (n === 1 ? ' review' : ' reviews'),
     trkNone: 'None', trkReady: 'Ready', trkRemove: 'remove', trkBad: 'This file is not a circuits file (.trk).', trkSaved: 'Custom circuits ready: they will be loaded at start (F7 to switch).',
-    ok: 'Ready', missing: 'Missing', checking: 'Checking the online server…',
+    ok: 'Ready', missing: 'Missing', checking: 'Checking the server…', srvUp: 'Server running', srvDown: 'Server down',
     online: (p, g) => p + (p === 1 ? ' player' : ' players') + ' online' + (g > 0 ? ' · ' + g + (g === 1 ? ' race' : ' races') + ' in progress' : ''),
     offline: 'Online server unreachable right now',
     badDisk: 'This file is not an Atari ST disk image (.st, or a .zip containing one).',
@@ -387,7 +400,8 @@
   function showOnline() {
     const el = $('online');
     el.classList.toggle('on', !!online && online.p >= 0); el.classList.toggle('off', !!online && online.p < 0);
-    $('onlinetxt').textContent = !online ? T('checking') : online.p >= 0 ? T('online', online.p, online.g) : T('offline');
+    $('onlinestate').textContent = !online ? T('checking') : online.p >= 0 ? T('srvUp') : T('srvDown');
+    $('onlinetxt').textContent = online && online.p >= 0 ? T('online', online.p, online.g) : '';
   }
   function probeOnline() {
     if (running) return;
